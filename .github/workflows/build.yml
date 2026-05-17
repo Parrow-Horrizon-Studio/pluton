@@ -45,7 +45,7 @@ jobs:
       - name: Set up vcpkg
         uses: lukka/run-vcpkg@v11
         with:
-          vcpkgGitCommitId: "3508985146f1b1d248c67ead13f8f54be5b4f5da"
+          vcpkgGitCommitId: "56bb2411609227288b70117ead2c47585ba07713"
 
       - name: Set CMAKE_TOOLCHAIN_FILE (Linux/macOS)
         if: runner.os != 'Windows'
@@ -70,14 +70,28 @@ jobs:
       - name: Run Python tests
         run: pytest -v
 
-      - name: Configure C++ tests
+      - name: Install nanobind for standalone CMake
+        run: pip install nanobind
+
+      - name: Configure C++ tests (Linux)
+        if: runner.os == 'Linux'
         env:
           VCPKG_BINARY_SOURCES: clear
-        run: cmake -B build/tests -S . -G Ninja
+        run: |
+          NANOBIND_DIR=$(python -c "import nanobind; print(nanobind.cmake_dir())")
+          cmake -B build/tests -S . -G Ninja -Dnanobind_DIR="$NANOBIND_DIR"
+
+      - name: Configure C++ tests (Windows)
+        if: runner.os == 'Windows'
+        env:
+          VCPKG_BINARY_SOURCES: clear
+        run: |
+          $nanobindDir = python -c "import nanobind; print(nanobind.cmake_dir())"
+          cmake -B build/tests -S . -G "Visual Studio 17 2022" -A x64 "-Dnanobind_DIR=$nanobindDir"
 
       - name: Build C++ tests
-        run: cmake --build build/tests
+        run: cmake --build build/tests --config Release
 
       - name: Run C++ tests
         working-directory: build/tests
-        run: ctest --output-on-failure
+        run: ctest --output-on-failure -C Release
