@@ -329,15 +329,14 @@ Write to `pluton/vcpkg.json`:
     "homepage": "https://pluton3d.org",
     "license": "GPL-3.0-or-later",
     "dependencies": [
-        {
-            "name": "gtest",
-            "version>=": "1.14.0"
-        }
+        "gtest"
     ]
 }
 ```
 
 Note: nanobind is NOT in vcpkg.json — it's installed via pip as a build-system requirement (handled in the next task via `pyproject.toml`). vcpkg handles pure-C++ deps; pip-installable bindings tools come through Python's package system.
+
+Note on dependency form: we use the **bare string form** (`"gtest"`) rather than the object form with `version>=`. The object form with version constraints requires a `builtin-baseline` field that pins a specific vcpkg registry commit, which adds reproducibility but also setup overhead we don't need at this stage. The bare-string form tells vcpkg to install whatever current version is in its registry — appropriate for a learning/early-stage project. We can add `builtin-baseline` later when version-pinning becomes important for CI reproducibility.
 
 - [ ] **Step 2: Commit**
 
