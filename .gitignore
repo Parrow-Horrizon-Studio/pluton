@@ -40,6 +40,9 @@ _skbuild/
 # vcpkg
 vcpkg_installed/
 
+# Build logs
+build.log
+
 # IDE
 .vscode/
 .idea/
