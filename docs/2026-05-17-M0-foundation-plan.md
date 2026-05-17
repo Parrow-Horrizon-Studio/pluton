@@ -107,7 +107,7 @@ pluton/
 - Create: `pluton/LICENSE`
 - Create: `pluton/README.md`
 - Create: `pluton/.gitignore`
-- Remote setup: create `parrow-horrizon-studio/pluton` on GitHub
+- Remote setup: create `Parrow-Horrizon-Studio/pluton` on GitHub
 
 - [ ] **Step 1: Create LICENSE file (GPL-3.0)**
 
@@ -219,7 +219,7 @@ Expected: Repository initialized on `main` branch; first commit created.
 
 **Option A — via the GitHub web UI (simpler if you've never used `gh` CLI):**
 
-1. Open https://github.com/organizations/parrow-horrizon-studio/repositories/new in your browser
+1. Open https://github.com/organizations/Parrow-Horrizon-Studio/repositories/new in your browser
 2. Repository name: `pluton`
 3. Description: `Polygonal 3D modeler for architecture — free alternative to SketchUp Pro`
 4. Visibility: **Public**
@@ -229,27 +229,27 @@ Expected: Repository initialized on `main` branch; first commit created.
 **Option B — via `gh` CLI (faster if you have GitHub CLI installed and authenticated):**
 
 ```bash
-gh repo create parrow-horrizon-studio/pluton \
+gh repo create Parrow-Horrizon-Studio/pluton \
     --public \
     --description "Polygonal 3D modeler for architecture — free alternative to SketchUp Pro"
 ```
 
-Either way, the result is an empty `parrow-horrizon-studio/pluton` repository on GitHub, ready to receive our initial push.
+Either way, the result is an empty `Parrow-Horrizon-Studio/pluton` repository on GitHub, ready to receive our initial push.
 
 - [ ] **Step 6: Add the remote and push the initial commit**
 
 Run from `pluton/`:
 
 ```bash
-git remote add origin git@github.com:parrow-horrizon-studio/pluton.git
+git remote add origin git@github.com:Parrow-Horrizon-Studio/pluton.git
 git push -u origin main
 ```
 
 Expected: `main` branch pushed to GitHub; the `-u` flag sets up upstream tracking so future `git push` commands don't need extra arguments.
 
-**Note on SSH vs HTTPS:** the URL above assumes you've already set up SSH keys on GitHub (we did this during the org calibration session). If you prefer HTTPS, use `https://github.com/parrow-horrizon-studio/pluton.git` instead. SSH is recommended.
+**Note on SSH vs HTTPS:** the URL above assumes you've already set up SSH keys on GitHub (we did this during the org calibration session). If you prefer HTTPS, use `https://github.com/Parrow-Horrizon-Studio/pluton.git` instead. SSH is recommended.
 
-After this step, visit `https://github.com/parrow-horrizon-studio/pluton` and confirm the LICENSE, README, and .gitignore are visible. The Verified badge should appear on the commit (signed via your SSH signing key, which we also set up earlier).
+After this step, visit `https://github.com/Parrow-Horrizon-Studio/pluton` and confirm the LICENSE, README, and .gitignore are visible. The Verified badge should appear on the commit (signed via your SSH signing key, which we also set up earlier).
 
 ---
 
@@ -1472,7 +1472,7 @@ Expected: the push triggers the workflow on `main`. GitHub Actions starts runnin
 
 - [ ] **Step 4: Verify both CI jobs go green**
 
-Open `https://github.com/parrow-horrizon-studio/pluton/actions` and watch the workflow run. Both `ubuntu-24.04` and `windows-2022` jobs should pass.
+Open `https://github.com/Parrow-Horrizon-Studio/pluton/actions` and watch the workflow run. Both `ubuntu-24.04` and `windows-2022` jobs should pass.
 
 **If CI fails:** read the error log carefully. Common first-run CI issues:
 - vcpkg pinned commit isn't valid → update to current vcpkg release tag
@@ -1507,7 +1507,7 @@ Expected: Window opens with the colored triangle visible.
 
 - [ ] **Step 3: Verify CI is green on `main`**
 
-Check `https://github.com/parrow-horrizon-studio/pluton/actions` — most recent workflow run on `main` is green for both OS jobs.
+Check `https://github.com/Parrow-Horrizon-Studio/pluton/actions` — most recent workflow run on `main` is green for both OS jobs.
 
 - [ ] **Step 4: Tag the M0 release**
 
