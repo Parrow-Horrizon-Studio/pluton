@@ -2,12 +2,19 @@
 
 import sys
 
+from PySide6.QtWidgets import QApplication
+
+from pluton import __version__
+from pluton.ui.main_window import MainWindow
+
 
 def main() -> int:
     """Application entry point. Returns process exit code."""
-    from pluton import __version__
     print(f"Pluton {__version__}")
-    return 0
+    app = QApplication(sys.argv)
+    window = MainWindow()
+    window.show()
+    return app.exec()
 
 
 if __name__ == "__main__":
