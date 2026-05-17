@@ -32,7 +32,8 @@ find_package(nanobind CONFIG REQUIRED)
 add_subdirectory(cpp)
 
 # Enable tests if this is the top-level project (not when consumed as a subproject)
-if(CMAKE_PROJECT_NAME STREQUAL PROJECT_NAME)
+# and the cpp/tests directory exists (it's added in M0 Task 10).
+if(CMAKE_PROJECT_NAME STREQUAL PROJECT_NAME AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/cpp/tests/CMakeLists.txt")
     enable_testing()
     add_subdirectory(cpp/tests)
 endif()
