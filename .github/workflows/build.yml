@@ -56,6 +56,13 @@ jobs:
         run: echo "CMAKE_TOOLCHAIN_FILE=$env:VCPKG_ROOT\scripts\buildsystems\vcpkg.cmake" >> $env:GITHUB_ENV
 
       - name: Install Pluton (editable, with dev deps)
+        env:
+          # run-vcpkg sets VCPKG_BINARY_SOURCES="clear;x-gha,readwrite" globally,
+          # but ACTIONS_RUNTIME_TOKEN / ACTIONS_CACHE_URL are not exposed to user
+          # steps by default, causing vcpkg install to fail when invoked via
+          # scikit-build-core. Disable the GHA binary cache here; vcpkg will build
+          # from source (acceptable for M0 with only gtest).
+          VCPKG_BINARY_SOURCES: clear
         run: |
           python -m pip install --upgrade pip
           pip install -e ".[dev]"
@@ -64,6 +71,8 @@ jobs:
         run: pytest -v
 
       - name: Configure C++ tests
+        env:
+          VCPKG_BINARY_SOURCES: clear
         run: cmake -B build/tests -S . -G Ninja
 
       - name: Build C++ tests
