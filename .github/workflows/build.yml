@@ -45,7 +45,7 @@ jobs:
       - name: Set up vcpkg
         uses: lukka/run-vcpkg@v11
         with:
-          vcpkgGitCommitId: "2024.08.23"
+          vcpkgGitCommitId: "3508985146f1b1d248c67ead13f8f54be5b4f5da"
 
       - name: Set CMAKE_TOOLCHAIN_FILE (Linux/macOS)
         if: runner.os != 'Windows'
