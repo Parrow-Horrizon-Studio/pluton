@@ -18,8 +18,22 @@ Pre-alpha — Milestone 0 (Foundation). The project is in early scaffolding. Not
 
 Requires Python 3.13+, CMake 3.27+, Ninja, a C++20 compiler, and vcpkg with `VCPKG_ROOT` set.
 
+Set the CMake toolchain file env var (one-time per shell session):
+
+**Linux/macOS:**
 ```bash
-pip install -e .
+export CMAKE_TOOLCHAIN_FILE="$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake"
+```
+
+**Windows (PowerShell):**
+```powershell
+$env:CMAKE_TOOLCHAIN_FILE = "$env:VCPKG_ROOT\scripts\buildsystems\vcpkg.cmake"
+```
+
+Then install in editable mode:
+
+```bash
+pip install -e ".[dev]"
 ```
 
 ## License

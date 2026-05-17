@@ -1,0 +1,67 @@
+[build-system]
+requires = [
+    "scikit-build-core>=0.10",
+    "nanobind>=2.0"
+]
+build-backend = "scikit_build_core.build"
+
+[project]
+name = "pluton"
+version = "0.0.1"
+description = "Polygonal 3D modeler for architecture"
+readme = "README.md"
+license = { file = "LICENSE" }
+authors = [
+    { name = "Rowee Apor", email = "roweeapor@gmail.com" }
+]
+requires-python = ">=3.13"
+classifiers = [
+    "Development Status :: 2 - Pre-Alpha",
+    "Intended Audience :: End Users/Desktop",
+    "License :: OSI Approved :: GNU General Public License v3 or later (GPLv3+)",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Multimedia :: Graphics :: 3D Modeling",
+    "Operating System :: Microsoft :: Windows",
+    "Operating System :: POSIX :: Linux"
+]
+dependencies = [
+    "PySide6>=6.7"
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "pytest-qt>=4.4",
+    "ruff>=0.5",
+    "mypy>=1.10"
+]
+
+[project.scripts]
+pluton = "pluton.app:main"
+
+# scikit-build-core configuration
+[tool.scikit-build]
+minimum-version = "0.10"
+cmake.version = ">=3.27"
+ninja.version = ">=1.11"
+build-dir = "build/{wheel_tag}"
+wheel.packages = ["python/pluton"]
+
+# Ruff configuration
+[tool.ruff]
+line-length = 100
+target-version = "py313"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "N", "UP", "B", "C4", "RUF"]
+ignore = []
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+
+# pytest configuration
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = "test_*.py"
+addopts = "-ra --strict-markers"
