@@ -1,0 +1,13 @@
+{
+    "name": "pluton",
+    "version": "0.0.1",
+    "description": "Polygonal 3D modeler for architecture",
+    "homepage": "https://pluton3d.org",
+    "license": "GPL-3.0-or-later",
+    "dependencies": [
+        {
+            "name": "gtest",
+            "version>=": "1.14.0"
+        }
+    ]
+}
