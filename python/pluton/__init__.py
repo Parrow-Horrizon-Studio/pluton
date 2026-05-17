@@ -4,4 +4,4 @@ from pluton._core import version
 
 __version__ = version()
 
-__all__ = ["version", "__version__"]
+__all__ = ["__version__", "version"]

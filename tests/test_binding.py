@@ -2,7 +2,7 @@
 
 import re
 
-from pluton import _core, version, __version__
+from pluton import __version__, _core, version
 
 
 def test_core_version_returns_string():
@@ -12,8 +12,9 @@ def test_core_version_returns_string():
 
 def test_core_version_matches_semver_pattern():
     result = _core.version()
-    assert re.match(r"^\d+\.\d+\.\d+$", result), \
+    assert re.match(r"^\d+\.\d+\.\d+$", result), (
         f"Expected MAJOR.MINOR.PATCH format, got: {result!r}"
+    )
 
 
 def test_top_level_version_function_delegates_to_core():

@@ -5,8 +5,6 @@ verify rendering — that requires a more involved framebuffer-capture
 approach which is out of scope for M0.
 """
 
-import pytest
-
 
 def test_main_window_constructs(qtbot):
     """The main window can be instantiated without raising."""

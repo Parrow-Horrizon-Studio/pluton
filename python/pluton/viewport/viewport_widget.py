@@ -11,7 +11,6 @@ from array import array
 from OpenGL import GL
 from PySide6.QtOpenGLWidgets import QOpenGLWidget
 
-
 VERTEX_SHADER_SRC = """
 #version 330 core
 
@@ -38,12 +37,27 @@ void main() {
 """
 
 # Triangle vertices: (x, y, r, g, b) per vertex
-TRIANGLE_VERTICES = array("f", [
-    # x      y      r     g     b
-     0.0,   0.6,   1.0,  0.0,  0.0,   # top vertex (red)
-    -0.6,  -0.4,   0.0,  1.0,  0.0,   # bottom-left (green)
-     0.6,  -0.4,   0.0,  0.0,  1.0,   # bottom-right (blue)
-])
+TRIANGLE_VERTICES = array(
+    "f",
+    [
+        # x      y      r     g     b
+        0.0,
+        0.6,
+        1.0,
+        0.0,
+        0.0,  # top vertex (red)
+        -0.6,
+        -0.4,
+        0.0,
+        1.0,
+        0.0,  # bottom-left (green)
+        0.6,
+        -0.4,
+        0.0,
+        0.0,
+        1.0,  # bottom-right (blue)
+    ],
+)
 
 
 class ViewportWidget(QOpenGLWidget):
@@ -132,7 +146,11 @@ def _create_triangle_buffers() -> tuple[int, int]:
     # Attribute 1: color (vec3), offset by 2 floats
     GL.glEnableVertexAttribArray(1)
     GL.glVertexAttribPointer(
-        1, 3, GL.GL_FLOAT, GL.GL_FALSE, stride,
+        1,
+        3,
+        GL.GL_FLOAT,
+        GL.GL_FALSE,
+        stride,
         ctypes.c_void_p(2 * ctypes.sizeof(ctypes.c_float)),
     )
 
