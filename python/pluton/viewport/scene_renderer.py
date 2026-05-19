@@ -152,6 +152,11 @@ class SceneRenderer:
         self._initialized = True
 
     def resize(self, w: int, h: int) -> None:
+        # Skip the GL call if initialize_gl hasn't run yet (e.g., tests that
+        # call resizeGL on an unshown widget). glViewport without a current
+        # GL context would raise GL_INVALID_OPERATION.
+        if not self._initialized:
+            return
         GL.glViewport(0, 0, w, h)
 
     def render(self, camera: Camera) -> None:

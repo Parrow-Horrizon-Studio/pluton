@@ -40,8 +40,7 @@ class ViewportWidget(QOpenGLWidget):
         self.scene_renderer.initialize_gl()
 
     def resizeGL(self, w: int, h: int) -> None:
-        if self.scene_renderer._initialized:
-            self.scene_renderer.resize(w, h)
+        self.scene_renderer.resize(w, h)
         self.camera.aspect = float(w) / max(float(h), 1.0)
 
     def paintGL(self) -> None:
