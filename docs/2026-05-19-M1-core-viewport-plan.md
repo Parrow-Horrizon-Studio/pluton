@@ -1034,7 +1034,7 @@ class Camera:
 pytest tests/test_camera.py -v
 ```
 
-Expected: all 12 tests PASS.
+Expected: all 11 tests PASS.
 
 If `test_orbit_full_circle_returns_to_origin` fails by being just outside the tolerance, that's likely numerical drift over 1000 iterations — confirm the test uses a generous tolerance (1e-3) and that the orbit math has no off-by-one in atan2/asin.
 
@@ -1742,7 +1742,7 @@ If `test_resize_updates_camera_aspect` fails: confirm `resizeGL` actually mutate
 pytest -v
 ```
 
-Expected: `test_mesh.py` (9), `test_camera.py` (12), `test_viewport.py` (6) = 27 tests, all PASS.
+Expected: `test_mesh.py` (9), `test_camera.py` (11), `test_viewport.py` (6) = 26 tests, all PASS.
 
 - [ ] **Step 7: Commit**
 
