@@ -1,159 +1,109 @@
-"""The 3D viewport widget — a QOpenGLWidget that draws via raw OpenGL.
+"""The 3D viewport widget — a QOpenGLWidget driving the M1 scene.
 
-For M0 this draws a single static triangle to verify the rendering pipeline.
-In M1 this will be replaced with ModernGL-based rendering through a swappable
-Renderer abstraction.
+Owns a Camera (Python/numpy) and a SceneRenderer (GL resources). Translates
+Qt mouse events into camera operations:
+
+  * MMB drag         -> orbit
+  * Shift + MMB drag -> pan
+  * Scroll wheel     -> zoom toward cursor
 """
 
-import ctypes
-from array import array
+from __future__ import annotations
 
-from OpenGL import GL
+import numpy as np
+from PySide6.QtCore import QPoint, Qt
+from PySide6.QtGui import QMouseEvent, QWheelEvent
 from PySide6.QtOpenGLWidgets import QOpenGLWidget
 
-VERTEX_SHADER_SRC = """
-#version 330 core
-
-layout(location = 0) in vec2 in_position;
-layout(location = 1) in vec3 in_color;
-
-out vec3 v_color;
-
-void main() {
-    v_color = in_color;
-    gl_Position = vec4(in_position, 0.0, 1.0);
-}
-"""
-
-FRAGMENT_SHADER_SRC = """
-#version 330 core
-
-in vec3 v_color;
-out vec4 frag_color;
-
-void main() {
-    frag_color = vec4(v_color, 1.0);
-}
-"""
-
-# Triangle vertices: (x, y, r, g, b) per vertex
-TRIANGLE_VERTICES = array(
-    "f",
-    [
-        # x      y      r     g     b
-        0.0,
-        0.6,
-        1.0,
-        0.0,
-        0.0,  # top vertex (red)
-        -0.6,
-        -0.4,
-        0.0,
-        1.0,
-        0.0,  # bottom-left (green)
-        0.6,
-        -0.4,
-        0.0,
-        0.0,
-        1.0,  # bottom-right (blue)
-    ],
-)
+from pluton.viewport.camera import Camera
+from pluton.viewport.scene_renderer import SceneRenderer
 
 
 class ViewportWidget(QOpenGLWidget):
-    """An OpenGL viewport. For M0, draws a static triangle."""
+    """The 3D viewport. Renders cube + grid + axes; orbits via mouse."""
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
-        self._program: int = 0
-        self._vao: int = 0
-        self._vbo: int = 0
+        self.camera = Camera()
+        self.scene_renderer = SceneRenderer()
+        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+        # Receive mouse-tracking events without requiring a button press.
+        self.setMouseTracking(True)
+
+        self._last_mouse_pos: QPoint | None = None
+        self._dragging_button: Qt.MouseButton = Qt.MouseButton.NoButton
+        self._dragging_modifiers: Qt.KeyboardModifier = Qt.KeyboardModifier.NoModifier
+
+    # --- GL lifecycle -----------------------------------------------------
 
     def initializeGL(self) -> None:
-        """Called once when the GL context is first created."""
-        self._program = _compile_shader_program(VERTEX_SHADER_SRC, FRAGMENT_SHADER_SRC)
-        self._vao, self._vbo = _create_triangle_buffers()
-        GL.glClearColor(0.15, 0.15, 0.18, 1.0)
+        self.scene_renderer.initialize_gl()
 
     def resizeGL(self, w: int, h: int) -> None:
-        """Called when the widget is resized."""
-        GL.glViewport(0, 0, w, h)
+        if self.scene_renderer._initialized:
+            self.scene_renderer.resize(w, h)
+        self.camera.aspect = float(w) / max(float(h), 1.0)
 
     def paintGL(self) -> None:
-        """Called each frame to redraw."""
-        GL.glClear(GL.GL_COLOR_BUFFER_BIT)
-        GL.glUseProgram(self._program)
-        GL.glBindVertexArray(self._vao)
-        GL.glDrawArrays(GL.GL_TRIANGLES, 0, 3)
-        GL.glBindVertexArray(0)
-        GL.glUseProgram(0)
+        self.scene_renderer.render(self.camera)
 
+    # --- Mouse handling ---------------------------------------------------
 
-def _compile_shader_program(vertex_src: str, fragment_src: str) -> int:
-    """Compile a shader program from vertex and fragment sources.
+    def mousePressEvent(self, event: QMouseEvent) -> None:
+        if event.button() == Qt.MouseButton.MiddleButton:
+            self._dragging_button = Qt.MouseButton.MiddleButton
+            self._dragging_modifiers = event.modifiers()
+            self._last_mouse_pos = event.position().toPoint()
+            event.accept()
+            return
+        super().mousePressEvent(event)
 
-    Raises RuntimeError if compilation or linking fails.
-    """
-    vertex_shader = _compile_shader(vertex_src, GL.GL_VERTEX_SHADER)
-    fragment_shader = _compile_shader(fragment_src, GL.GL_FRAGMENT_SHADER)
+    def mouseMoveEvent(self, event: QMouseEvent) -> None:
+        if (
+            self._dragging_button == Qt.MouseButton.MiddleButton
+            and self._last_mouse_pos is not None
+        ):
+            current = event.position().toPoint()
+            dx = float(current.x() - self._last_mouse_pos.x())
+            dy = float(current.y() - self._last_mouse_pos.y())
+            self._last_mouse_pos = current
 
-    program = GL.glCreateProgram()
-    GL.glAttachShader(program, vertex_shader)
-    GL.glAttachShader(program, fragment_shader)
-    GL.glLinkProgram(program)
+            if self._dragging_modifiers & Qt.KeyboardModifier.ShiftModifier:
+                self.camera.pan(dx_pixels=dx, dy_pixels=dy)
+            else:
+                # Negate dy so dragging up tilts the view up (screen-y is inverted).
+                self.camera.orbit(dx_pixels=dx, dy_pixels=-dy)
+            self.update()
+            event.accept()
+            return
+        super().mouseMoveEvent(event)
 
-    link_status = GL.glGetProgramiv(program, GL.GL_LINK_STATUS)
-    if not link_status:
-        log = GL.glGetProgramInfoLog(program).decode("utf-8", errors="replace")
-        raise RuntimeError(f"Shader program link failed:\n{log}")
+    def mouseReleaseEvent(self, event: QMouseEvent) -> None:
+        if event.button() == Qt.MouseButton.MiddleButton:
+            self._dragging_button = Qt.MouseButton.NoButton
+            self._last_mouse_pos = None
+            event.accept()
+            return
+        super().mouseReleaseEvent(event)
 
-    GL.glDeleteShader(vertex_shader)
-    GL.glDeleteShader(fragment_shader)
-    return program
+    def wheelEvent(self, event: QWheelEvent) -> None:
+        # angleDelta is in 1/8 of a degree; one notch = 120 units = 15 degrees.
+        notches = event.angleDelta().y() / 120.0
+        cursor = event.position()
+        ndc = self._cursor_to_ndc(cursor.x(), cursor.y())
+        self.camera.zoom(scroll_delta=notches, cursor_ndc=ndc)
+        self.update()
+        event.accept()
 
+    # --- Helpers ----------------------------------------------------------
 
-def _compile_shader(source: str, shader_type: int) -> int:
-    """Compile a single shader. Raises RuntimeError on failure."""
-    shader = GL.glCreateShader(shader_type)
-    GL.glShaderSource(shader, source)
-    GL.glCompileShader(shader)
+    def _cursor_to_ndc(self, x: float, y: float) -> np.ndarray:
+        """Map widget-local cursor pixel to NDC [-1, +1] for x and y.
 
-    compile_status = GL.glGetShaderiv(shader, GL.GL_COMPILE_STATUS)
-    if not compile_status:
-        log = GL.glGetShaderInfoLog(shader).decode("utf-8", errors="replace")
-        kind = "vertex" if shader_type == GL.GL_VERTEX_SHADER else "fragment"
-        raise RuntimeError(f"{kind} shader compile failed:\n{log}")
-    return shader
-
-
-def _create_triangle_buffers() -> tuple[int, int]:
-    """Create the VAO and VBO containing the triangle. Returns (vao, vbo)."""
-    vao = GL.glGenVertexArrays(1)
-    GL.glBindVertexArray(vao)
-
-    vbo = GL.glGenBuffers(1)
-    GL.glBindBuffer(GL.GL_ARRAY_BUFFER, vbo)
-    GL.glBufferData(
-        GL.GL_ARRAY_BUFFER,
-        TRIANGLE_VERTICES.tobytes(),
-        GL.GL_STATIC_DRAW,
-    )
-
-    stride = 5 * ctypes.sizeof(ctypes.c_float)  # 5 floats per vertex
-    # Attribute 0: position (vec2)
-    GL.glEnableVertexAttribArray(0)
-    GL.glVertexAttribPointer(0, 2, GL.GL_FLOAT, GL.GL_FALSE, stride, ctypes.c_void_p(0))
-    # Attribute 1: color (vec3), offset by 2 floats
-    GL.glEnableVertexAttribArray(1)
-    GL.glVertexAttribPointer(
-        1,
-        3,
-        GL.GL_FLOAT,
-        GL.GL_FALSE,
-        stride,
-        ctypes.c_void_p(2 * ctypes.sizeof(ctypes.c_float)),
-    )
-
-    GL.glBindBuffer(GL.GL_ARRAY_BUFFER, 0)
-    GL.glBindVertexArray(0)
-    return vao, vbo
+        y axis is flipped because screen-y grows downward while NDC-y grows up.
+        """
+        w = max(self.width(), 1)
+        h = max(self.height(), 1)
+        nx = (2.0 * x / w) - 1.0
+        ny = 1.0 - (2.0 * y / h)
+        return np.array([nx, ny], dtype=np.float32)
