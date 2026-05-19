@@ -1,6 +1,7 @@
 # Core library — the C++ implementation
 add_library(pluton_core STATIC
     src/version.cpp
+    src/mesh.cpp
 )
 
 target_include_directories(pluton_core PUBLIC

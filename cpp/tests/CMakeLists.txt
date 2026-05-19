@@ -2,6 +2,7 @@ find_package(GTest CONFIG REQUIRED)
 
 add_executable(pluton_tests
     test_version.cpp
+    test_mesh.cpp
 )
 
 target_link_libraries(pluton_tests PRIVATE
