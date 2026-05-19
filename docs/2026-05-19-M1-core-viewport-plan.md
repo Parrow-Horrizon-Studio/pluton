@@ -16,11 +16,27 @@
 
 ## Build & Test Commands Reference
 
-The scikit-build-core build directory pattern is `build/{wheel_tag}/` — e.g. `build/cp313-cp313-win_amd64/` on Windows or `build/cp313-cp313-linux_x86_64/` on Linux. Rather than hardcode that path everywhere, define helpers once per shell:
+The scikit-build-core build directory pattern is `build/{wheel_tag}/` — e.g. `build/cp313-cp313-win_amd64/` on Windows or `build/cp313-cp313-linux_x86_64/` on Linux.
+
+**Critical:** scikit-build-core does NOT pick up `CMAKE_TOOLCHAIN_FILE` from the environment alone — it must be passed via `SKBUILD_CMAKE_ARGS`. Also, the vcpkg binary cache (`VCPKG_BINARY_SOURCES`) must be cleared when running in a shell that doesn't have GHA cache tokens. Confirmed working incantation:
+
+**Git Bash / Linux / macOS:**
+```bash
+export VCPKG_ROOT=/c/vcpkg                                                          # or wherever vcpkg lives
+export SKBUILD_CMAKE_ARGS="-DCMAKE_TOOLCHAIN_FILE=$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake"
+export VCPKG_BINARY_SOURCES=clear
+
+alias pluton-build='pip install -e . --no-build-isolation'
+alias pluton-cpp-tests='ctest --test-dir "$(ls -d build/*/ | head -1)" --output-on-failure'
+alias pluton-py-tests='pytest -v'
+```
 
 **Windows PowerShell:**
 ```powershell
-$env:VCPKG_ROOT = "C:\path\to\vcpkg"   # set this once per shell session
+$env:VCPKG_ROOT = "C:\vcpkg"
+$env:SKBUILD_CMAKE_ARGS = "-DCMAKE_TOOLCHAIN_FILE=C:/vcpkg/scripts/buildsystems/vcpkg.cmake"
+$env:VCPKG_BINARY_SOURCES = "clear"
+
 function pluton-build { pip install -e . --no-build-isolation }
 function pluton-cpp-tests {
     $build = (Get-ChildItem build/ -Directory | Select-Object -First 1).FullName
@@ -29,13 +45,7 @@ function pluton-cpp-tests {
 function pluton-py-tests { pytest -v }
 ```
 
-**Linux / macOS bash:**
-```bash
-export VCPKG_ROOT=/path/to/vcpkg
-alias pluton-build='pip install -e . --no-build-isolation'
-alias pluton-cpp-tests='ctest --test-dir "$(ls -d build/*/ | head -1)" --output-on-failure'
-alias pluton-py-tests='pytest -v'
-```
+**Note on stale CMakeCache:** if a build fails with `Could not find GTest`, the existing `build/<wheel_tag>/CMakeCache.txt` was configured without the toolchain. Remove the build directory once: `rm -rf build/<wheel_tag>` and re-run `pluton-build`. Subsequent rebuilds will reuse the cached toolchain setting.
 
 Each task below uses `pluton-build`, `pluton-cpp-tests`, `pluton-py-tests` as shorthand.
 
