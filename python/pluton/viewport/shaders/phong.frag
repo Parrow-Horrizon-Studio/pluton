@@ -17,9 +17,12 @@ uniform float u_material_shininess;
 
 void main() {
     vec3 N = normalize(v_world_normal);
+    // Convention: `u_light_dir` is the direction the light *travels* (incident
+    // ray pointing INTO the surface). So `L` is the incident ray, `-L` points
+    // from surface to light, and `reflect(L, N)` gives the bounce direction.
     vec3 L = normalize(u_light_dir);
     vec3 V = normalize(u_camera_pos - v_world_pos);
-    vec3 R = reflect(L, N);  // light reflects off the surface
+    vec3 R = reflect(L, N);  // bounce direction (away from surface)
 
     float diff = max(dot(N, -L), 0.0);
     float spec = pow(max(dot(R, V), 0.0), u_material_shininess);
