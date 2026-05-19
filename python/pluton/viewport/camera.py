@@ -145,6 +145,6 @@ class Camera:
         step = max(min(step, distance * 0.9), -distance * 5.0)
 
         self.position = self.position + direction * step
-        # Drag target along too so subsequent orbits still feel anchored.
-        if cursor_ndc is not None:
-            self.target = self.target + direction * step
+        # M1 design: orbit pivot stays at the original `target` (world origin).
+        # SketchUp-style "orbit around clicked point" is deferred to a later
+        # milestone once we have ray-mesh hit-testing.

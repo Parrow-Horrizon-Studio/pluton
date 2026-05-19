@@ -126,3 +126,15 @@ def test_zoom_out_increases_distance():
     c.zoom(scroll_delta=-1.0, cursor_ndc=None)
     distance_after = np.linalg.norm(c.position - c.target)
     assert distance_after > distance_before
+
+
+def test_zoom_toward_cursor_does_not_drift_target():
+    """Cursor-zoom must not move `target` — the orbit pivot must stay anchored."""
+    c = Camera()
+    target_before = c.target.copy()
+    cursor = np.array([0.3, -0.2], dtype=np.float32)  # arbitrary off-center cursor
+
+    for _ in range(50):
+        c.zoom(scroll_delta=1.0, cursor_ndc=cursor)
+
+    np.testing.assert_allclose(c.target, target_before, atol=1e-5)
