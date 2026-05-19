@@ -519,9 +519,9 @@ namespace {
 
 // Expose std::vector<float> as a read-only (N, 3) numpy view of the data.
 // The `const float` dtype is what makes the resulting numpy array
-// non-writable from Python. The `nb::keep_alive<0, 1>` policy on the
-// def_prop_ro call (below) keeps the owning Mesh alive as long as the
-// returned ndarray is alive.
+// non-writable from Python. The `nb::rv_policy::reference_internal` policy
+// on the def_prop_ro call (below) keeps the owning Mesh alive as long as
+// the returned ndarray is alive.
 nb::ndarray<const float, nb::numpy, nb::shape<-1, 3>> as_vec3_array(
     const std::vector<float>& v) {
     const std::size_t n = v.size() / 3;
