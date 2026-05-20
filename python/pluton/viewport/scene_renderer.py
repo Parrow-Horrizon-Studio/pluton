@@ -9,6 +9,7 @@ Lifecycle is driven by QOpenGLWidget:
 from __future__ import annotations
 
 import ctypes
+from collections.abc import Sequence
 from importlib.resources import files
 
 import numpy as np
@@ -40,6 +41,15 @@ _MATERIAL_SHININESS = 16.0
 
 _BG_COLOR = (0.15, 0.15, 0.18, 1.0)
 
+# Uniform names looked up once per program in initialize_gl().
+_PHONG_UNIFORMS = (
+    "u_view", "u_projection", "u_model", "u_camera_pos",
+    "u_light_dir", "u_light_color",
+    "u_material_ambient", "u_material_diffuse",
+    "u_material_specular", "u_material_shininess",
+)
+_LINE_UNIFORMS = ("u_view", "u_projection")
+
 
 def _load_shader_source(name: str) -> str:
     return (files("pluton.viewport") / "shaders" / name).read_text(encoding="utf-8")
@@ -69,6 +79,12 @@ def _link_program(vert_src: str, frag_src: str) -> int:
     GL.glDeleteShader(vs)
     GL.glDeleteShader(fs)
     return program
+
+
+def _cache_uniform_locations(program: int, names: Sequence[str]) -> dict[str, int]:
+    """Look up uniform locations once per program. Returned dict is read by
+    every subsequent draw to avoid glGetUniformLocation in the hot path."""
+    return {name: GL.glGetUniformLocation(program, name) for name in names}
 
 
 def _build_grid_vertex_array() -> np.ndarray:
@@ -114,6 +130,9 @@ class SceneRenderer:
         # Programs
         self._phong_program: int = 0
         self._line_program: int = 0
+        # Uniform location caches (populated in initialize_gl)
+        self._phong_locs: dict[str, int] = {}
+        self._line_locs: dict[str, int] = {}
         # Cube buffers
         self._cube_vao: int = 0
         self._cube_position_vbo: int = 0
@@ -144,6 +163,12 @@ class SceneRenderer:
             _load_shader_source("line.vert"),
             _load_shader_source("line.frag"),
         )
+
+        # Cache uniform locations once per program — uniform locations are
+        # stable for the lifetime of a linked program, so doing the lookup
+        # in the per-frame draw path is pure waste.
+        self._phong_locs = _cache_uniform_locations(self._phong_program, _PHONG_UNIFORMS)
+        self._line_locs = _cache_uniform_locations(self._line_program, _LINE_UNIFORMS)
 
         self._init_cube_buffers()
         self._init_grid_buffers()
@@ -176,10 +201,12 @@ class SceneRenderer:
     # --- Init helpers -----------------------------------------------------
 
     def _init_cube_buffers(self) -> None:
+        # mesh.positions / normals / indices are already C-contiguous float32 /
+        # uint32 views from nanobind; np.asarray returns them unchanged.
         mesh = pluton.make_cube(1.0)
-        positions = np.ascontiguousarray(mesh.positions, dtype=np.float32)
-        normals = np.ascontiguousarray(mesh.normals, dtype=np.float32)
-        indices = np.ascontiguousarray(mesh.indices, dtype=np.uint32)
+        positions = np.asarray(mesh.positions, dtype=np.float32)
+        normals = np.asarray(mesh.normals, dtype=np.float32)
+        indices = np.asarray(mesh.indices, dtype=np.uint32)
         self._cube_index_count = int(indices.size)
 
         self._cube_vao = GL.glGenVertexArrays(1)
@@ -241,8 +268,9 @@ class SceneRenderer:
 
     def _draw_lines(self, vao: int, count: int, view: np.ndarray, projection: np.ndarray) -> None:
         GL.glUseProgram(self._line_program)
-        _set_mat4(self._line_program, "u_view", view)
-        _set_mat4(self._line_program, "u_projection", projection)
+        locs = self._line_locs
+        _set_mat4(locs["u_view"], view)
+        _set_mat4(locs["u_projection"], projection)
         GL.glBindVertexArray(vao)
         GL.glDrawArrays(GL.GL_LINES, 0, count)
         GL.glBindVertexArray(0)
@@ -256,16 +284,17 @@ class SceneRenderer:
         camera_pos: np.ndarray,
     ) -> None:
         GL.glUseProgram(self._phong_program)
-        _set_mat4(self._phong_program, "u_view", view)
-        _set_mat4(self._phong_program, "u_projection", projection)
-        _set_mat4(self._phong_program, "u_model", model)
-        _set_vec3(self._phong_program, "u_camera_pos", camera_pos)
-        _set_vec3(self._phong_program, "u_light_dir", _LIGHT_DIR)
-        _set_vec3(self._phong_program, "u_light_color", _LIGHT_COLOR)
-        _set_vec3(self._phong_program, "u_material_ambient", _MATERIAL_AMBIENT)
-        _set_vec3(self._phong_program, "u_material_diffuse", _MATERIAL_DIFFUSE)
-        _set_vec3(self._phong_program, "u_material_specular", _MATERIAL_SPECULAR)
-        _set_float(self._phong_program, "u_material_shininess", _MATERIAL_SHININESS)
+        locs = self._phong_locs
+        _set_mat4(locs["u_view"], view)
+        _set_mat4(locs["u_projection"], projection)
+        _set_mat4(locs["u_model"], model)
+        _set_vec3(locs["u_camera_pos"], camera_pos)
+        _set_vec3(locs["u_light_dir"], _LIGHT_DIR)
+        _set_vec3(locs["u_light_color"], _LIGHT_COLOR)
+        _set_vec3(locs["u_material_ambient"], _MATERIAL_AMBIENT)
+        _set_vec3(locs["u_material_diffuse"], _MATERIAL_DIFFUSE)
+        _set_vec3(locs["u_material_specular"], _MATERIAL_SPECULAR)
+        _set_float(locs["u_material_shininess"], _MATERIAL_SHININESS)
 
         GL.glBindVertexArray(self._cube_vao)
         GL.glDrawElements(GL.GL_TRIANGLES, self._cube_index_count, GL.GL_UNSIGNED_INT, None)
@@ -274,25 +303,26 @@ class SceneRenderer:
 
 
 # --- Uniform helpers --------------------------------------------------------
+#
+# These take a uniform `loc` (pre-cached via _cache_uniform_locations) instead
+# of looking it up per-call. A `loc` of -1 means the uniform isn't present in
+# the linked program (e.g., optimized out) — silently skipped.
 
-def _set_mat4(program: int, name: str, m: np.ndarray) -> None:
-    loc = GL.glGetUniformLocation(program, name)
+def _set_mat4(loc: int, m: np.ndarray) -> None:
     if loc < 0:
         return
     # GLSL is column-major; numpy is row-major. Transpose flag handles it.
-    GL.glUniformMatrix4fv(loc, 1, GL.GL_TRUE, np.ascontiguousarray(m, dtype=np.float32))
+    GL.glUniformMatrix4fv(loc, 1, GL.GL_TRUE, np.asarray(m, dtype=np.float32))
 
 
-def _set_vec3(program: int, name: str, v) -> None:
-    loc = GL.glGetUniformLocation(program, name)
+def _set_vec3(loc: int, v: np.ndarray | tuple[float, float, float]) -> None:
     if loc < 0:
         return
     arr = np.asarray(v, dtype=np.float32)
     GL.glUniform3f(loc, float(arr[0]), float(arr[1]), float(arr[2]))
 
 
-def _set_float(program: int, name: str, x: float) -> None:
-    loc = GL.glGetUniformLocation(program, name)
+def _set_float(loc: int, x: float) -> None:
     if loc < 0:
         return
     GL.glUniform1f(loc, float(x))
