@@ -83,6 +83,27 @@ def test_wheel_event_zooms_camera(qtbot):
     assert distance_after != distance_before
 
 
+def test_wheel_event_with_zero_vertical_delta_does_not_zoom(qtbot):
+    """Horizontal-only trackpad scrolls (delta_y=0) must not change the camera.
+
+    The viewport's wheelEvent should also leave the event unaccepted so a
+    parent widget could handle horizontal scroll without it being swallowed.
+    """
+    from pluton.viewport.viewport_widget import ViewportWidget
+
+    widget = ViewportWidget()
+    qtbot.addWidget(widget)
+    pos_before = widget.camera.position.copy()
+    target_before = widget.camera.target.copy()
+
+    event = _make_wheel_event(widget, delta_y=0)
+    widget.wheelEvent(event)
+
+    np.testing.assert_array_equal(widget.camera.position, pos_before)
+    np.testing.assert_array_equal(widget.camera.target, target_before)
+    assert not event.isAccepted()
+
+
 def _make_wheel_event(widget, delta_y: int) -> QWheelEvent:
     """Construct a QWheelEvent suitable for delivery to a widget's wheelEvent."""
     from PySide6.QtCore import QPointF

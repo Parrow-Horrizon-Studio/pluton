@@ -88,6 +88,11 @@ class ViewportWidget(QOpenGLWidget):
     def wheelEvent(self, event: QWheelEvent) -> None:
         # angleDelta is in 1/8 of a degree; one notch = 120 units = 15 degrees.
         notches = event.angleDelta().y() / 120.0
+        if notches == 0:
+            # Pure horizontal scroll — nothing for us to do, and we don't want
+            # to swallow the event in case a parent (M4 sidebars, etc.) wants it.
+            super().wheelEvent(event)
+            return
         cursor = event.position()
         ndc = self._cursor_to_ndc(cursor.x(), cursor.y())
         self.camera.zoom(scroll_delta=notches, cursor_ndc=ndc)
