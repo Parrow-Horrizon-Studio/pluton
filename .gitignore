@@ -50,3 +50,6 @@ build.log
 *.swo
 .DS_Store
 Thumbs.db
+
+# Superpowers brainstorming visual companion
+.superpowers/
