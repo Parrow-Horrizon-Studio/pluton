@@ -1,11 +1,11 @@
-"""The 3D viewport widget — a QOpenGLWidget driving the M1 scene.
+"""The 3D viewport widget — drives the scene + snap engine + active tool.
 
 Owns a Camera (Python/numpy) and a SceneRenderer (GL resources). Translates
-Qt mouse events into camera operations:
-
-  * MMB drag         -> orbit
-  * Shift + MMB drag -> pan
-  * Scroll wheel     -> zoom toward cursor
+Qt mouse events into:
+  * MMB drag         -> camera orbit (unchanged from M1)
+  * Shift + MMB drag -> camera pan   (unchanged from M1)
+  * Scroll wheel     -> camera zoom  (unchanged from M1)
+  * LMB / cursor-move (when a tool is active) -> snap + delegate to tool
 """
 
 from __future__ import annotations
@@ -17,22 +17,30 @@ from PySide6.QtOpenGLWidgets import QOpenGLWidget
 
 from pluton.viewport.camera import Camera
 from pluton.viewport.scene_renderer import SceneRenderer
+from pluton.viewport.snap_engine import SnapEngine, SnapKind
 
 
 class ViewportWidget(QOpenGLWidget):
-    """The 3D viewport. Renders cube + grid + axes; orbits via mouse."""
+    """The 3D viewport. Renders scene + active tool overlay; routes mouse events."""
 
-    def __init__(self, parent=None) -> None:
+    def __init__(self, scene=None, tool_manager=None, parent=None) -> None:  # noqa: ANN001
         super().__init__(parent)
         self.camera = Camera()
         self.scene_renderer = SceneRenderer()
+        self.scene = scene
+        self.tool_manager = tool_manager
+        self.snap_engine = SnapEngine()
+        self._status_bar = None
+
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
-        # Receive mouse-tracking events without requiring a button press.
         self.setMouseTracking(True)
 
         self._last_mouse_pos: QPoint | None = None
         self._dragging_button: Qt.MouseButton = Qt.MouseButton.NoButton
         self._dragging_modifiers: Qt.KeyboardModifier = Qt.KeyboardModifier.NoModifier
+
+    def set_status_bar(self, status_bar) -> None:  # noqa: ANN001
+        self._status_bar = status_bar
 
     # --- GL lifecycle -----------------------------------------------------
 
@@ -44,7 +52,9 @@ class ViewportWidget(QOpenGLWidget):
         self.camera.aspect = float(w) / max(float(h), 1.0)
 
     def paintGL(self) -> None:
-        self.scene_renderer.render(self.camera)
+        active = self.tool_manager.active if self.tool_manager is not None else None
+        overlay = active.overlay() if active is not None else None
+        self.scene_renderer.render(self.camera, self.scene, overlay)
 
     # --- Mouse handling ---------------------------------------------------
 
@@ -55,9 +65,20 @@ class ViewportWidget(QOpenGLWidget):
             self._last_mouse_pos = event.position().toPoint()
             event.accept()
             return
+        if event.button() == Qt.MouseButton.LeftButton:
+            active = self.tool_manager.active if self.tool_manager is not None else None
+            if active is not None:
+                snap = self._snap_for_event(event)
+                active.on_mouse_press(event, snap)
+                if self._status_bar is not None:
+                    self._status_bar.set_snap(snap.label)
+                self.update()
+                event.accept()
+                return
         super().mousePressEvent(event)
 
     def mouseMoveEvent(self, event: QMouseEvent) -> None:
+        # Camera drag — unchanged from M1.
         if (
             self._dragging_button == Qt.MouseButton.MiddleButton
             and self._last_mouse_pos is not None
@@ -66,15 +87,25 @@ class ViewportWidget(QOpenGLWidget):
             dx = float(current.x() - self._last_mouse_pos.x())
             dy = float(current.y() - self._last_mouse_pos.y())
             self._last_mouse_pos = current
-
             if self._dragging_modifiers & Qt.KeyboardModifier.ShiftModifier:
                 self.camera.pan(dx_pixels=dx, dy_pixels=dy)
             else:
-                # Negate dy so dragging up tilts the view up (screen-y is inverted).
                 self.camera.orbit(dx_pixels=dx, dy_pixels=-dy)
             self.update()
             event.accept()
             return
+
+        # Tool delegation
+        active = self.tool_manager.active if self.tool_manager is not None else None
+        if active is not None:
+            snap = self._snap_for_event(event)
+            active.on_mouse_move(event, snap)
+            if self._status_bar is not None:
+                self._status_bar.set_snap(snap.label if snap.kind != SnapKind.NONE else "")
+            self.update()
+            event.accept()
+            return
+
         super().mouseMoveEvent(event)
 
     def mouseReleaseEvent(self, event: QMouseEvent) -> None:
@@ -86,11 +117,8 @@ class ViewportWidget(QOpenGLWidget):
         super().mouseReleaseEvent(event)
 
     def wheelEvent(self, event: QWheelEvent) -> None:
-        # angleDelta is in 1/8 of a degree; one notch = 120 units = 15 degrees.
         notches = event.angleDelta().y() / 120.0
         if notches == 0:
-            # Pure horizontal scroll — nothing for us to do, and we don't want
-            # to swallow the event in case a parent (M4 sidebars, etc.) wants it.
             super().wheelEvent(event)
             return
         cursor = event.position()
@@ -102,12 +130,23 @@ class ViewportWidget(QOpenGLWidget):
     # --- Helpers ----------------------------------------------------------
 
     def _cursor_to_ndc(self, x: float, y: float) -> np.ndarray:
-        """Map widget-local cursor pixel to NDC [-1, +1] for x and y.
-
-        y axis is flipped because screen-y grows downward while NDC-y grows up.
-        """
         w = max(self.width(), 1)
         h = max(self.height(), 1)
         nx = (2.0 * x / w) - 1.0
         ny = 1.0 - (2.0 * y / h)
         return np.array([nx, ny], dtype=np.float32)
+
+    def _snap_for_event(self, event: QMouseEvent):
+        pos = event.position()
+        cursor_world = self.camera.ray_intersect_ground(
+            float(pos.x()), float(pos.y()), self.width(), self.height()
+        )
+        active = self.tool_manager.active if self.tool_manager is not None else None
+        anchor = active.anchor_or_none if active is not None else None
+        return self.snap_engine.snap(
+            cursor_world,
+            (float(pos.x()), float(pos.y())),
+            self.camera,
+            self.scene,
+            anchor=anchor,
+        )

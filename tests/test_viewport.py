@@ -14,7 +14,6 @@ from PySide6.QtCore import QPoint, Qt
 from PySide6.QtGui import QMouseEvent, QWheelEvent
 
 
-@pytest.mark.skip(reason="MainWindow integration in Task 15 changed ViewportWidget signature; un-skipped in Task 16")
 def test_main_window_constructs(qtbot):
     from pluton.ui.main_window import MainWindow
 
@@ -121,3 +120,43 @@ def _make_wheel_event(widget, delta_y: int) -> QWheelEvent:
         Qt.ScrollPhase.NoScrollPhase,
         False,                            # inverted
     )
+
+
+def test_keyboard_l_activates_line_tool(qtbot):
+    from pluton.ui.main_window import MainWindow
+
+    window = MainWindow()
+    qtbot.addWidget(window)
+    window.show()
+    qtbot.waitExposed(window)
+    qtbot.wait(50)
+    qtbot.keyClick(window, Qt.Key.Key_L)
+    assert window._tool_manager.active is not None
+    assert window._tool_manager.active.name == "Line"
+
+
+def test_keyboard_r_activates_rectangle_tool(qtbot):
+    from pluton.ui.main_window import MainWindow
+
+    window = MainWindow()
+    qtbot.addWidget(window)
+    window.show()
+    qtbot.waitExposed(window)
+    qtbot.wait(50)
+    qtbot.keyClick(window, Qt.Key.Key_R)
+    assert window._tool_manager.active.name == "Rectangle"
+
+
+def test_ctrl_n_clears_scene(qtbot):
+    from pluton.ui.main_window import MainWindow
+
+    window = MainWindow()
+    qtbot.addWidget(window)
+    window.show()
+    qtbot.waitExposed(window)
+    qtbot.wait(50)
+    # Seed the scene with a vertex.
+    window._scene.add_vertex(np.array([1.0, 2.0, 0.0], dtype=np.float32))
+    assert len(list(window._scene.vertices_iter())) == 1
+    qtbot.keyClick(window, Qt.Key.Key_N, modifier=Qt.KeyboardModifier.ControlModifier)
+    assert len(list(window._scene.vertices_iter())) == 0
