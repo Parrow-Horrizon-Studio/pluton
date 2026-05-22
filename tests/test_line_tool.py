@@ -159,3 +159,61 @@ def test_line_tool_esc_cancels_visible_gesture():
     # Per spec §4.5 / §5.6: ESC clears the visible gesture state but does NOT
     # un-add already-committed vertices/edges.
     assert tool.overlay().rubber_band_segments.shape == (0, 3)
+
+
+def test_line_tool_pushes_composite_at_loop_close():
+    from pluton.commands import CommandStack
+    from pluton.scene import Scene
+    from pluton.tools import ToolContext
+    from pluton.tools.line_tool import LineTool
+
+    scene = Scene()
+    stack = CommandStack()
+    tool = LineTool()
+    tool.activate(ToolContext(scene=scene, command_stack=stack))
+
+    tool.on_mouse_press(None, _grid_snap((0.0, 0.0, 0.0)))  # type: ignore[arg-type]
+    first_vid = next(iter(scene.vertices_iter())).id
+    tool.on_mouse_press(None, _grid_snap((2.0, 0.0, 0.0)))  # type: ignore[arg-type]
+    tool.on_mouse_press(None, _grid_snap((2.0, 2.0, 0.0)))  # type: ignore[arg-type]
+    tool.on_mouse_press(None, _endpoint_snap((0.0, 0.0, 0.0), vertex_id=first_vid))  # type: ignore[arg-type]
+
+    assert stack.can_undo
+    assert len(list(scene.faces_iter())) == 1
+
+    stack.undo(scene)
+    assert len(list(scene.vertices_iter())) == 0
+    assert len(list(scene.edges_iter())) == 0
+    assert len(list(scene.faces_iter())) == 0
+
+
+def test_line_tool_esc_mid_gesture_rolls_back_committed_geometry():
+    """The M2 §5.6 #3 elimination test — ESC fully reverses in-progress mutations."""
+    from PySide6.QtCore import Qt
+    from PySide6.QtGui import QKeyEvent
+
+    from pluton.commands import CommandStack
+    from pluton.scene import Scene
+    from pluton.tools import ToolContext
+    from pluton.tools.line_tool import LineTool
+
+    scene = Scene()
+    stack = CommandStack()
+    tool = LineTool()
+    tool.activate(ToolContext(scene=scene, command_stack=stack))
+
+    # 3 clicks — verts + edges committed to scene as the gesture progresses.
+    tool.on_mouse_press(None, _grid_snap((0.0, 0.0, 0.0)))  # type: ignore[arg-type]
+    tool.on_mouse_press(None, _grid_snap((1.0, 0.0, 0.0)))  # type: ignore[arg-type]
+    tool.on_mouse_press(None, _grid_snap((1.0, 1.0, 0.0)))  # type: ignore[arg-type]
+    assert len(list(scene.vertices_iter())) == 3
+    assert len(list(scene.edges_iter())) == 2
+
+    # ESC mid-gesture rolls back everything committed during this gesture.
+    ev = QKeyEvent(QKeyEvent.Type.KeyPress, Qt.Key.Key_Escape, Qt.KeyboardModifier.NoModifier)
+    tool.on_key_press(ev)
+
+    assert len(list(scene.vertices_iter())) == 0
+    assert len(list(scene.edges_iter())) == 0
+    # Nothing pushed to undo stack (the composite was discarded, not committed).
+    assert not stack.can_undo

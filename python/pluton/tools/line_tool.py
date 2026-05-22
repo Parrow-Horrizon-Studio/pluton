@@ -16,6 +16,12 @@ import numpy as np
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QKeyEvent, QMouseEvent
 
+from pluton.commands import CompositeCommand
+from pluton.commands.scene_commands import (
+    AddEdgeCommand,
+    AddFaceCommand,
+    AddVertexCommand,
+)
 from pluton.tools.tool import Tool, ToolContext, ToolOverlay
 
 
@@ -58,9 +64,12 @@ class LineTool(Tool):
         self._snap_marker_pos: np.ndarray | None = None
         self._snap_marker_color: tuple[float, float, float] = _NEUTRAL_COLOR
         self._snap_marker_kind: int = 0
+        self._composite: CompositeCommand | None = None
+        self._command_stack = None
 
     def activate(self, ctx: ToolContext) -> None:
         self._scene = ctx.scene  # type: ignore[assignment]
+        self._command_stack = ctx.command_stack
         self._reset_gesture()
 
     def deactivate(self) -> None:
@@ -92,16 +101,21 @@ class LineTool(Tool):
         s = self._scene  # type: ignore[assignment]
         if self._state == _State.IDLE:
             # First click — seed the gesture.
+            self._composite = CompositeCommand(name="Draw Line")
             if snap.kind == SnapKind.ENDPOINT and snap.vertex_id is not None:
-                vid = snap.vertex_id
+                vid = snap.vertex_id  # reuse existing vertex; no command added
             else:
-                vid = s.add_vertex(snap.world_position)
+                cmd = AddVertexCommand(snap.world_position)
+                cmd.do(s)
+                self._composite.children.append(cmd)
+                vid = cmd._vertex_id  # type: ignore[attr-defined]
             self._gesture_vertex_ids = [vid]
             self._state = _State.DRAWING
             self._preview_tip = snap.world_position.copy()
             return
 
         # DRAWING — branch 1, 2, or 3
+        assert self._composite is not None
         tip_vid = self._gesture_vertex_ids[-1]
         first_vid = self._gesture_vertex_ids[0]
 
@@ -111,29 +125,49 @@ class LineTool(Tool):
             and len(self._gesture_vertex_ids) >= 3
         ):
             # Branch 1 — loop closure
-            s.add_edge(tip_vid, first_vid)
-            s.add_face_from_loop(tuple(self._gesture_vertex_ids))
+            e_cmd = AddEdgeCommand(tip_vid, first_vid)
+            e_cmd.do(s)
+            self._composite.children.append(e_cmd)
+            f_cmd = AddFaceCommand(tuple(self._gesture_vertex_ids))
+            f_cmd.do(s)
+            self._composite.children.append(f_cmd)
+            if self._command_stack is not None:
+                self._command_stack.push_executed(self._composite)
             self._reset_gesture()
             return
 
         if snap.kind == SnapKind.ENDPOINT and snap.vertex_id is not None:
-            # Branch 2 — extend polyline to an existing vertex
             if snap.vertex_id == tip_vid:
-                return  # degenerate: dropped
-            s.add_edge(tip_vid, snap.vertex_id)
+                return
+            e_cmd = AddEdgeCommand(tip_vid, snap.vertex_id)
+            e_cmd.do(s)
+            self._composite.children.append(e_cmd)
             self._gesture_vertex_ids.append(snap.vertex_id)
             return
 
         # Branch 3 — new vertex
-        new_vid = s.add_vertex(snap.world_position)
+        v_cmd = AddVertexCommand(snap.world_position)
+        v_cmd.do(s)
+        new_vid = v_cmd._vertex_id  # type: ignore[attr-defined]
         if new_vid == tip_vid:
-            return  # degenerate: dropped
-        s.add_edge(tip_vid, new_vid)
+            # degenerate: drop the just-added vertex by undoing
+            v_cmd.undo(s)
+            return
+        self._composite.children.append(v_cmd)
+        e_cmd = AddEdgeCommand(tip_vid, new_vid)
+        e_cmd.do(s)
+        self._composite.children.append(e_cmd)
         self._gesture_vertex_ids.append(new_vid)
 
     def on_key_press(self, event: QKeyEvent) -> None:
-        if event.key() == Qt.Key.Key_Escape:
-            self._reset_gesture()
+        if event.key() != Qt.Key.Key_Escape:
+            return
+        # ESC mid-gesture: roll back the in-progress composite.
+        if self._composite is not None:
+            s = self._scene  # type: ignore[assignment]
+            self._composite.undo(s)
+            self._composite = None
+        self._reset_gesture()
 
     def overlay(self) -> ToolOverlay:
         s = self._scene  # type: ignore[assignment]
@@ -185,3 +219,4 @@ class LineTool(Tool):
         self._rubber_band_color = _NEUTRAL_COLOR
         self._snap_marker_pos = None
         self._snap_marker_kind = 0
+        self._composite = None
