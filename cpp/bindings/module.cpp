@@ -2,13 +2,18 @@
 
 #include <nanobind/nanobind.h>
 #include <nanobind/ndarray.h>
+#include <nanobind/stl/array.h>
+#include <nanobind/stl/pair.h>
 #include <nanobind/stl/string.h>
+#include <nanobind/stl/vector.h>
 
+#include "pluton/halfedge.h"
 #include "pluton/mesh.h"
 #include "pluton/primitives.h"
 #include "pluton/version.h"
 
 namespace nb = nanobind;
+using pluton::HalfEdgeMesh;
 using pluton::Mesh;
 
 namespace {
@@ -64,4 +69,54 @@ NB_MODULE(_core, m) {
     m.def("make_cube", &pluton::make_cube, nb::arg("size") = 1.0f,
           "Create an axis-aligned cube of the given edge length, "
           "with its bottom face on the ground plane (z = 0).");
+
+    nb::class_<HalfEdgeMesh>(m, "HalfEdgeMesh", "Half-edge topology mesh — geometric source of truth")
+        .def(nb::init<>())
+
+        // Mutators
+        .def("add_vertex", &HalfEdgeMesh::add_vertex)
+        .def("add_halfedge_pair", &HalfEdgeMesh::add_halfedge_pair)
+        .def("add_face_from_loop", &HalfEdgeMesh::add_face_from_loop)
+        .def("remove_vertex", &HalfEdgeMesh::remove_vertex)
+        .def("remove_edge", &HalfEdgeMesh::remove_edge)
+        .def("remove_face", &HalfEdgeMesh::remove_face)
+        .def("restore_vertex", &HalfEdgeMesh::restore_vertex)
+        .def("restore_edge", &HalfEdgeMesh::restore_edge)
+        .def("restore_face", &HalfEdgeMesh::restore_face)
+        .def("clear", &HalfEdgeMesh::clear)
+
+        // Queries
+        .def("vertex_is_live", &HalfEdgeMesh::vertex_is_live)
+        .def("edge_is_live", &HalfEdgeMesh::edge_is_live)
+        .def("face_is_live", &HalfEdgeMesh::face_is_live)
+        .def("vertex_position", &HalfEdgeMesh::vertex_position)
+        .def("edge_vertices", &HalfEdgeMesh::edge_vertices)
+        .def("face_loop_vertices", &HalfEdgeMesh::face_loop_vertices)
+        .def("face_triangles", &HalfEdgeMesh::face_triangles)
+
+        // Half-edge adjacency (used by M3b push/pull)
+        .def("halfedge_origin", &HalfEdgeMesh::halfedge_origin)
+        .def("halfedge_next", &HalfEdgeMesh::halfedge_next)
+        .def("halfedge_twin", &HalfEdgeMesh::halfedge_twin)
+        .def("halfedge_face", &HalfEdgeMesh::halfedge_face)
+
+        // Iteration
+        .def("next_live_vertex", &HalfEdgeMesh::next_live_vertex, nb::arg("start") = 0u)
+        .def("next_live_edge", &HalfEdgeMesh::next_live_edge, nb::arg("start") = 0u)
+        .def("next_live_face", &HalfEdgeMesh::next_live_face, nb::arg("start") = 0u)
+
+        // Buffer projection
+        .def("edge_line_buffer", &HalfEdgeMesh::edge_line_buffer)
+        .def("face_triangle_buffer", &HalfEdgeMesh::face_triangle_buffer)
+
+        // Dirty flag
+        .def("is_dirty", &HalfEdgeMesh::is_dirty)
+        .def("mark_clean", &HalfEdgeMesh::mark_clean)
+
+        // Slab introspection (mostly for tests)
+        .def("vertex_slab_size", &HalfEdgeMesh::vertex_slab_size)
+        .def("halfedge_slab_size", &HalfEdgeMesh::halfedge_slab_size)
+        .def("face_slab_size", &HalfEdgeMesh::face_slab_size)
+
+        .def_ro_static("INVALID_ID", &HalfEdgeMesh::INVALID_ID);
 }
