@@ -30,8 +30,26 @@ std::uint64_t HalfEdgeMesh::pack_pair(std::uint32_t a, std::uint32_t b) noexcept
 
 // --- Stubs for Task 2+ -------------------------------------------------
 
-std::uint32_t HalfEdgeMesh::add_vertex(float, float, float) {
-    throw std::runtime_error("HalfEdgeMesh::add_vertex not implemented yet");
+std::uint32_t HalfEdgeMesh::add_vertex(float x, float y, float z) {
+    // Collapse negative zero so -0.0 and 0.0 hash identically.
+    if (x == 0.0f) x = 0.0f;
+    if (y == 0.0f) y = 0.0f;
+    if (z == 0.0f) z = 0.0f;
+
+    const std::uint64_t key = pack_position(x, y, z);
+    auto it = position_index_.find(key);
+    if (it != position_index_.end() && vertices_[it->second].alive) {
+        const auto& p = vertices_[it->second].pos;
+        if (p[0] == x && p[1] == y && p[2] == z) {
+            return it->second;
+        }
+        // Hash collision on a different float triple; fall through to allocate.
+    }
+    const std::uint32_t vid = static_cast<std::uint32_t>(vertices_.size());
+    vertices_.push_back(Vertex{{x, y, z}, INVALID_ID, true});
+    position_index_[key] = vid;
+    dirty_ = true;
+    return vid;
 }
 
 std::uint32_t HalfEdgeMesh::add_halfedge_pair(std::uint32_t, std::uint32_t) {
