@@ -130,7 +130,41 @@ class Scene:
         self._dirty = True
         return fid
 
-    # --- Queries used by tools / snap engine ------------------------------
+    def clear(self) -> None:
+        """Reset the scene to empty. Renderer will re-upload empty buffers."""
+        self._vertices.clear()
+        self._edges.clear()
+        self._faces.clear()
+        self._next_vertex_id = 0
+        self._next_edge_id = 0
+        self._next_face_id = 0
+        self._position_index.clear()
+        self._edge_index.clear()
+        self._dirty = True
+
+    # --- Lifecycle (renderer sync) ----------------------------------------
+
+    def mark_clean(self) -> None:
+        """Renderer calls this after consuming the current buffers."""
+        self._dirty = False
+
+    # --- Queries ----------------------------------------------------------
+
+    @property
+    def dirty(self) -> bool:
+        return self._dirty
+
+    def vertex(self, vid: int) -> Vertex:
+        return self._vertices[vid]
+
+    def vertices_iter(self) -> Iterable[Vertex]:
+        return self._vertices.values()
+
+    def edges_iter(self) -> Iterable[Edge]:
+        return self._edges.values()
+
+    def faces_iter(self) -> Iterable[Face]:
+        return self._faces.values()
 
     def find_vertex_near(self, world_xyz: np.ndarray, tolerance: float) -> int | None:
         """Return the ID of the vertex closest to `world_xyz` within `tolerance`.
@@ -184,37 +218,3 @@ class Scene:
                 normals[row + 2] = f.plane_normal
                 row += 3
         return positions, normals
-
-    def clear(self) -> None:
-        """Reset the scene to empty. Renderer will re-upload empty buffers."""
-        self._vertices.clear()
-        self._edges.clear()
-        self._faces.clear()
-        self._next_vertex_id = 0
-        self._next_edge_id = 0
-        self._next_face_id = 0
-        self._position_index.clear()
-        self._edge_index.clear()
-        self._dirty = True
-
-    def mark_clean(self) -> None:
-        """Renderer calls this after consuming the current buffers."""
-        self._dirty = False
-
-    # --- Queries ----------------------------------------------------------
-
-    @property
-    def dirty(self) -> bool:
-        return self._dirty
-
-    def vertex(self, vid: int) -> Vertex:
-        return self._vertices[vid]
-
-    def vertices_iter(self) -> Iterable[Vertex]:
-        return self._vertices.values()
-
-    def edges_iter(self) -> Iterable[Edge]:
-        return self._edges.values()
-
-    def faces_iter(self) -> Iterable[Face]:
-        return self._faces.values()
