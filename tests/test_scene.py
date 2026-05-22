@@ -174,6 +174,7 @@ def test_add_edge_returns_new_id():
     v1 = s.add_vertex(np.array([1.0, 0.0, 0.0], dtype=np.float32))
     e = s.add_edge(v0, v1)
     assert isinstance(e, int)
+    assert e == 0  # first edge in a fresh scene starts at 0
 
 
 def test_add_edge_is_idempotent_unordered():
@@ -207,3 +208,16 @@ def test_add_edge_canonicalises_endpoints():
     assert e.id == eid
     assert e.v1_id == min(v0, v1)
     assert e.v2_id == max(v0, v1)
+
+
+def test_add_edge_rejects_unknown_vertex_ids():
+    from pluton.scene import Scene
+
+    s = Scene()
+    v0 = s.add_vertex(np.array([0.0, 0.0, 0.0], dtype=np.float32))
+    with pytest.raises(KeyError):
+        s.add_edge(v0, 999)  # 999 doesn't exist
+    with pytest.raises(KeyError):
+        s.add_edge(999, v0)  # both directions
+    # No edge should have been added.
+    assert len(list(s.edges_iter())) == 0

@@ -65,8 +65,13 @@ class Scene:
 
         Idempotent on the unordered pair: ``add_edge(a, b)`` and
         ``add_edge(b, a)`` return the same edge ID. Rejects self-loops with
-        ValueError — tools should never request one.
+        ValueError — tools should never request one. Rejects edges referencing
+        unknown vertex IDs with KeyError so topology stays coherent.
         """
+        if v1_id not in self._vertices:
+            raise KeyError(f"add_edge: unknown v1_id={v1_id}")
+        if v2_id not in self._vertices:
+            raise KeyError(f"add_edge: unknown v2_id={v2_id}")
         if v1_id == v2_id:
             raise ValueError(f"self-loop edge requested at vertex {v1_id}")
         a, b = (v1_id, v2_id) if v1_id < v2_id else (v2_id, v1_id)
