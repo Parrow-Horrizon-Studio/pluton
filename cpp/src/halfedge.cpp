@@ -134,11 +134,37 @@ std::uint32_t HalfEdgeMesh::add_face_from_loop(const std::vector<std::uint32_t>&
     return f_id;
 }
 
-void HalfEdgeMesh::remove_vertex(std::uint32_t) {
-    throw std::runtime_error("HalfEdgeMesh::remove_vertex not implemented yet");
+void HalfEdgeMesh::remove_edge(std::uint32_t e_id) {
+    if (!edge_is_live(e_id)) {
+        throw std::out_of_range("HalfEdgeMesh::remove_edge: edge " + std::to_string(e_id) + " is not live");
+    }
+    const std::uint32_t he_a = e_id * 2;
+    const std::uint32_t he_b = he_a + 1;
+    if (halfedges_[he_a].face != INVALID_ID || halfedges_[he_b].face != INVALID_ID) {
+        throw std::invalid_argument("HalfEdgeMesh::remove_edge: edge " + std::to_string(e_id) + " still bordered by a face");
+    }
+    const std::uint32_t v_min = halfedges_[he_a].origin;
+    const std::uint32_t v_max = halfedges_[he_b].origin;
+    edge_index_.erase(pack_pair(v_min, v_max));
+    halfedges_[he_a].alive = false;
+    halfedges_[he_b].alive = false;
+    dirty_ = true;
 }
-void HalfEdgeMesh::remove_edge(std::uint32_t) {
-    throw std::runtime_error("HalfEdgeMesh::remove_edge not implemented yet");
+
+void HalfEdgeMesh::remove_vertex(std::uint32_t v_id) {
+    if (!vertex_is_live(v_id)) {
+        throw std::out_of_range("HalfEdgeMesh::remove_vertex: vertex " + std::to_string(v_id) + " is not live");
+    }
+    // Scan live half-edges; reject if any has origin == v_id.
+    for (const auto& he : halfedges_) {
+        if (he.alive && he.origin == v_id) {
+            throw std::invalid_argument("HalfEdgeMesh::remove_vertex: vertex " + std::to_string(v_id) + " still has incident edges");
+        }
+    }
+    const auto& v = vertices_[v_id];
+    position_index_.erase(pack_position(v.pos[0], v.pos[1], v.pos[2]));
+    vertices_[v_id].alive = false;
+    dirty_ = true;
 }
 void HalfEdgeMesh::remove_face(std::uint32_t f_id) {
     if (!face_is_live(f_id)) {

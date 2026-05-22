@@ -202,3 +202,52 @@ TEST(HalfEdgeMeshTest, RemoveFaceAlreadyDeadThrows) {
     m.remove_face(f);
     EXPECT_THROW(m.remove_face(f), std::out_of_range);
 }
+
+TEST(HalfEdgeMeshTest, RemoveEdgeRejectsIfFaceUsesIt) {
+    pluton::HalfEdgeMesh m;
+    auto v0 = m.add_vertex(0.0f, 0.0f, 0.0f);
+    auto v1 = m.add_vertex(1.0f, 0.0f, 0.0f);
+    auto v2 = m.add_vertex(0.0f, 1.0f, 0.0f);
+    m.add_halfedge_pair(v0, v1);
+    m.add_halfedge_pair(v1, v2);
+    m.add_halfedge_pair(v2, v0);
+    m.add_face_from_loop({v0, v1, v2}, {0, 1, 2});
+    EXPECT_THROW(m.remove_edge(0u), std::invalid_argument);
+}
+
+TEST(HalfEdgeMeshTest, RemoveEdgeAfterFaceWorks) {
+    pluton::HalfEdgeMesh m;
+    auto v0 = m.add_vertex(0.0f, 0.0f, 0.0f);
+    auto v1 = m.add_vertex(1.0f, 0.0f, 0.0f);
+    m.add_halfedge_pair(v0, v1);
+    m.remove_edge(0u);
+    EXPECT_FALSE(m.edge_is_live(0u));
+}
+
+TEST(HalfEdgeMeshTest, RemoveEdgeAlreadyDeadThrows) {
+    pluton::HalfEdgeMesh m;
+    auto v0 = m.add_vertex(0.0f, 0.0f, 0.0f);
+    auto v1 = m.add_vertex(1.0f, 0.0f, 0.0f);
+    m.add_halfedge_pair(v0, v1);
+    m.remove_edge(0u);
+    EXPECT_THROW(m.remove_edge(0u), std::out_of_range);
+}
+
+TEST(HalfEdgeMeshTest, RemoveVertexRejectsIfEdgeUsesIt) {
+    pluton::HalfEdgeMesh m;
+    auto v0 = m.add_vertex(0.0f, 0.0f, 0.0f);
+    auto v1 = m.add_vertex(1.0f, 0.0f, 0.0f);
+    m.add_halfedge_pair(v0, v1);
+    EXPECT_THROW(m.remove_vertex(v0), std::invalid_argument);
+}
+
+TEST(HalfEdgeMeshTest, RemoveVertexAfterEdgeWorks) {
+    pluton::HalfEdgeMesh m;
+    auto v0 = m.add_vertex(0.0f, 0.0f, 0.0f);
+    auto v1 = m.add_vertex(1.0f, 0.0f, 0.0f);
+    m.add_halfedge_pair(v0, v1);
+    m.remove_edge(0u);
+    m.remove_vertex(v0);
+    EXPECT_FALSE(m.vertex_is_live(v0));
+    EXPECT_TRUE(m.vertex_is_live(v1));
+}
