@@ -140,8 +140,24 @@ void HalfEdgeMesh::remove_vertex(std::uint32_t) {
 void HalfEdgeMesh::remove_edge(std::uint32_t) {
     throw std::runtime_error("HalfEdgeMesh::remove_edge not implemented yet");
 }
-void HalfEdgeMesh::remove_face(std::uint32_t) {
-    throw std::runtime_error("HalfEdgeMesh::remove_face not implemented yet");
+void HalfEdgeMesh::remove_face(std::uint32_t f_id) {
+    if (!face_is_live(f_id)) {
+        throw std::out_of_range("HalfEdgeMesh::remove_face: face " + std::to_string(f_id) + " is not live");
+    }
+    // Walk the boundary half-edge cycle and clear face pointers.
+    Face& f = faces_[f_id];
+    std::uint32_t he = f.boundary_he;
+    if (he != INVALID_ID) {
+        const std::uint32_t start = he;
+        do {
+            halfedges_[he].face = INVALID_ID;
+            he = halfedges_[he].next;
+            if (he == INVALID_ID) break;  // defensive: malformed cycle
+        } while (he != start);
+    }
+    f.alive = false;
+    f.boundary_he = INVALID_ID;
+    dirty_ = true;
 }
 
 void HalfEdgeMesh::restore_vertex(std::uint32_t, float, float, float) {

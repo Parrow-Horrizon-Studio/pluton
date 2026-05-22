@@ -154,3 +154,51 @@ TEST(HalfEdgeMeshTest, AddFaceFromLoopSetsHalfedgeFacePointers) {
         EXPECT_TRUE(m.halfedge_face(he_a) == pluton::HalfEdgeMesh::INVALID_ID || m.halfedge_face(he_b) == pluton::HalfEdgeMesh::INVALID_ID);
     }
 }
+
+TEST(HalfEdgeMeshTest, RemoveFaceTombstonesSlot) {
+    pluton::HalfEdgeMesh m;
+    auto v0 = m.add_vertex(0.0f, 0.0f, 0.0f);
+    auto v1 = m.add_vertex(1.0f, 0.0f, 0.0f);
+    auto v2 = m.add_vertex(0.0f, 1.0f, 0.0f);
+    m.add_halfedge_pair(v0, v1);
+    m.add_halfedge_pair(v1, v2);
+    m.add_halfedge_pair(v2, v0);
+    auto f = m.add_face_from_loop({v0, v1, v2}, {static_cast<std::int32_t>(v0), static_cast<std::int32_t>(v1), static_cast<std::int32_t>(v2)});
+    EXPECT_TRUE(m.face_is_live(f));
+
+    m.remove_face(f);
+    EXPECT_FALSE(m.face_is_live(f));
+
+    // Vertices and edges stay alive.
+    EXPECT_TRUE(m.vertex_is_live(v0));
+    EXPECT_TRUE(m.edge_is_live(0u));
+}
+
+TEST(HalfEdgeMeshTest, RemoveFaceClearsHalfedgeFacePointers) {
+    pluton::HalfEdgeMesh m;
+    auto v0 = m.add_vertex(0.0f, 0.0f, 0.0f);
+    auto v1 = m.add_vertex(1.0f, 0.0f, 0.0f);
+    auto v2 = m.add_vertex(0.0f, 1.0f, 0.0f);
+    m.add_halfedge_pair(v0, v1);
+    m.add_halfedge_pair(v1, v2);
+    m.add_halfedge_pair(v2, v0);
+    auto f = m.add_face_from_loop({v0, v1, v2}, {0, 1, 2});
+
+    m.remove_face(f);
+    for (std::uint32_t he = 0; he < m.halfedge_slab_size(); ++he) {
+        EXPECT_EQ(m.halfedge_face(he), pluton::HalfEdgeMesh::INVALID_ID);
+    }
+}
+
+TEST(HalfEdgeMeshTest, RemoveFaceAlreadyDeadThrows) {
+    pluton::HalfEdgeMesh m;
+    auto v0 = m.add_vertex(0.0f, 0.0f, 0.0f);
+    auto v1 = m.add_vertex(1.0f, 0.0f, 0.0f);
+    auto v2 = m.add_vertex(0.0f, 1.0f, 0.0f);
+    m.add_halfedge_pair(v0, v1);
+    m.add_halfedge_pair(v1, v2);
+    m.add_halfedge_pair(v2, v0);
+    auto f = m.add_face_from_loop({v0, v1, v2}, {0, 1, 2});
+    m.remove_face(f);
+    EXPECT_THROW(m.remove_face(f), std::out_of_range);
+}
