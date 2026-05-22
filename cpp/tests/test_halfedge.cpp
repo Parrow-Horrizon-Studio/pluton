@@ -304,3 +304,39 @@ TEST(HalfEdgeMeshTest, RestoreFaceRoundTrips) {
     EXPECT_TRUE(m.face_is_live(f));
     EXPECT_EQ(m.face_loop_vertices(f), std::vector<std::uint32_t>({v0, v1, v2}));
 }
+
+TEST(HalfEdgeMeshTest, NextLiveVertexSkipsTombstones) {
+    pluton::HalfEdgeMesh m;
+    auto v0 = m.add_vertex(0.0f, 0.0f, 0.0f);
+    auto v1 = m.add_vertex(1.0f, 0.0f, 0.0f);
+    auto v2 = m.add_vertex(2.0f, 0.0f, 0.0f);
+    EXPECT_EQ(m.next_live_vertex(0), v0);
+    EXPECT_EQ(m.next_live_vertex(v0 + 1), v1);
+    EXPECT_EQ(m.next_live_vertex(v1 + 1), v2);
+
+    m.remove_vertex(v1);
+    EXPECT_EQ(m.next_live_vertex(0), v0);
+    EXPECT_EQ(m.next_live_vertex(v0 + 1), v2);   // skipped v1
+    EXPECT_EQ(m.next_live_vertex(v2 + 1), pluton::HalfEdgeMesh::INVALID_ID);
+}
+
+TEST(HalfEdgeMeshTest, ClearEmptiesEverythingAndMarksDirty) {
+    pluton::HalfEdgeMesh m;
+    m.add_vertex(0.0f, 0.0f, 0.0f);
+    m.add_vertex(1.0f, 0.0f, 0.0f);
+    m.mark_clean();
+    EXPECT_FALSE(m.is_dirty());
+
+    m.clear();
+    EXPECT_TRUE(m.is_dirty());
+    EXPECT_EQ(m.vertex_slab_size(), 0u);
+    EXPECT_EQ(m.next_live_vertex(0), pluton::HalfEdgeMesh::INVALID_ID);
+}
+
+TEST(HalfEdgeMeshTest, MarkCleanClearsDirty) {
+    pluton::HalfEdgeMesh m;
+    m.add_vertex(0.0f, 0.0f, 0.0f);
+    EXPECT_TRUE(m.is_dirty());
+    m.mark_clean();
+    EXPECT_FALSE(m.is_dirty());
+}
