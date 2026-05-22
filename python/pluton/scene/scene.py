@@ -14,10 +14,10 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 
+from pluton.scene.edge import Edge
 from pluton.scene.vertex import Vertex
 
 if TYPE_CHECKING:
-    from pluton.scene.edge import Edge
     from pluton.scene.face import Face
 
 
@@ -33,6 +33,7 @@ class Scene:
         self._next_face_id = 0
         # Maps position.tobytes() -> vertex_id for idempotent add_vertex.
         self._position_index: dict[bytes, int] = {}
+        self._edge_index: dict[tuple[int, int], int] = {}
         self._dirty: bool = False
 
     # --- Mutators ---------------------------------------------------------
@@ -59,6 +60,27 @@ class Scene:
         self._dirty = True
         return vid
 
+    def add_edge(self, v1_id: int, v2_id: int) -> int:
+        """Insert an undirected edge between two existing vertices.
+
+        Idempotent on the unordered pair: ``add_edge(a, b)`` and
+        ``add_edge(b, a)`` return the same edge ID. Rejects self-loops with
+        ValueError — tools should never request one.
+        """
+        if v1_id == v2_id:
+            raise ValueError(f"self-loop edge requested at vertex {v1_id}")
+        a, b = (v1_id, v2_id) if v1_id < v2_id else (v2_id, v1_id)
+        key = (a, b)
+        existing = self._edge_index.get(key)
+        if existing is not None:
+            return existing
+        eid = self._next_edge_id
+        self._next_edge_id += 1
+        self._edges[eid] = Edge(id=eid, v1_id=a, v2_id=b)
+        self._edge_index[key] = eid
+        self._dirty = True
+        return eid
+
     def clear(self) -> None:
         """Reset the scene to empty. Renderer will re-upload empty buffers."""
         self._vertices.clear()
@@ -68,6 +90,7 @@ class Scene:
         self._next_edge_id = 0
         self._next_face_id = 0
         self._position_index.clear()
+        self._edge_index.clear()
         self._dirty = True
 
     def mark_clean(self) -> None:

@@ -159,3 +159,51 @@ def test_add_vertex_collapses_negative_zero():
     v1 = s.add_vertex(np.array([-0.0, 0.0, 0.0], dtype=np.float32))
     assert v0 == v1
     assert len(list(s.vertices_iter())) == 1
+
+
+# ---------------------------------------------------------------------------
+# add_edge tests (Task 4)
+# ---------------------------------------------------------------------------
+
+
+def test_add_edge_returns_new_id():
+    from pluton.scene import Scene
+
+    s = Scene()
+    v0 = s.add_vertex(np.array([0.0, 0.0, 0.0], dtype=np.float32))
+    v1 = s.add_vertex(np.array([1.0, 0.0, 0.0], dtype=np.float32))
+    e = s.add_edge(v0, v1)
+    assert isinstance(e, int)
+
+
+def test_add_edge_is_idempotent_unordered():
+    from pluton.scene import Scene
+
+    s = Scene()
+    v0 = s.add_vertex(np.array([0.0, 0.0, 0.0], dtype=np.float32))
+    v1 = s.add_vertex(np.array([1.0, 0.0, 0.0], dtype=np.float32))
+    a = s.add_edge(v0, v1)
+    b = s.add_edge(v1, v0)  # swapped order
+    assert a == b
+
+
+def test_add_edge_rejects_self_loop():
+    from pluton.scene import Scene
+
+    s = Scene()
+    v0 = s.add_vertex(np.array([0.0, 0.0, 0.0], dtype=np.float32))
+    with pytest.raises(ValueError):
+        s.add_edge(v0, v0)
+
+
+def test_add_edge_canonicalises_endpoints():
+    from pluton.scene import Scene
+
+    s = Scene()
+    v0 = s.add_vertex(np.array([0.0, 0.0, 0.0], dtype=np.float32))
+    v1 = s.add_vertex(np.array([1.0, 0.0, 0.0], dtype=np.float32))
+    eid = s.add_edge(v1, v0)
+    e = next(iter(s.edges_iter()))
+    assert e.id == eid
+    assert e.v1_id == min(v0, v1)
+    assert e.v2_id == max(v0, v1)
