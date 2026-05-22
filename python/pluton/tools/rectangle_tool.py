@@ -12,6 +12,12 @@ import numpy as np
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QKeyEvent, QMouseEvent
 
+from pluton.commands import CompositeCommand
+from pluton.commands.scene_commands import (
+    AddEdgeCommand,
+    AddFaceCommand,
+    AddVertexCommand,
+)
 from pluton.tools.tool import Tool, ToolContext, ToolOverlay
 
 
@@ -46,9 +52,12 @@ class RectangleTool(Tool):
         self._snap_marker_pos: np.ndarray | None = None
         self._snap_marker_color: tuple[float, float, float] = _NEUTRAL_COLOR
         self._snap_marker_kind: int = 0
+        self._composite: CompositeCommand | None = None
+        self._command_stack = None  # populated in activate()
 
     def activate(self, ctx: ToolContext) -> None:
         self._scene = ctx.scene  # type: ignore[assignment]
+        self._command_stack = ctx.command_stack
         self._reset_gesture()
 
     def deactivate(self) -> None:
@@ -88,21 +97,39 @@ class RectangleTool(Tool):
 
         x0, y0 = float(self._first_corner[0]), float(self._first_corner[1])
         x1, y1 = float(second[0]), float(second[1])
+
+        composite = CompositeCommand(name="Draw Rectangle")
         s = self._scene  # type: ignore[assignment]
-        v0 = s.add_vertex(np.array([x0, y0, 0.0], dtype=np.float32))
-        v1 = s.add_vertex(np.array([x1, y0, 0.0], dtype=np.float32))
-        v2 = s.add_vertex(np.array([x1, y1, 0.0], dtype=np.float32))
-        v3 = s.add_vertex(np.array([x0, y1, 0.0], dtype=np.float32))
-        s.add_edge(v0, v1)
-        s.add_edge(v1, v2)
-        s.add_edge(v2, v3)
-        s.add_edge(v3, v0)
-        s.add_face_from_loop((v0, v1, v2, v3))
+        v_cmds = [
+            AddVertexCommand(np.array([x0, y0, 0.0], dtype=np.float32)),
+            AddVertexCommand(np.array([x1, y0, 0.0], dtype=np.float32)),
+            AddVertexCommand(np.array([x1, y1, 0.0], dtype=np.float32)),
+            AddVertexCommand(np.array([x0, y1, 0.0], dtype=np.float32)),
+        ]
+        for c in v_cmds:
+            c.do(s)
+            composite.children.append(c)
+        vids = [c._vertex_id for c in v_cmds]  # type: ignore[attr-defined]
+        for a, b in [(0, 1), (1, 2), (2, 3), (3, 0)]:
+            e_cmd = AddEdgeCommand(vids[a], vids[b])
+            e_cmd.do(s)
+            composite.children.append(e_cmd)
+        f_cmd = AddFaceCommand(tuple(vids))
+        f_cmd.do(s)
+        composite.children.append(f_cmd)
+
+        if self._command_stack is not None:
+            self._command_stack.push_executed(composite)
         self._reset_gesture()
 
     def on_key_press(self, event: QKeyEvent) -> None:
-        if event.key() == Qt.Key.Key_Escape:
-            self._reset_gesture()
+        if event.key() != Qt.Key.Key_Escape:
+            return
+        if self._composite is not None:
+            # We haven't built a composite mid-drag in Rectangle (it commits
+            # atomically on second click), so there is nothing to roll back.
+            self._composite = None
+        self._reset_gesture()
 
     def overlay(self) -> ToolOverlay:
         if self._state == _State.DRAGGING and self._first_corner is not None and self._preview_corner is not None:
@@ -143,3 +170,4 @@ class RectangleTool(Tool):
         self._preview_corner = None
         self._snap_marker_pos = None
         self._snap_marker_kind = 0
+        self._composite = None

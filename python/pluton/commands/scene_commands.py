@@ -17,7 +17,12 @@ class AddVertexCommand(Command):
         self._vertex_id: int | None = None
 
     def do(self, scene) -> None:  # noqa: ANN001
-        self._vertex_id = scene.add_vertex(self._position)
+        if self._vertex_id is None:
+            # First execution — allocate a new slot.
+            self._vertex_id = scene.add_vertex(self._position)
+        else:
+            # Redo — restore the previously-allocated slot to preserve the ID.
+            scene.restore_vertex(self._vertex_id, self._position)
 
     def undo(self, scene) -> None:  # noqa: ANN001
         assert self._vertex_id is not None, "AddVertexCommand.undo before do"
@@ -32,7 +37,12 @@ class AddEdgeCommand(Command):
         self._edge_id: int | None = None
 
     def do(self, scene) -> None:  # noqa: ANN001
-        self._edge_id = scene.add_edge(self._v1, self._v2)
+        if self._edge_id is None:
+            # First execution — allocate a new slot.
+            self._edge_id = scene.add_edge(self._v1, self._v2)
+        else:
+            # Redo — restore the previously-allocated slot to preserve the ID.
+            scene.restore_edge(self._edge_id, self._v1, self._v2)
 
     def undo(self, scene) -> None:  # noqa: ANN001
         assert self._edge_id is not None, "AddEdgeCommand.undo before do"
@@ -47,7 +57,12 @@ class AddFaceCommand(Command):
         self._face_id: int | None = None
 
     def do(self, scene) -> None:  # noqa: ANN001
-        self._face_id = scene.add_face_from_loop(self._loop)
+        if self._face_id is None:
+            # First execution — allocate a new slot.
+            self._face_id = scene.add_face_from_loop(self._loop)
+        else:
+            # Redo — restore the previously-allocated slot to preserve the ID.
+            scene.restore_face(self._face_id, self._loop)
 
     def undo(self, scene) -> None:  # noqa: ANN001
         assert self._face_id is not None, "AddFaceCommand.undo before do"

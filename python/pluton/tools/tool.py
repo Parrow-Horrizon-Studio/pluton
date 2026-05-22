@@ -16,9 +16,10 @@ from PySide6.QtGui import QKeyEvent, QMouseEvent
 
 @dataclass(frozen=True, slots=True)
 class ToolContext:
-    """Handed to Tool.activate(); gives the tool a handle to the live Scene."""
+    """Handed to Tool.activate(); gives the tool a handle to the live Scene and CommandStack."""
 
-    scene: object  # forward-typed to avoid circular import; really a pluton.scene.Scene
+    scene: object
+    command_stack: object = None  # M3a-introduced — pluton.commands.CommandStack
 
 
 @dataclass(frozen=True, slots=True)
