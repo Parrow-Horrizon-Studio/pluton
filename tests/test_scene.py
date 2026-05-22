@@ -249,6 +249,8 @@ def test_add_face_from_loop_creates_face_and_triangulates():
     np.testing.assert_allclose(f.plane_normal, np.array([0.0, 0.0, 1.0], dtype=np.float32))
     # Square triangulates to 2 triangles
     assert f.triangles.shape == (2, 3)
+    # And every triangle vertex must be a known global vertex ID (not a leaked local index).
+    assert set(f.triangles.flatten().tolist()).issubset({v0, v1, v2, v3})
 
 
 def test_add_face_from_loop_rejects_fewer_than_three_vertices():
@@ -305,3 +307,97 @@ def test_add_face_from_loop_accepts_list_and_stores_as_tuple():
     f = next(iter(s.faces_iter()))
     assert isinstance(f.loop_vertex_ids, tuple)
     assert f.loop_vertex_ids == (v0, v1, v2)
+
+
+# ---------------------------------------------------------------------------
+# Scene helper tests (Task 6)
+# ---------------------------------------------------------------------------
+
+
+def test_find_vertex_near_returns_closest_within_tolerance():
+    from pluton.scene import Scene
+
+    s = Scene()
+    v0 = s.add_vertex(np.array([0.0, 0.0, 0.0], dtype=np.float32))
+    v1 = s.add_vertex(np.array([5.0, 0.0, 0.0], dtype=np.float32))
+
+    near_v0 = s.find_vertex_near(np.array([0.1, 0.0, 0.0], dtype=np.float32), tolerance=0.5)
+    assert near_v0 == v0
+
+    near_v1 = s.find_vertex_near(np.array([5.05, 0.0, 0.0], dtype=np.float32), tolerance=0.5)
+    assert near_v1 == v1
+
+
+def test_find_vertex_near_returns_none_when_outside_tolerance():
+    from pluton.scene import Scene
+
+    s = Scene()
+    s.add_vertex(np.array([0.0, 0.0, 0.0], dtype=np.float32))
+
+    assert s.find_vertex_near(np.array([10.0, 0.0, 0.0], dtype=np.float32), tolerance=0.5) is None
+
+
+def test_find_vertex_near_picks_closest_when_multiple_within_tolerance():
+    from pluton.scene import Scene
+
+    s = Scene()
+    v_far = s.add_vertex(np.array([0.3, 0.0, 0.0], dtype=np.float32))
+    v_near = s.add_vertex(np.array([0.05, 0.0, 0.0], dtype=np.float32))
+
+    # Cursor at origin — both within tolerance=1.0, but v_near is closer.
+    got = s.find_vertex_near(np.array([0.0, 0.0, 0.0], dtype=np.float32), tolerance=1.0)
+    assert got == v_near
+
+
+def test_edge_line_buffer_shape():
+    from pluton.scene import Scene
+
+    s = Scene()
+    v0 = s.add_vertex(np.array([0.0, 0.0, 0.0], dtype=np.float32))
+    v1 = s.add_vertex(np.array([1.0, 0.0, 0.0], dtype=np.float32))
+    v2 = s.add_vertex(np.array([2.0, 0.0, 0.0], dtype=np.float32))
+    s.add_edge(v0, v1)
+    s.add_edge(v1, v2)
+
+    buf = s.edge_line_buffer()
+    assert buf.shape == (4, 3)  # 2 edges * 2 endpoints
+    assert buf.dtype == np.float32
+
+
+def test_edge_line_buffer_is_empty_when_no_edges():
+    from pluton.scene import Scene
+
+    s = Scene()
+    s.add_vertex(np.array([0.0, 0.0, 0.0], dtype=np.float32))  # vertex but no edge
+
+    buf = s.edge_line_buffer()
+    assert buf.shape == (0, 3)
+    assert buf.dtype == np.float32
+
+
+def test_face_triangle_buffer_shape():
+    from pluton.scene import Scene
+
+    s = Scene()
+    v0 = s.add_vertex(np.array([0.0, 0.0, 0.0], dtype=np.float32))
+    v1 = s.add_vertex(np.array([1.0, 0.0, 0.0], dtype=np.float32))
+    v2 = s.add_vertex(np.array([1.0, 1.0, 0.0], dtype=np.float32))
+    v3 = s.add_vertex(np.array([0.0, 1.0, 0.0], dtype=np.float32))
+    s.add_face_from_loop((v0, v1, v2, v3))
+
+    positions, normals = s.face_triangle_buffer()
+    # 2 triangles * 3 vertices = 6 vertices
+    assert positions.shape == (6, 3)
+    assert normals.shape == (6, 3)
+    # All normals should be +Z for a ground-plane face
+    np.testing.assert_allclose(normals, np.tile([0.0, 0.0, 1.0], (6, 1)).astype(np.float32))
+
+
+def test_face_triangle_buffer_is_empty_when_no_faces():
+    from pluton.scene import Scene
+
+    s = Scene()
+    s.add_vertex(np.array([0.0, 0.0, 0.0], dtype=np.float32))
+    positions, normals = s.face_triangle_buffer()
+    assert positions.shape == (0, 3)
+    assert normals.shape == (0, 3)

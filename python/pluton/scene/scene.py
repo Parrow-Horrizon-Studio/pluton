@@ -130,6 +130,61 @@ class Scene:
         self._dirty = True
         return fid
 
+    # --- Queries used by tools / snap engine ------------------------------
+
+    def find_vertex_near(self, world_xyz: np.ndarray, tolerance: float) -> int | None:
+        """Return the ID of the vertex closest to `world_xyz` within `tolerance`.
+
+        Linear scan over all vertices. Fine for M2 (small scenes). A spatial
+        index lands in M10 if profiling demands it.
+        """
+        best_id: int | None = None
+        best_d2 = tolerance * tolerance
+        for vid, v in self._vertices.items():
+            d = v.position - world_xyz
+            d2 = float(d[0] * d[0] + d[1] * d[1] + d[2] * d[2])
+            if d2 <= best_d2:
+                best_d2 = d2
+                best_id = vid
+        return best_id
+
+    # --- Render-buffer projection -----------------------------------------
+
+    def edge_line_buffer(self) -> np.ndarray:
+        """Flat (2*E, 3) float32 array — line-list endpoints for the GL VBO."""
+        if not self._edges:
+            return np.zeros((0, 3), dtype=np.float32)
+        out = np.empty((2 * len(self._edges), 3), dtype=np.float32)
+        for i, e in enumerate(self._edges.values()):
+            out[2 * i + 0] = self._vertices[e.v1_id].position
+            out[2 * i + 1] = self._vertices[e.v2_id].position
+        return out
+
+    def face_triangle_buffer(self) -> tuple[np.ndarray, np.ndarray]:
+        """Flat (3*T, 3) float32 (positions, normals) — triangle-list for the GL VBO.
+
+        Each triangle is expanded inline. Normals are flat — every vertex of a
+        triangle takes the face's `plane_normal` — so the Phong shader from M1
+        renders the face with the same flat shading as the cube did.
+        """
+        if not self._faces:
+            empty = np.zeros((0, 3), dtype=np.float32)
+            return empty, empty
+        total_tris = sum(int(f.triangles.shape[0]) for f in self._faces.values())
+        positions = np.empty((3 * total_tris, 3), dtype=np.float32)
+        normals = np.empty((3 * total_tris, 3), dtype=np.float32)
+        row = 0
+        for f in self._faces.values():
+            for tri in f.triangles:
+                positions[row + 0] = self._vertices[int(tri[0])].position
+                positions[row + 1] = self._vertices[int(tri[1])].position
+                positions[row + 2] = self._vertices[int(tri[2])].position
+                normals[row + 0] = f.plane_normal
+                normals[row + 1] = f.plane_normal
+                normals[row + 2] = f.plane_normal
+                row += 3
+        return positions, normals
+
     def clear(self) -> None:
         """Reset the scene to empty. Renderer will re-upload empty buffers."""
         self._vertices.clear()
