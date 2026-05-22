@@ -1,0 +1,140 @@
+"""Unit tests for the Line tool — three-branch click logic + ESC + < 3 close."""
+
+from __future__ import annotations
+
+import numpy as np
+
+
+def _endpoint_snap(world, vertex_id: int):
+    from pluton.viewport.snap_engine import SnapKind, SnapResult
+
+    return SnapResult(
+        kind=SnapKind.ENDPOINT,
+        world_position=np.array(world, dtype=np.float32),
+        axis=None,
+        vertex_id=vertex_id,
+        label="Endpoint",
+    )
+
+
+def _grid_snap(world):
+    from pluton.viewport.snap_engine import SnapKind, SnapResult
+
+    return SnapResult(
+        kind=SnapKind.GRID,
+        world_position=np.array(world, dtype=np.float32),
+        axis=None,
+        vertex_id=None,
+        label="Grid",
+    )
+
+
+def test_line_tool_first_click_adds_one_vertex():
+    from pluton.scene import Scene
+    from pluton.tools import ToolContext
+    from pluton.tools.line_tool import LineTool
+
+    scene = Scene()
+    tool = LineTool()
+    tool.activate(ToolContext(scene=scene))
+    tool.on_mouse_press(None, _grid_snap((1.0, 0.0, 0.0)))  # type: ignore[arg-type]
+
+    assert len(list(scene.vertices_iter())) == 1
+
+
+def test_line_tool_branch_3_new_vertex_creates_edge():
+    from pluton.scene import Scene
+    from pluton.tools import ToolContext
+    from pluton.tools.line_tool import LineTool
+
+    scene = Scene()
+    tool = LineTool()
+    tool.activate(ToolContext(scene=scene))
+    tool.on_mouse_press(None, _grid_snap((0.0, 0.0, 0.0)))  # type: ignore[arg-type]
+    tool.on_mouse_press(None, _grid_snap((1.0, 0.0, 0.0)))  # type: ignore[arg-type]
+
+    assert len(list(scene.vertices_iter())) == 2
+    assert len(list(scene.edges_iter())) == 1
+    assert len(list(scene.faces_iter())) == 0
+
+
+def test_line_tool_loop_close_creates_face():
+    from pluton.scene import Scene
+    from pluton.tools import ToolContext
+    from pluton.tools.line_tool import LineTool
+
+    scene = Scene()
+    tool = LineTool()
+    tool.activate(ToolContext(scene=scene))
+    # Click 1 — first vertex at (0,0,0).
+    tool.on_mouse_press(None, _grid_snap((0.0, 0.0, 0.0)))  # type: ignore[arg-type]
+    first_vid = next(iter(scene.vertices_iter())).id
+    # Clicks 2, 3 — extend the polyline.
+    tool.on_mouse_press(None, _grid_snap((2.0, 0.0, 0.0)))  # type: ignore[arg-type]
+    tool.on_mouse_press(None, _grid_snap((2.0, 2.0, 0.0)))  # type: ignore[arg-type]
+    # Click 4 — endpoint-snap onto the FIRST vertex → loop close.
+    tool.on_mouse_press(None, _endpoint_snap((0.0, 0.0, 0.0), vertex_id=first_vid))  # type: ignore[arg-type]
+
+    assert len(list(scene.vertices_iter())) == 3
+    assert len(list(scene.edges_iter())) == 3
+    assert len(list(scene.faces_iter())) == 1
+
+
+def test_line_tool_branch_2_extend_to_existing_vertex():
+    from pluton.scene import Scene
+    from pluton.tools import ToolContext
+    from pluton.tools.line_tool import LineTool
+
+    scene = Scene()
+    # Pre-existing vertex (e.g. drawn by a previous gesture or Rectangle).
+    pre_vid = scene.add_vertex(np.array([5.0, 0.0, 0.0], dtype=np.float32))
+
+    tool = LineTool()
+    tool.activate(ToolContext(scene=scene))
+    tool.on_mouse_press(None, _grid_snap((0.0, 0.0, 0.0)))  # type: ignore[arg-type]
+    tool.on_mouse_press(None, _endpoint_snap((5.0, 0.0, 0.0), vertex_id=pre_vid))  # type: ignore[arg-type]
+
+    # Only 2 vertices (the new one + the pre-existing one), 1 edge, no face.
+    assert len(list(scene.vertices_iter())) == 2
+    assert len(list(scene.edges_iter())) == 1
+    assert len(list(scene.faces_iter())) == 0
+
+
+def test_line_tool_close_with_fewer_than_three_vertices_ignored():
+    from pluton.scene import Scene
+    from pluton.tools import ToolContext
+    from pluton.tools.line_tool import LineTool
+
+    scene = Scene()
+    tool = LineTool()
+    tool.activate(ToolContext(scene=scene))
+    # Click 1 — first vertex at (0,0,0).
+    tool.on_mouse_press(None, _grid_snap((0.0, 0.0, 0.0)))  # type: ignore[arg-type]
+    first_vid = next(iter(scene.vertices_iter())).id
+    # Click 2 — endpoint snap back onto first vertex (only 1 vertex in gesture).
+    # Should be ignored — no face, no extra edge.
+    tool.on_mouse_press(None, _endpoint_snap((0.0, 0.0, 0.0), vertex_id=first_vid))  # type: ignore[arg-type]
+
+    assert len(list(scene.faces_iter())) == 0
+
+
+def test_line_tool_esc_cancels_visible_gesture():
+    from PySide6.QtCore import Qt
+    from PySide6.QtGui import QKeyEvent
+
+    from pluton.scene import Scene
+    from pluton.tools import ToolContext
+    from pluton.tools.line_tool import LineTool
+
+    scene = Scene()
+    tool = LineTool()
+    tool.activate(ToolContext(scene=scene))
+    tool.on_mouse_press(None, _grid_snap((0.0, 0.0, 0.0)))  # type: ignore[arg-type]
+    tool.on_mouse_press(None, _grid_snap((1.0, 0.0, 0.0)))  # type: ignore[arg-type]
+
+    ev = QKeyEvent(QKeyEvent.Type.KeyPress, Qt.Key.Key_Escape, Qt.KeyboardModifier.NoModifier)
+    tool.on_key_press(ev)
+
+    # Per spec §4.5 / §5.6: ESC clears the visible gesture state but does NOT
+    # un-add already-committed vertices/edges.
+    assert tool.overlay().rubber_band_segments.shape == (0, 3)
