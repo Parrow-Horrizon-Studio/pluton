@@ -153,6 +153,44 @@ def test_keyboard_r_activates_rectangle_tool(qtbot):
     assert window._tool_manager.active.name == "Rectangle"
 
 
+def test_esc_two_stage_cancel_then_deactivate(qtbot):
+    """First ESC cancels gesture; second ESC deactivates the tool entirely."""
+    from pluton.ui.main_window import MainWindow
+
+    window = MainWindow()
+    qtbot.addWidget(window)
+    window.show()
+    qtbot.waitExposed(window)
+    qtbot.wait(50)
+
+    # Activate the Line tool, start a gesture.
+    qtbot.keyClick(window, Qt.Key.Key_L)
+    assert window._tool_manager.active is not None
+    # Drive a first click via the active tool directly (skipping the mouse
+    # plumbing because the QOpenGLWidget doesn't render the offscreen ray).
+    from pluton.viewport.snap_engine import SnapKind, SnapResult
+
+    active = window._tool_manager.active
+    snap = SnapResult(
+        kind=SnapKind.GRID,
+        world_position=np.array([0.0, 0.0, 0.0], dtype=np.float32),
+        axis=None,
+        vertex_id=None,
+        label="Grid",
+    )
+    active.on_mouse_press(None, snap)  # type: ignore[arg-type]
+    assert active.has_active_gesture is True
+
+    # First ESC: cancels the gesture, tool stays active.
+    qtbot.keyClick(window, Qt.Key.Key_Escape)
+    assert window._tool_manager.active is not None  # tool still active
+    assert active.has_active_gesture is False       # gesture cleared
+
+    # Second ESC: deactivates the tool entirely.
+    qtbot.keyClick(window, Qt.Key.Key_Escape)
+    assert window._tool_manager.active is None      # no active tool
+
+
 def test_ctrl_n_clears_scene(qtbot):
     from pluton.ui.main_window import MainWindow
 

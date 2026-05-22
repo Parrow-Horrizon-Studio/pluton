@@ -118,6 +118,27 @@ def test_line_tool_close_with_fewer_than_three_vertices_ignored():
     assert len(list(scene.faces_iter())) == 0
 
 
+def test_line_tool_has_active_gesture_reflects_state():
+    from pluton.scene import Scene
+    from pluton.tools import ToolContext
+    from pluton.tools.line_tool import LineTool
+
+    scene = Scene()
+    tool = LineTool()
+    tool.activate(ToolContext(scene=scene))
+    assert tool.has_active_gesture is False
+
+    tool.on_mouse_press(None, _grid_snap((0.0, 0.0, 0.0)))  # type: ignore[arg-type]
+    assert tool.has_active_gesture is True
+
+    first_vid = next(iter(scene.vertices_iter())).id
+    tool.on_mouse_press(None, _grid_snap((2.0, 0.0, 0.0)))  # type: ignore[arg-type]
+    tool.on_mouse_press(None, _grid_snap((2.0, 2.0, 0.0)))  # type: ignore[arg-type]
+    # Close the loop — should reset gesture.
+    tool.on_mouse_press(None, _endpoint_snap((0.0, 0.0, 0.0), vertex_id=first_vid))  # type: ignore[arg-type]
+    assert tool.has_active_gesture is False
+
+
 def test_line_tool_esc_cancels_visible_gesture():
     from PySide6.QtCore import Qt
     from PySide6.QtGui import QKeyEvent

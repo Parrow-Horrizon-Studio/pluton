@@ -46,6 +46,10 @@ class FakeTool(Tool):
         )
 
     @property
+    def has_active_gesture(self) -> bool:
+        return False
+
+    @property
     def anchor_or_none(self) -> np.ndarray | None:
         return None
 

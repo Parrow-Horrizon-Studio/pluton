@@ -43,6 +43,16 @@ class Tool(ABC):
     @abstractmethod
     def shortcut(self) -> str: ...
 
+    @property
+    @abstractmethod
+    def has_active_gesture(self) -> bool:
+        """True if the tool is in the middle of a multi-click gesture.
+
+        MainWindow uses this to decide whether ESC should cancel the gesture
+        (forward to tool.on_key_press) or deactivate the tool entirely
+        (ToolManager.deactivate_current).
+        """
+
     @abstractmethod
     def activate(self, ctx: ToolContext) -> None: ...
 

@@ -129,6 +129,10 @@ class RectangleTool(Tool):
         )
 
     @property
+    def has_active_gesture(self) -> bool:
+        return self._state == _State.DRAGGING
+
+    @property
     def anchor_or_none(self) -> np.ndarray | None:
         return None  # Rectangle tool doesn't drive axis-lock
 

@@ -58,14 +58,26 @@ class MainWindow(QMainWindow):
             self._viewport.update()
 
     def _on_escape(self) -> None:
-        # Forward to active tool's on_key_press; if no tool, no-op.
+        """Two-stage ESC per spec §4.5.
+
+        - If the active tool has an in-progress gesture, forward ESC to it
+          (the tool cancels the gesture, stays active).
+        - Otherwise, deactivate the tool entirely (back to camera-only).
+        """
         active = self._tool_manager.active
         if active is None:
             return
-        from PySide6.QtGui import QKeyEvent
 
-        ev = QKeyEvent(QKeyEvent.Type.KeyPress, Qt.Key.Key_Escape, Qt.KeyboardModifier.NoModifier)
-        active.on_key_press(ev)
+        if active.has_active_gesture:
+            from PySide6.QtGui import QKeyEvent
+
+            ev = QKeyEvent(QKeyEvent.Type.KeyPress, Qt.Key.Key_Escape, Qt.KeyboardModifier.NoModifier)
+            active.on_key_press(ev)
+        else:
+            self._tool_manager.deactivate_current()
+            self._status_bar.set_tool("")
+            self._status_bar.set_snap("")
+
         self._viewport.update()
 
     def _on_clear_scene(self) -> None:

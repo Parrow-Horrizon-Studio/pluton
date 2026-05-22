@@ -72,6 +72,23 @@ def test_rectangle_tool_zero_area_drops_gesture():
     assert len(list(scene.faces_iter())) == 0
 
 
+def test_rectangle_tool_has_active_gesture_reflects_state():
+    from pluton.scene import Scene
+    from pluton.tools import ToolContext
+    from pluton.tools.rectangle_tool import RectangleTool
+
+    scene = Scene()
+    tool = RectangleTool()
+    tool.activate(ToolContext(scene=scene))
+    assert tool.has_active_gesture is False
+
+    tool.on_mouse_press(None, _snap_at((0.0, 0.0, 0.0)))  # type: ignore[arg-type]
+    assert tool.has_active_gesture is True
+
+    tool.on_mouse_press(None, _snap_at((1.0, 1.0, 0.0)))  # type: ignore[arg-type]  # commit
+    assert tool.has_active_gesture is False
+
+
 def test_rectangle_tool_esc_cancels_mid_drag():
     from PySide6.QtCore import Qt
     from PySide6.QtGui import QKeyEvent

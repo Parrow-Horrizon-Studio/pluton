@@ -167,6 +167,10 @@ class LineTool(Tool):
         )
 
     @property
+    def has_active_gesture(self) -> bool:
+        return self._state == _State.DRAWING
+
+    @property
     def anchor_or_none(self) -> np.ndarray | None:
         s = self._scene  # type: ignore[assignment]
         if self._state != _State.DRAWING or s is None or not self._gesture_vertex_ids:
