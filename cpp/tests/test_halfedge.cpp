@@ -340,3 +340,49 @@ TEST(HalfEdgeMeshTest, MarkCleanClearsDirty) {
     m.mark_clean();
     EXPECT_FALSE(m.is_dirty());
 }
+
+TEST(HalfEdgeMeshTest, EdgeLineBufferShape) {
+    pluton::HalfEdgeMesh m;
+    auto v0 = m.add_vertex(0.0f, 0.0f, 0.0f);
+    auto v1 = m.add_vertex(1.0f, 0.0f, 0.0f);
+    m.add_halfedge_pair(v0, v1);
+
+    const auto buf = m.edge_line_buffer();
+    ASSERT_EQ(buf.size(), 6u);  // 2 endpoints × 3 floats
+    EXPECT_FLOAT_EQ(buf[0], 0.0f); EXPECT_FLOAT_EQ(buf[1], 0.0f); EXPECT_FLOAT_EQ(buf[2], 0.0f);
+    EXPECT_FLOAT_EQ(buf[3], 1.0f); EXPECT_FLOAT_EQ(buf[4], 0.0f); EXPECT_FLOAT_EQ(buf[5], 0.0f);
+}
+
+TEST(HalfEdgeMeshTest, EdgeLineBufferSkipsTombstones) {
+    pluton::HalfEdgeMesh m;
+    auto v0 = m.add_vertex(0.0f, 0.0f, 0.0f);
+    auto v1 = m.add_vertex(1.0f, 0.0f, 0.0f);
+    auto v2 = m.add_vertex(2.0f, 0.0f, 0.0f);
+    m.add_halfedge_pair(v0, v1);
+    m.add_halfedge_pair(v1, v2);
+    m.remove_edge(0u);
+
+    const auto buf = m.edge_line_buffer();
+    EXPECT_EQ(buf.size(), 6u);  // only the live edge contributes
+}
+
+TEST(HalfEdgeMeshTest, FaceTriangleBufferShape) {
+    pluton::HalfEdgeMesh m;
+    auto v0 = m.add_vertex(0.0f, 0.0f, 0.0f);
+    auto v1 = m.add_vertex(1.0f, 0.0f, 0.0f);
+    auto v2 = m.add_vertex(0.0f, 1.0f, 0.0f);
+    m.add_halfedge_pair(v0, v1);
+    m.add_halfedge_pair(v1, v2);
+    m.add_halfedge_pair(v2, v0);
+    m.add_face_from_loop({v0, v1, v2}, {0, 1, 2});
+
+    auto [positions, normals] = m.face_triangle_buffer();
+    EXPECT_EQ(positions.size(), 9u);  // 1 triangle × 3 verts × 3 floats
+    EXPECT_EQ(normals.size(), 9u);
+    // Normal of every vertex is the face's +Z normal.
+    for (std::size_t i = 0; i + 2 < normals.size(); i += 3) {
+        EXPECT_FLOAT_EQ(normals[i + 0], 0.0f);
+        EXPECT_FLOAT_EQ(normals[i + 1], 0.0f);
+        EXPECT_FLOAT_EQ(normals[i + 2], 1.0f);
+    }
+}
