@@ -992,13 +992,17 @@ def test_ray_intersect_ground_for_centre_cursor():
 
 
 def test_ray_intersect_ground_returns_none_when_ray_parallel_or_above():
-    """Cursor placed so the ray goes upward (away from ground) yields None."""
+    """Cursor placed so the ray goes upward (away from ground) yields None.
+
+    Camera ABOVE the ground (z=5) looking further UP (target at z=10): the
+    ray direction has +dz, so the Z=0 intersection has negative t (behind
+    the camera). The method should return None per the spec §5.3 contract.
+    """
     from pluton.viewport.camera import Camera
 
     cam = Camera()
-    # Pose the camera below the ground looking up.
-    cam.position = np.array([0.0, 0.0, -5.0], dtype=np.float32)
-    cam.target = np.array([0.0, 0.0, 1.0], dtype=np.float32)
+    cam.position = np.array([0.0, 0.0, 5.0], dtype=np.float32)
+    cam.target = np.array([0.0, 0.0, 10.0], dtype=np.float32)
     cam.aspect = 1.0
     hit = cam.ray_intersect_ground(640.0, 400.0, 1280, 800)
     assert hit is None
