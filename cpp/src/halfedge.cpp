@@ -1,5 +1,6 @@
 #include "pluton/halfedge.h"
 
+#include <algorithm>
 #include <cstring>
 
 namespace pluton {
@@ -52,8 +53,31 @@ std::uint32_t HalfEdgeMesh::add_vertex(float x, float y, float z) {
     return vid;
 }
 
-std::uint32_t HalfEdgeMesh::add_halfedge_pair(std::uint32_t, std::uint32_t) {
-    throw std::runtime_error("HalfEdgeMesh::add_halfedge_pair not implemented yet");
+std::uint32_t HalfEdgeMesh::add_halfedge_pair(std::uint32_t v1_id, std::uint32_t v2_id) {
+    if (v1_id == v2_id) {
+        throw std::invalid_argument("HalfEdgeMesh::add_halfedge_pair: self-loop at vertex " + std::to_string(v1_id));
+    }
+    if (!vertex_is_live(v1_id)) {
+        throw std::out_of_range("HalfEdgeMesh::add_halfedge_pair: v1_id " + std::to_string(v1_id) + " is not live");
+    }
+    if (!vertex_is_live(v2_id)) {
+        throw std::out_of_range("HalfEdgeMesh::add_halfedge_pair: v2_id " + std::to_string(v2_id) + " is not live");
+    }
+    const std::uint32_t v_min = std::min(v1_id, v2_id);
+    const std::uint32_t v_max = std::max(v1_id, v2_id);
+    const std::uint64_t key = pack_pair(v_min, v_max);
+    auto it = edge_index_.find(key);
+    if (it != edge_index_.end() && edge_is_live(it->second)) {
+        return it->second;
+    }
+    const std::uint32_t he_a = static_cast<std::uint32_t>(halfedges_.size());
+    const std::uint32_t he_b = he_a + 1;
+    const std::uint32_t edge_id = he_a / 2;
+    halfedges_.push_back(HalfEdge{v_min, INVALID_ID, he_b, INVALID_ID, true});
+    halfedges_.push_back(HalfEdge{v_max, INVALID_ID, he_a, INVALID_ID, true});
+    edge_index_[key] = edge_id;
+    dirty_ = true;
+    return edge_id;
 }
 
 std::uint32_t HalfEdgeMesh::add_face_from_loop(const std::vector<std::uint32_t>&,
