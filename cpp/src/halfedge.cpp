@@ -186,16 +186,82 @@ void HalfEdgeMesh::remove_face(std::uint32_t f_id) {
     dirty_ = true;
 }
 
-void HalfEdgeMesh::restore_vertex(std::uint32_t, float, float, float) {
-    throw std::runtime_error("HalfEdgeMesh::restore_vertex not implemented yet");
+void HalfEdgeMesh::restore_vertex(std::uint32_t v_id, float x, float y, float z) {
+    if (v_id >= vertices_.size()) {
+        throw std::out_of_range("HalfEdgeMesh::restore_vertex: v_id " + std::to_string(v_id) + " out of range");
+    }
+    if (vertices_[v_id].alive) {
+        throw std::logic_error("HalfEdgeMesh::restore_vertex: slot " + std::to_string(v_id) + " is already live");
+    }
+    if (x == 0.0f) x = 0.0f;
+    if (y == 0.0f) y = 0.0f;
+    if (z == 0.0f) z = 0.0f;
+    vertices_[v_id].pos[0] = x;
+    vertices_[v_id].pos[1] = y;
+    vertices_[v_id].pos[2] = z;
+    vertices_[v_id].alive = true;
+    position_index_[pack_position(x, y, z)] = v_id;
+    dirty_ = true;
 }
-void HalfEdgeMesh::restore_edge(std::uint32_t, std::uint32_t, std::uint32_t) {
-    throw std::runtime_error("HalfEdgeMesh::restore_edge not implemented yet");
+
+void HalfEdgeMesh::restore_edge(std::uint32_t e_id, std::uint32_t v1_id, std::uint32_t v2_id) {
+    const std::uint32_t he_a = e_id * 2;
+    const std::uint32_t he_b = he_a + 1;
+    if (he_b >= halfedges_.size()) {
+        throw std::out_of_range("HalfEdgeMesh::restore_edge: e_id " + std::to_string(e_id) + " out of range");
+    }
+    if (halfedges_[he_a].alive || halfedges_[he_b].alive) {
+        throw std::logic_error("HalfEdgeMesh::restore_edge: slot " + std::to_string(e_id) + " is already live");
+    }
+    const std::uint32_t v_min = std::min(v1_id, v2_id);
+    const std::uint32_t v_max = std::max(v1_id, v2_id);
+    halfedges_[he_a].origin = v_min;
+    halfedges_[he_a].face = INVALID_ID;
+    halfedges_[he_a].next = INVALID_ID;
+    halfedges_[he_a].alive = true;
+    halfedges_[he_b].origin = v_max;
+    halfedges_[he_b].face = INVALID_ID;
+    halfedges_[he_b].next = INVALID_ID;
+    halfedges_[he_b].alive = true;
+    edge_index_[pack_pair(v_min, v_max)] = e_id;
+    dirty_ = true;
 }
-void HalfEdgeMesh::restore_face(std::uint32_t,
-                                 const std::vector<std::uint32_t>&,
-                                 const std::vector<std::int32_t>&) {
-    throw std::runtime_error("HalfEdgeMesh::restore_face not implemented yet");
+
+void HalfEdgeMesh::restore_face(std::uint32_t f_id,
+                                 const std::vector<std::uint32_t>& loop,
+                                 const std::vector<std::int32_t>& triangles) {
+    if (f_id >= faces_.size()) {
+        throw std::out_of_range("HalfEdgeMesh::restore_face: f_id " + std::to_string(f_id) + " out of range");
+    }
+    if (faces_[f_id].alive) {
+        throw std::logic_error("HalfEdgeMesh::restore_face: slot " + std::to_string(f_id) + " is already live");
+    }
+    // Same wiring as add_face_from_loop but writes into the existing slot.
+    const std::size_t n = loop.size();
+    std::vector<std::uint32_t> loop_halfedges(n, INVALID_ID);
+    for (std::size_t i = 0; i < n; ++i) {
+        const std::uint32_t v_from = loop[i];
+        const std::uint32_t v_to = loop[(i + 1) % n];
+        const std::uint32_t v_min = std::min(v_from, v_to);
+        const std::uint32_t v_max = std::max(v_from, v_to);
+        auto it = edge_index_.find(pack_pair(v_min, v_max));
+        if (it == edge_index_.end() || !edge_is_live(it->second)) {
+            throw std::invalid_argument("HalfEdgeMesh::restore_face: edge ("
+                + std::to_string(v_from) + ", " + std::to_string(v_to) + ") is missing");
+        }
+        loop_halfedges[i] = (v_from < v_to) ? (it->second * 2) : (it->second * 2 + 1);
+    }
+    for (std::size_t i = 0; i < n; ++i) {
+        const std::uint32_t he = loop_halfedges[i];
+        halfedges_[he].next = loop_halfedges[(i + 1) % n];
+        halfedges_[he].face = f_id;
+    }
+    Face& f = faces_[f_id];
+    f.boundary_he = loop_halfedges[0];
+    f.tris = triangles;
+    f.loop = loop;
+    f.alive = true;
+    dirty_ = true;
 }
 
 void HalfEdgeMesh::clear() noexcept {

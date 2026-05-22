@@ -251,3 +251,56 @@ TEST(HalfEdgeMeshTest, RemoveVertexAfterEdgeWorks) {
     EXPECT_FALSE(m.vertex_is_live(v0));
     EXPECT_TRUE(m.vertex_is_live(v1));
 }
+
+TEST(HalfEdgeMeshTest, RestoreVertexRoundTrips) {
+    pluton::HalfEdgeMesh m;
+    auto v = m.add_vertex(1.0f, 2.0f, 3.0f);
+    m.remove_vertex(v);
+    EXPECT_FALSE(m.vertex_is_live(v));
+
+    m.restore_vertex(v, 1.0f, 2.0f, 3.0f);
+    EXPECT_TRUE(m.vertex_is_live(v));
+    auto p = m.vertex_position(v);
+    EXPECT_FLOAT_EQ(p[0], 1.0f);
+    EXPECT_FLOAT_EQ(p[1], 2.0f);
+    EXPECT_FLOAT_EQ(p[2], 3.0f);
+}
+
+TEST(HalfEdgeMeshTest, RestoreVertexLiveSlotThrows) {
+    pluton::HalfEdgeMesh m;
+    auto v = m.add_vertex(1.0f, 2.0f, 3.0f);
+    EXPECT_THROW(m.restore_vertex(v, 0.0f, 0.0f, 0.0f), std::logic_error);
+}
+
+TEST(HalfEdgeMeshTest, RestoreEdgeRoundTrips) {
+    pluton::HalfEdgeMesh m;
+    auto v0 = m.add_vertex(0.0f, 0.0f, 0.0f);
+    auto v1 = m.add_vertex(1.0f, 0.0f, 0.0f);
+    auto e = m.add_halfedge_pair(v0, v1);
+    m.remove_edge(e);
+    EXPECT_FALSE(m.edge_is_live(e));
+
+    m.restore_edge(e, v0, v1);
+    EXPECT_TRUE(m.edge_is_live(e));
+    auto verts = m.edge_vertices(e);
+    EXPECT_EQ(verts[0], std::min(v0, v1));
+    EXPECT_EQ(verts[1], std::max(v0, v1));
+}
+
+TEST(HalfEdgeMeshTest, RestoreFaceRoundTrips) {
+    pluton::HalfEdgeMesh m;
+    auto v0 = m.add_vertex(0.0f, 0.0f, 0.0f);
+    auto v1 = m.add_vertex(1.0f, 0.0f, 0.0f);
+    auto v2 = m.add_vertex(0.0f, 1.0f, 0.0f);
+    m.add_halfedge_pair(v0, v1);
+    m.add_halfedge_pair(v1, v2);
+    m.add_halfedge_pair(v2, v0);
+    const std::vector<std::int32_t> tris = {0, 1, 2};
+    auto f = m.add_face_from_loop({v0, v1, v2}, tris);
+    m.remove_face(f);
+    EXPECT_FALSE(m.face_is_live(f));
+
+    m.restore_face(f, {v0, v1, v2}, tris);
+    EXPECT_TRUE(m.face_is_live(f));
+    EXPECT_EQ(m.face_loop_vertices(f), std::vector<std::uint32_t>({v0, v1, v2}));
+}
