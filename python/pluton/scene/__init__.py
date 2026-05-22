@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from pluton.scene.edge import Edge
 from pluton.scene.face import Face
+from pluton.scene.scene import Scene
 from pluton.scene.vertex import Vertex
 
-__all__ = ["Edge", "Face", "Vertex"]
+__all__ = ["Edge", "Face", "Scene", "Vertex"]
