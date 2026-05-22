@@ -146,7 +146,7 @@ dependencies = [
     "numpy>=2.0",
     "PySide6>=6.7",
     "PyOpenGL>=3.1.7",
-    "mapbox-earcut>=1.0"
+    "mapbox-earcut>=2.0"
 ]
 ```
 
@@ -157,8 +157,10 @@ Expected: build succeeds; pip installs `mapbox-earcut` from PyPI.
 
 - [ ] **Step 3: Verify the import works**
 
-Run: `python -c "import mapbox_earcut; import numpy as np; print(mapbox_earcut.triangulate_float32(np.array([0,0, 1,0, 1,1, 0,1], dtype=np.float32), np.array([4], dtype=np.uint32)))"`
-Expected: prints a numpy array of shape `(6,)` containing two triangles' worth of indices (e.g. `[0 1 2 0 2 3]`).
+Run: `python -c "import mapbox_earcut; import numpy as np; xy = np.array([[0,0],[1,0],[1,1],[0,1]], dtype=np.float32); print(mapbox_earcut.triangulate_float32(xy, np.array([4], dtype=np.uint32)))"`
+Expected: prints a uint32 numpy array of shape `(6,)` containing two triangles' worth of indices (e.g. `[2 3 0 0 1 2]`).
+
+**Note (mapbox-earcut 2.x API):** the function takes a `(N, 2)` shaped float32 array — not the flat `(2*N,)` form from v1. Pass the 2D array directly; do not reshape.
 
 - [ ] **Step 4: Existing tests still pass**
 
@@ -762,14 +764,15 @@ Then add this method to `Scene`, after `add_edge`:
                 f"face needs at least 3 vertices, got {len(ordered_vertex_ids)}"
             )
 
-        # Build a flat (2*N,) float32 array of XY for earcut.
+        # Build a (N, 2) float32 array of XY for earcut. mapbox-earcut 2.x
+        # takes the 2D shape directly — DO NOT reshape to flat.
         xy = np.empty((len(ordered_vertex_ids), 2), dtype=np.float32)
         for i, vid in enumerate(ordered_vertex_ids):
             xy[i] = self._vertices[vid].position[:2]
         ring_ends = np.array([len(ordered_vertex_ids)], dtype=np.uint32)
-        # earcut returns a flat int array of length 3*T; reshape to (T, 3).
+        # earcut returns a flat uint32 array of length 3*T; reshape to (T, 3).
         # Indices are into the local ring, so map back to global vertex IDs.
-        local_indices = mapbox_earcut.triangulate_float32(xy.reshape(-1), ring_ends)
+        local_indices = mapbox_earcut.triangulate_float32(xy, ring_ends)
         local_indices = np.asarray(local_indices, dtype=np.int32).reshape(-1, 3)
         triangles = np.array(
             [[ordered_vertex_ids[i] for i in tri] for tri in local_indices],
