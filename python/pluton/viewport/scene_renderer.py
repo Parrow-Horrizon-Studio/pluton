@@ -1,9 +1,9 @@
-"""Owns GL resources for the M1 scene: cube + grid + axes.
+"""Owns GL resources for the M2 scene: grid + axes + user geometry + tool overlay.
 
 Lifecycle is driven by QOpenGLWidget:
   initialize_gl() -> first paintGL() call sets up VBOs and shader programs.
   resize(w, h)    -> called from resizeGL.
-  render(camera) -> called from paintGL each frame.
+  render(camera, scene, tool_overlay) -> called from paintGL each frame.
 """
 
 from __future__ import annotations
@@ -15,7 +15,6 @@ from importlib.resources import files
 import numpy as np
 from OpenGL import GL
 
-import pluton
 from pluton.viewport.camera import Camera
 
 
@@ -31,7 +30,7 @@ _AXIS_X_COLOR = (0.90, 0.20, 0.20)
 _AXIS_Y_COLOR = (0.20, 0.90, 0.20)
 _AXIS_Z_COLOR = (0.20, 0.40, 0.90)
 
-# Phong material + light — hardcoded for M1.
+# Phong material + light — used for user geometry.
 _LIGHT_DIR = (-1.0, +1.0, -2.0)
 _LIGHT_COLOR = (1.00, 0.97, 0.92)
 _MATERIAL_AMBIENT = (0.15, 0.15, 0.17)
@@ -40,6 +39,11 @@ _MATERIAL_SPECULAR = (0.10, 0.10, 0.10)
 _MATERIAL_SHININESS = 16.0
 
 _BG_COLOR = (0.15, 0.15, 0.18, 1.0)
+
+# Edge / overlay colors (per-vertex, packed into the VBO alongside positions).
+_USER_EDGE_COLOR = (0.85, 0.85, 0.85)
+_OVERLAY_RUBBER_BAND_COLOR = (1.00, 0.80, 0.20)
+_OVERLAY_SNAP_MARKER_COLOR = (0.20, 0.90, 1.00)
 
 # Uniform names looked up once per program in initialize_gl().
 _PHONG_UNIFORMS = (
@@ -123,7 +127,7 @@ def _build_axes_vertex_array() -> np.ndarray:
 
 
 class SceneRenderer:
-    """Owns GL resources for the cube + grid + axes scene."""
+    """Owns GL resources for the grid + axes + user geometry + tool overlay."""
 
     def __init__(self) -> None:
         self._initialized = False
@@ -133,12 +137,6 @@ class SceneRenderer:
         # Uniform location caches (populated in initialize_gl)
         self._phong_locs: dict[str, int] = {}
         self._line_locs: dict[str, int] = {}
-        # Cube buffers
-        self._cube_vao: int = 0
-        self._cube_position_vbo: int = 0
-        self._cube_normal_vbo: int = 0
-        self._cube_ibo: int = 0
-        self._cube_index_count: int = 0
         # Grid + axes buffers
         self._grid_vao: int = 0
         self._grid_vbo: int = 0
@@ -146,6 +144,20 @@ class SceneRenderer:
         self._axes_vao: int = 0
         self._axes_vbo: int = 0
         self._axes_vertex_count: int = 0
+        # User-geometry buffers (filled by Scene.dirty refresh path)
+        self._user_face_vao: int = 0
+        self._user_face_vbo: int = 0  # interleaved (pos.xyz, normal.xyz)
+        self._user_face_count: int = 0  # number of vertices to draw
+
+        self._user_edge_vao: int = 0
+        self._user_edge_vbo: int = 0  # interleaved (pos.xyz, color.rgb), 24 bytes per vertex
+        self._user_edge_count: int = 0
+
+        # Tool overlay buffers (rebuilt every frame)
+        self._overlay_line_vao: int = 0
+        self._overlay_line_vbo: int = 0
+        self._overlay_marker_vao: int = 0
+        self._overlay_marker_vbo: int = 0
 
     # --- Lifecycle --------------------------------------------------------
 
@@ -170,9 +182,10 @@ class SceneRenderer:
         self._phong_locs = _cache_uniform_locations(self._phong_program, _PHONG_UNIFORMS)
         self._line_locs = _cache_uniform_locations(self._line_program, _LINE_UNIFORMS)
 
-        self._init_cube_buffers()
         self._init_grid_buffers()
         self._init_axes_buffers()
+        self._init_user_buffers()
+        self._init_overlay_buffers()
 
         self._initialized = True
 
@@ -184,53 +197,38 @@ class SceneRenderer:
             return
         GL.glViewport(0, 0, w, h)
 
-    def render(self, camera: Camera) -> None:
+    def render(self, camera: Camera, scene=None, tool_overlay=None) -> None:  # noqa: ANN001
+        """Draw the full scene: grid + axes + user faces + user edges + tool overlay."""
         if not self._initialized:
             return
+
+        GL.glClearColor(0.15, 0.16, 0.18, 1.0)
         GL.glClear(GL.GL_COLOR_BUFFER_BIT | GL.GL_DEPTH_BUFFER_BIT)
+        GL.glEnable(GL.GL_DEPTH_TEST)
 
         view = camera.view_matrix()
         projection = camera.projection_matrix()
-        model = np.eye(4, dtype=np.float32)  # cube model matrix is identity
 
-        # Draw grid + axes first so they don't z-fight on top of the cube.
+        # 1. Grid (M1)
         self._draw_lines(self._grid_vao, self._grid_vertex_count, view, projection)
+        # 2. Axes (M1)
         self._draw_lines(self._axes_vao, self._axes_vertex_count, view, projection)
-        self._draw_cube(view, projection, model, camera.position)
+
+        # 3 & 4. User faces / edges (NEW) — re-upload if scene is dirty
+        if scene is not None:
+            if scene.dirty:
+                self._refresh_user_buffers(scene)
+                scene.mark_clean()
+            if self._user_face_count > 0:
+                self._draw_user_faces(view, projection, camera.position)
+            if self._user_edge_count > 0:
+                self._draw_user_edges(view, projection)
+
+        # 5. Tool overlay (NEW) — drawn on top with depth-test disabled
+        if tool_overlay is not None:
+            self._draw_tool_overlay(tool_overlay, view, projection)
 
     # --- Init helpers -----------------------------------------------------
-
-    def _init_cube_buffers(self) -> None:
-        # mesh.positions / normals / indices are already C-contiguous float32 /
-        # uint32 views from nanobind; np.asarray returns them unchanged.
-        mesh = pluton.make_cube(1.0)
-        positions = np.asarray(mesh.positions, dtype=np.float32)
-        normals = np.asarray(mesh.normals, dtype=np.float32)
-        indices = np.asarray(mesh.indices, dtype=np.uint32)
-        self._cube_index_count = int(indices.size)
-
-        self._cube_vao = GL.glGenVertexArrays(1)
-        GL.glBindVertexArray(self._cube_vao)
-
-        self._cube_position_vbo = GL.glGenBuffers(1)
-        GL.glBindBuffer(GL.GL_ARRAY_BUFFER, self._cube_position_vbo)
-        GL.glBufferData(GL.GL_ARRAY_BUFFER, positions.nbytes, positions, GL.GL_STATIC_DRAW)
-        GL.glEnableVertexAttribArray(0)
-        GL.glVertexAttribPointer(0, 3, GL.GL_FLOAT, GL.GL_FALSE, 0, None)
-
-        self._cube_normal_vbo = GL.glGenBuffers(1)
-        GL.glBindBuffer(GL.GL_ARRAY_BUFFER, self._cube_normal_vbo)
-        GL.glBufferData(GL.GL_ARRAY_BUFFER, normals.nbytes, normals, GL.GL_STATIC_DRAW)
-        GL.glEnableVertexAttribArray(1)
-        GL.glVertexAttribPointer(1, 3, GL.GL_FLOAT, GL.GL_FALSE, 0, None)
-
-        self._cube_ibo = GL.glGenBuffers(1)
-        GL.glBindBuffer(GL.GL_ELEMENT_ARRAY_BUFFER, self._cube_ibo)
-        GL.glBufferData(GL.GL_ELEMENT_ARRAY_BUFFER, indices.nbytes, indices, GL.GL_STATIC_DRAW)
-
-        GL.glBindVertexArray(0)
-        GL.glBindBuffer(GL.GL_ARRAY_BUFFER, 0)
-        GL.glBindBuffer(GL.GL_ELEMENT_ARRAY_BUFFER, 0)
 
     def _init_grid_buffers(self) -> None:
         verts = _build_grid_vertex_array()
@@ -241,6 +239,78 @@ class SceneRenderer:
         verts = _build_axes_vertex_array()
         self._axes_vertex_count = int(verts.shape[0])
         self._axes_vao, self._axes_vbo = self._upload_interleaved_lines(verts)
+
+    def _init_user_buffers(self) -> None:
+        """Create empty VBOs for user-face and user-edge geometry.
+
+        We allocate VAOs/VBOs here but leave them empty until the first
+        scene-dirty refresh fills them with real data.
+        """
+        # User faces — interleaved (pos.xyz, normal.xyz), 24 bytes per vertex
+        self._user_face_vao = int(GL.glGenVertexArrays(1))
+        self._user_face_vbo = int(GL.glGenBuffers(1))
+        GL.glBindVertexArray(self._user_face_vao)
+        GL.glBindBuffer(GL.GL_ARRAY_BUFFER, self._user_face_vbo)
+        GL.glBufferData(GL.GL_ARRAY_BUFFER, 0, None, GL.GL_DYNAMIC_DRAW)
+        GL.glVertexAttribPointer(0, 3, GL.GL_FLOAT, GL.GL_FALSE, 24, None)
+        GL.glEnableVertexAttribArray(0)
+        GL.glVertexAttribPointer(1, 3, GL.GL_FLOAT, GL.GL_FALSE, 24, ctypes.c_void_p(12))
+        GL.glEnableVertexAttribArray(1)
+        GL.glBindVertexArray(0)
+
+        # User edges — interleaved (pos.xyz, color.rgb), 24 bytes per vertex
+        # The line shader reads per-vertex color from attribute 1, so we pack
+        # a constant edge color alongside each position.
+        self._user_edge_vao = int(GL.glGenVertexArrays(1))
+        self._user_edge_vbo = int(GL.glGenBuffers(1))
+        GL.glBindVertexArray(self._user_edge_vao)
+        GL.glBindBuffer(GL.GL_ARRAY_BUFFER, self._user_edge_vbo)
+        GL.glBufferData(GL.GL_ARRAY_BUFFER, 0, None, GL.GL_DYNAMIC_DRAW)
+        stride = 6 * ctypes.sizeof(ctypes.c_float)  # 24 bytes
+        GL.glVertexAttribPointer(0, 3, GL.GL_FLOAT, GL.GL_FALSE, stride, ctypes.c_void_p(0))
+        GL.glEnableVertexAttribArray(0)
+        GL.glVertexAttribPointer(
+            1, 3, GL.GL_FLOAT, GL.GL_FALSE, stride,
+            ctypes.c_void_p(3 * ctypes.sizeof(ctypes.c_float)),
+        )
+        GL.glEnableVertexAttribArray(1)
+        GL.glBindVertexArray(0)
+
+    def _init_overlay_buffers(self) -> None:
+        """Create empty VBOs for tool-overlay lines and snap-marker quads.
+
+        Both buffers use the line shader's (pos.xyz, color.rgb) layout.
+        """
+        # Rubber-band lines
+        self._overlay_line_vao = int(GL.glGenVertexArrays(1))
+        self._overlay_line_vbo = int(GL.glGenBuffers(1))
+        GL.glBindVertexArray(self._overlay_line_vao)
+        GL.glBindBuffer(GL.GL_ARRAY_BUFFER, self._overlay_line_vbo)
+        GL.glBufferData(GL.GL_ARRAY_BUFFER, 0, None, GL.GL_DYNAMIC_DRAW)
+        stride = 6 * ctypes.sizeof(ctypes.c_float)
+        GL.glVertexAttribPointer(0, 3, GL.GL_FLOAT, GL.GL_FALSE, stride, ctypes.c_void_p(0))
+        GL.glEnableVertexAttribArray(0)
+        GL.glVertexAttribPointer(
+            1, 3, GL.GL_FLOAT, GL.GL_FALSE, stride,
+            ctypes.c_void_p(3 * ctypes.sizeof(ctypes.c_float)),
+        )
+        GL.glEnableVertexAttribArray(1)
+        GL.glBindVertexArray(0)
+
+        # Snap marker — small world-aligned wireframe square re-uploaded per frame.
+        self._overlay_marker_vao = int(GL.glGenVertexArrays(1))
+        self._overlay_marker_vbo = int(GL.glGenBuffers(1))
+        GL.glBindVertexArray(self._overlay_marker_vao)
+        GL.glBindBuffer(GL.GL_ARRAY_BUFFER, self._overlay_marker_vbo)
+        GL.glBufferData(GL.GL_ARRAY_BUFFER, 0, None, GL.GL_DYNAMIC_DRAW)
+        GL.glVertexAttribPointer(0, 3, GL.GL_FLOAT, GL.GL_FALSE, stride, ctypes.c_void_p(0))
+        GL.glEnableVertexAttribArray(0)
+        GL.glVertexAttribPointer(
+            1, 3, GL.GL_FLOAT, GL.GL_FALSE, stride,
+            ctypes.c_void_p(3 * ctypes.sizeof(ctypes.c_float)),
+        )
+        GL.glEnableVertexAttribArray(1)
+        GL.glBindVertexArray(0)
 
     @staticmethod
     def _upload_interleaved_lines(verts: np.ndarray) -> tuple[int, int]:
@@ -276,19 +346,48 @@ class SceneRenderer:
         GL.glBindVertexArray(0)
         GL.glUseProgram(0)
 
-    def _draw_cube(
+    def _refresh_user_buffers(self, scene) -> None:  # noqa: ANN001
+        """Re-upload face and edge geometry from the scene to the GPU."""
+        # User faces: (3*T, 3) positions + (3*T, 3) normals → interleaved (3*T, 6)
+        positions, normals = scene.face_triangle_buffer()
+        if positions.shape[0] > 0:
+            interleaved = np.concatenate([positions, normals], axis=1).astype(np.float32)
+            data = np.ascontiguousarray(interleaved)
+            GL.glBindBuffer(GL.GL_ARRAY_BUFFER, self._user_face_vbo)
+            GL.glBufferData(GL.GL_ARRAY_BUFFER, data.nbytes, data, GL.GL_DYNAMIC_DRAW)
+            self._user_face_count = int(positions.shape[0])
+        else:
+            self._user_face_count = 0
+
+        # User edges: (2*E, 3) positions — pack constant color per vertex so the
+        # line shader's attribute 1 (in_color) is always satisfied.
+        edges = scene.edge_line_buffer()
+        if edges.shape[0] > 0:
+            n = int(edges.shape[0])
+            colors = np.tile(np.array(_USER_EDGE_COLOR, dtype=np.float32), (n, 1))
+            data = np.ascontiguousarray(
+                np.concatenate([edges.astype(np.float32), colors], axis=1)
+            )
+            GL.glBindBuffer(GL.GL_ARRAY_BUFFER, self._user_edge_vbo)
+            GL.glBufferData(GL.GL_ARRAY_BUFFER, data.nbytes, data, GL.GL_DYNAMIC_DRAW)
+            self._user_edge_count = n
+        else:
+            self._user_edge_count = 0
+
+    def _draw_user_faces(
         self,
         view: np.ndarray,
         projection: np.ndarray,
-        model: np.ndarray,
         camera_pos: np.ndarray,
     ) -> None:
         GL.glUseProgram(self._phong_program)
         locs = self._phong_locs
         _set_mat4(locs["u_view"], view)
         _set_mat4(locs["u_projection"], projection)
-        _set_mat4(locs["u_model"], model)
+        # User geometry is already in world space — identity model matrix.
+        _set_mat4(locs["u_model"], np.eye(4, dtype=np.float32))
         _set_vec3(locs["u_camera_pos"], camera_pos)
+        # Same lighting / material as the old M1 cube.
         _set_vec3(locs["u_light_dir"], _LIGHT_DIR)
         _set_vec3(locs["u_light_color"], _LIGHT_COLOR)
         _set_vec3(locs["u_material_ambient"], _MATERIAL_AMBIENT)
@@ -296,9 +395,84 @@ class SceneRenderer:
         _set_vec3(locs["u_material_specular"], _MATERIAL_SPECULAR)
         _set_float(locs["u_material_shininess"], _MATERIAL_SHININESS)
 
-        GL.glBindVertexArray(self._cube_vao)
-        GL.glDrawElements(GL.GL_TRIANGLES, self._cube_index_count, GL.GL_UNSIGNED_INT, None)
+        GL.glBindVertexArray(self._user_face_vao)
+        GL.glDrawArrays(GL.GL_TRIANGLES, 0, self._user_face_count)
         GL.glBindVertexArray(0)
+        GL.glUseProgram(0)
+
+    def _draw_user_edges(self, view: np.ndarray, projection: np.ndarray) -> None:
+        GL.glUseProgram(self._line_program)
+        locs = self._line_locs
+        _set_mat4(locs["u_view"], view)
+        _set_mat4(locs["u_projection"], projection)
+
+        GL.glBindVertexArray(self._user_edge_vao)
+        GL.glLineWidth(1.5)
+        GL.glDrawArrays(GL.GL_LINES, 0, self._user_edge_count)
+        GL.glLineWidth(1.0)
+        GL.glBindVertexArray(0)
+        GL.glUseProgram(0)
+
+    def _draw_tool_overlay(
+        self,
+        overlay,  # noqa: ANN001
+        view: np.ndarray,
+        projection: np.ndarray,
+    ) -> None:
+        GL.glUseProgram(self._line_program)
+        locs = self._line_locs
+        _set_mat4(locs["u_view"], view)
+        _set_mat4(locs["u_projection"], projection)
+
+        # Disable depth test so the overlay always wins.
+        GL.glDisable(GL.GL_DEPTH_TEST)
+        try:
+            # Rubber-band segments — each segment is two vertices with pos + color.
+            segs = overlay.rubber_band_segments
+            if segs.shape[0] > 0:
+                n = int(segs.shape[0])
+                colors = np.tile(
+                    np.array(_OVERLAY_RUBBER_BAND_COLOR, dtype=np.float32), (n, 1)
+                )
+                data = np.ascontiguousarray(
+                    np.concatenate([segs.astype(np.float32), colors], axis=1)
+                )
+                GL.glBindBuffer(GL.GL_ARRAY_BUFFER, self._overlay_line_vbo)
+                GL.glBufferData(GL.GL_ARRAY_BUFFER, data.nbytes, data, GL.GL_DYNAMIC_DRAW)
+                GL.glBindVertexArray(self._overlay_line_vao)
+                GL.glLineWidth(2.0)
+                GL.glDrawArrays(GL.GL_LINES, 0, n)
+                GL.glLineWidth(1.0)
+                GL.glBindVertexArray(0)
+
+            # Snap marker — small world-aligned wireframe square at the snap point.
+            if overlay.snap_marker_position is not None:
+                p = overlay.snap_marker_position
+                # 0.05 m square on the same Z plane as the snap point.
+                s = 0.05
+                cr, cg, cb = _OVERLAY_SNAP_MARKER_COLOR
+                quad = np.array(
+                    [
+                        [p[0] - s, p[1] - s, p[2], cr, cg, cb],
+                        [p[0] + s, p[1] - s, p[2], cr, cg, cb],
+                        [p[0] + s, p[1] - s, p[2], cr, cg, cb],
+                        [p[0] + s, p[1] + s, p[2], cr, cg, cb],
+                        [p[0] + s, p[1] + s, p[2], cr, cg, cb],
+                        [p[0] - s, p[1] + s, p[2], cr, cg, cb],
+                        [p[0] - s, p[1] + s, p[2], cr, cg, cb],
+                        [p[0] - s, p[1] - s, p[2], cr, cg, cb],
+                    ],
+                    dtype=np.float32,
+                )
+                GL.glBindBuffer(GL.GL_ARRAY_BUFFER, self._overlay_marker_vbo)
+                GL.glBufferData(GL.GL_ARRAY_BUFFER, quad.nbytes, quad, GL.GL_DYNAMIC_DRAW)
+                GL.glBindVertexArray(self._overlay_marker_vao)
+                GL.glLineWidth(2.0)
+                GL.glDrawArrays(GL.GL_LINES, 0, 8)
+                GL.glLineWidth(1.0)
+                GL.glBindVertexArray(0)
+        finally:
+            GL.glEnable(GL.GL_DEPTH_TEST)
         GL.glUseProgram(0)
 
 
