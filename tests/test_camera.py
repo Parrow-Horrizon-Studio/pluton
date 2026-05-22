@@ -138,3 +138,49 @@ def test_zoom_toward_cursor_does_not_drift_target():
         c.zoom(scroll_delta=1.0, cursor_ndc=cursor)
 
     np.testing.assert_allclose(c.target, target_before, atol=1e-5)
+
+
+# --- Ray from screen / ray intersect ground --------------------------------
+
+
+def test_ray_from_screen_returns_origin_and_unit_direction():
+    from pluton.viewport.camera import Camera
+
+    cam = Camera()
+    cam.aspect = 1.0
+    origin, direction = cam.ray_from_screen(640.0, 400.0, 1280, 800)
+
+    # Origin is the camera position
+    np.testing.assert_allclose(origin, cam.position, atol=1e-6)
+    # Direction is a unit vector
+    np.testing.assert_allclose(float(np.linalg.norm(direction)), 1.0, atol=1e-6)
+    # Centre cursor → direction points from position toward target
+    expected = cam.target - cam.position
+    expected = expected / float(np.linalg.norm(expected))
+    np.testing.assert_allclose(direction, expected, atol=1e-5)
+
+
+def test_ray_intersect_ground_for_centre_cursor():
+    from pluton.viewport.camera import Camera
+
+    cam = Camera()
+    cam.aspect = 1.0
+    hit = cam.ray_intersect_ground(640.0, 400.0, 1280, 800)
+    # Centre cursor with default camera (looking at target at z=0.5) hits the
+    # ground near, but not exactly at, target.x/target.y because the target
+    # has z=0.5 not 0. The hit must still be valid (not None) and on z=0.
+    assert hit is not None
+    assert abs(float(hit[2])) < 1e-5
+
+
+def test_ray_intersect_ground_returns_none_when_ray_parallel_or_above():
+    """Cursor placed so the ray goes upward (away from ground) yields None."""
+    from pluton.viewport.camera import Camera
+
+    cam = Camera()
+    # Pose the camera above the ground looking up (away from z=0).
+    cam.position = np.array([0.0, 0.0, 5.0], dtype=np.float32)
+    cam.target = np.array([0.0, 0.0, 10.0], dtype=np.float32)
+    cam.aspect = 1.0
+    hit = cam.ray_intersect_ground(640.0, 400.0, 1280, 800)
+    assert hit is None

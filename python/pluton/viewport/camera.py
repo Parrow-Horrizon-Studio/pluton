@@ -148,3 +148,53 @@ class Camera:
         # M1 design: orbit pivot stays at the original `target` (world origin).
         # SketchUp-style "orbit around clicked point" is deferred to a later
         # milestone once we have ray-mesh hit-testing.
+
+    # --- Picking / raycast helpers ----------------------------------------
+
+    def ray_from_screen(
+        self, x_pixels: float, y_pixels: float, width: int, height: int
+    ) -> tuple[np.ndarray, np.ndarray]:
+        """Build a world-space ray from the camera through the cursor pixel.
+
+        Returns `(origin, direction)` where `origin = self.position` and
+        `direction` is a unit vector. Y is treated as screen-y (top-down).
+        """
+        w = max(int(width), 1)
+        h = max(int(height), 1)
+        # NDC: x in [-1, 1] left→right; y in [-1, 1] bottom→top.
+        nx = (2.0 * float(x_pixels) / w) - 1.0
+        ny = 1.0 - (2.0 * float(y_pixels) / h)
+
+        forward = _normalize(self.target - self.position)
+        right = _normalize(np.cross(forward, self.up))
+        cam_up = np.cross(right, forward)
+        tan_half_fovy = math.tan(math.radians(self.fov_y_deg) * 0.5)
+
+        # Camera-space direction for the (nx, ny) cursor.
+        cam_dir = (
+            forward
+            + right * (nx * tan_half_fovy * self.aspect)
+            + cam_up * (ny * tan_half_fovy)
+        )
+        direction = _normalize(cam_dir).astype(np.float32)
+        origin = self.position.astype(np.float32)
+        return origin, direction
+
+    def ray_intersect_ground(
+        self, x_pixels: float, y_pixels: float, width: int, height: int
+    ) -> np.ndarray | None:
+        """Intersect the cursor ray with the Z=0 plane.
+
+        Returns the world-space hit point as a float32 (3,) array, or `None`
+        if the ray runs parallel to the plane or hits it behind the camera.
+        """
+        origin, direction = self.ray_from_screen(x_pixels, y_pixels, width, height)
+        dz = float(direction[2])
+        if abs(dz) < 1e-9:
+            return None  # parallel
+        t = -float(origin[2]) / dz
+        if t <= 0.0:
+            return None  # behind the camera
+        hit = origin + direction * t
+        hit[2] = 0.0  # snap to exact zero to defend against FP drift
+        return hit.astype(np.float32)
