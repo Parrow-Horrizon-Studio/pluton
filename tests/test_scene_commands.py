@@ -116,3 +116,31 @@ def test_remove_vertex_command_round_trip():
     restored = next(iter(s.vertices_iter()))
     assert restored.id == v
     np.testing.assert_array_equal(restored.position, np.array([1.0, 2.0, 0.0], dtype=np.float32))
+
+
+def test_clear_scene_command_captures_and_restores():
+    from pluton.commands.scene_commands import ClearSceneCommand
+    from pluton.scene import Scene
+
+    s, v0, v1, v2 = _three_vertex_scene()
+    s.add_edge(v0, v1); s.add_edge(v1, v2); s.add_edge(v2, v0)
+    s.add_face_from_loop((v0, v1, v2))
+    assert len(list(s.vertices_iter())) == 3
+    assert len(list(s.edges_iter())) == 3
+    assert len(list(s.faces_iter())) == 1
+
+    cmd = ClearSceneCommand()
+    cmd.do(s)
+    assert len(list(s.vertices_iter())) == 0
+    assert len(list(s.edges_iter())) == 0
+    assert len(list(s.faces_iter())) == 0
+
+    cmd.undo(s)
+    # All IDs restored.
+    verts = list(s.vertices_iter())
+    edges = list(s.edges_iter())
+    faces = list(s.faces_iter())
+    assert len(verts) == 3
+    assert len(edges) == 3
+    assert len(faces) == 1
+    assert {v.id for v in verts} == {v0, v1, v2}

@@ -101,3 +101,76 @@ class RemoveVertexCommand(Command):
     def undo(self, scene) -> None:  # noqa: ANN001
         assert self._captured_pos is not None, "RemoveVertexCommand.undo before do"
         scene.restore_vertex(self._vertex_id, self._captured_pos)
+
+
+class _AddVertexAtId(Command):
+    """Internal: re-adds a vertex at a specific ID. Used by ClearSceneCommand.undo.
+
+    After scene.clear() the slab is empty; restore_vertex requires the slot to
+    already exist.  We therefore call scene.add_vertex() so the slab grows
+    back.  When the scene is empty and vertices are re-added in their original
+    order the C++ HalfEdgeMesh assigns the same sequential IDs.
+    """
+
+    def __init__(self, v_id: int, position: np.ndarray) -> None:
+        self._v_id = v_id
+        self._position = np.asarray(position, dtype=np.float32).reshape(3).copy()
+
+    def do(self, scene) -> None:  # noqa: ANN001
+        scene.add_vertex(self._position)
+
+    def undo(self, scene) -> None:  # noqa: ANN001
+        scene.remove_vertex(self._v_id)
+
+
+class _AddEdgeAtId(Command):
+    """Internal: re-adds an edge at a specific ID."""
+
+    def __init__(self, e_id: int, v1_id: int, v2_id: int) -> None:
+        self._e_id = e_id
+        self._v1, self._v2 = v1_id, v2_id
+
+    def do(self, scene) -> None:  # noqa: ANN001
+        scene.add_edge(self._v1, self._v2)
+
+    def undo(self, scene) -> None:  # noqa: ANN001
+        scene.remove_edge(self._e_id)
+
+
+class _AddFaceAtId(Command):
+    """Internal: re-adds a face at a specific ID."""
+
+    def __init__(self, f_id: int, loop: Sequence[int]) -> None:
+        self._f_id = f_id
+        self._loop = tuple(loop)
+
+    def do(self, scene) -> None:  # noqa: ANN001
+        scene.add_face_from_loop(self._loop)
+
+    def undo(self, scene) -> None:  # noqa: ANN001
+        scene.remove_face(self._f_id)
+
+
+class ClearSceneCommand(Command):
+    """do() captures every live entity and clears; undo() replays Add*AtId children."""
+
+    name = "Clear Scene"
+
+    def __init__(self) -> None:
+        self._captured: list[Command] | None = None
+
+    def do(self, scene) -> None:  # noqa: ANN001
+        captured: list[Command] = []
+        for v in scene.vertices_iter():
+            captured.append(_AddVertexAtId(v.id, v.position))
+        for e in scene.edges_iter():
+            captured.append(_AddEdgeAtId(e.id, e.v1_id, e.v2_id))
+        for f in scene.faces_iter():
+            captured.append(_AddFaceAtId(f.id, f.loop_vertex_ids))
+        self._captured = captured
+        scene.clear()
+
+    def undo(self, scene) -> None:  # noqa: ANN001
+        assert self._captured is not None, "ClearSceneCommand.undo before do"
+        for cmd in self._captured:
+            cmd.do(scene)
