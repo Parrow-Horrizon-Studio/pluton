@@ -45,6 +45,7 @@ class RectangleTool(Tool):
         self._preview_corner: np.ndarray | None = None
         self._snap_marker_pos: np.ndarray | None = None
         self._snap_marker_color: tuple[float, float, float] = _NEUTRAL_COLOR
+        self._snap_marker_kind: int = 0
 
     def activate(self, ctx: ToolContext) -> None:
         self._scene = ctx.scene  # type: ignore[assignment]
@@ -58,9 +59,11 @@ class RectangleTool(Tool):
 
         if snap.kind == SnapKind.NONE:
             self._snap_marker_pos = None
+            self._snap_marker_kind = 0
             return
         self._snap_marker_pos = snap.world_position.copy()
         self._snap_marker_color = _MARKER_COLOR_BY_KIND.get(int(snap.kind), _NEUTRAL_COLOR)
+        self._snap_marker_kind = int(snap.kind)
         if self._state == _State.DRAGGING:
             self._preview_corner = snap.world_position.copy()
 
@@ -122,6 +125,7 @@ class RectangleTool(Tool):
             rubber_band_color=_NEUTRAL_COLOR,
             snap_marker_position=self._snap_marker_pos.copy() if self._snap_marker_pos is not None else None,
             snap_marker_color=self._snap_marker_color,
+            snap_marker_kind=self._snap_marker_kind,
         )
 
     @property
@@ -134,3 +138,4 @@ class RectangleTool(Tool):
         self._first_corner = None
         self._preview_corner = None
         self._snap_marker_pos = None
+        self._snap_marker_kind = 0

@@ -29,6 +29,7 @@ class ToolOverlay:
     rubber_band_color: tuple[float, float, float]
     snap_marker_position: np.ndarray | None
     snap_marker_color: tuple[float, float, float]
+    snap_marker_kind: int = 0  # SnapKind value (0=NONE/no marker); stored as int to avoid circular import
 
 
 class Tool(ABC):

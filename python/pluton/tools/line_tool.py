@@ -57,6 +57,7 @@ class LineTool(Tool):
         self._rubber_band_color: tuple[float, float, float] = _NEUTRAL_COLOR
         self._snap_marker_pos: np.ndarray | None = None
         self._snap_marker_color: tuple[float, float, float] = _NEUTRAL_COLOR
+        self._snap_marker_kind: int = 0
 
     def activate(self, ctx: ToolContext) -> None:
         self._scene = ctx.scene  # type: ignore[assignment]
@@ -70,9 +71,11 @@ class LineTool(Tool):
 
         if snap.kind == SnapKind.NONE:
             self._snap_marker_pos = None
+            self._snap_marker_kind = 0
             return
         self._snap_marker_pos = snap.world_position.copy()
         self._snap_marker_color = _MARKER_COLOR_BY_KIND.get(int(snap.kind), _NEUTRAL_COLOR)
+        self._snap_marker_kind = int(snap.kind)
         if self._state == _State.DRAWING:
             self._preview_tip = snap.world_position.copy()
             if snap.kind == SnapKind.AXIS_LOCK and snap.axis is not None:
@@ -160,6 +163,7 @@ class LineTool(Tool):
             rubber_band_color=self._rubber_band_color,
             snap_marker_position=self._snap_marker_pos.copy() if self._snap_marker_pos is not None else None,
             snap_marker_color=self._snap_marker_color,
+            snap_marker_kind=self._snap_marker_kind,
         )
 
     @property
@@ -176,3 +180,4 @@ class LineTool(Tool):
         self._preview_tip = None
         self._rubber_band_color = _NEUTRAL_COLOR
         self._snap_marker_pos = None
+        self._snap_marker_kind = 0

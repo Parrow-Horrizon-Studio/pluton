@@ -442,30 +442,43 @@ class SceneRenderer:
                 GL.glLineWidth(1.0)
                 GL.glBindVertexArray(0)
 
-            # Snap marker — small world-aligned wireframe square at the snap point.
+            # Snap marker — small wireframe shape at the snap point.
+            # Shape depends on snap kind: MIDPOINT → triangle, others → square.
             if overlay.snap_marker_position is not None:
                 p = overlay.snap_marker_position
-                # 0.05 m square on the same Z plane as the snap point.
                 s = 0.05
+                if overlay.snap_marker_kind == 3:  # SnapKind.MIDPOINT
+                    # Equilateral-ish triangle with apex at +Y, base along -Y
+                    pos = np.array(
+                        [
+                            [p[0] - s, p[1] - s, p[2]], [p[0] + s, p[1] - s, p[2]],   # base
+                            [p[0] + s, p[1] - s, p[2]], [p[0], p[1] + s, p[2]],        # right slope up
+                            [p[0], p[1] + s, p[2]],     [p[0] - s, p[1] - s, p[2]],    # left slope down
+                        ],
+                        dtype=np.float32,
+                    )
+                else:
+                    # Square
+                    pos = np.array(
+                        [
+                            [p[0] - s, p[1] - s, p[2]], [p[0] + s, p[1] - s, p[2]],
+                            [p[0] + s, p[1] - s, p[2]], [p[0] + s, p[1] + s, p[2]],
+                            [p[0] + s, p[1] + s, p[2]], [p[0] - s, p[1] + s, p[2]],
+                            [p[0] - s, p[1] + s, p[2]], [p[0] - s, p[1] - s, p[2]],
+                        ],
+                        dtype=np.float32,
+                    )
+
+                n = pos.shape[0]
                 cr, cg, cb = overlay.snap_marker_color
-                quad = np.array(
-                    [
-                        [p[0] - s, p[1] - s, p[2], cr, cg, cb],
-                        [p[0] + s, p[1] - s, p[2], cr, cg, cb],
-                        [p[0] + s, p[1] - s, p[2], cr, cg, cb],
-                        [p[0] + s, p[1] + s, p[2], cr, cg, cb],
-                        [p[0] + s, p[1] + s, p[2], cr, cg, cb],
-                        [p[0] - s, p[1] + s, p[2], cr, cg, cb],
-                        [p[0] - s, p[1] + s, p[2], cr, cg, cb],
-                        [p[0] - s, p[1] - s, p[2], cr, cg, cb],
-                    ],
-                    dtype=np.float32,
-                )
+                colors = np.tile(np.array([cr, cg, cb], dtype=np.float32), (n, 1))
+                data = np.ascontiguousarray(np.concatenate([pos, colors], axis=1).astype(np.float32))
+
                 GL.glBindBuffer(GL.GL_ARRAY_BUFFER, self._overlay_marker_vbo)
-                GL.glBufferData(GL.GL_ARRAY_BUFFER, quad.nbytes, quad, GL.GL_DYNAMIC_DRAW)
+                GL.glBufferData(GL.GL_ARRAY_BUFFER, data.nbytes, data, GL.GL_DYNAMIC_DRAW)
                 GL.glBindVertexArray(self._overlay_marker_vao)
                 GL.glLineWidth(2.0)
-                GL.glDrawArrays(GL.GL_LINES, 0, 8)
+                GL.glDrawArrays(GL.GL_LINES, 0, n)
                 GL.glLineWidth(1.0)
                 GL.glBindVertexArray(0)
         finally:
