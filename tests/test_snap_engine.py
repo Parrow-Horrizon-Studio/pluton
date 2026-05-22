@@ -58,6 +58,7 @@ def test_midpoint_snap_when_cursor_near_edge_midpoint():
     result = eng.snap(cursor_world, (640.0, 400.0), cam, scene)
     assert result.kind == SnapKind.MIDPOINT
     np.testing.assert_allclose(result.world_position, [2.0, 0.0, 0.0], atol=1e-5)
+    assert result.vertex_id is None
 
 
 def test_axis_lock_when_drawing_near_x_axis_direction():
@@ -86,3 +87,56 @@ def test_returns_none_when_cursor_world_is_none():
     cam = _camera_at_default()
     result = eng.snap(None, (640.0, 400.0), cam, scene)
     assert result.kind == SnapKind.NONE
+    assert result.axis is None
+    assert result.vertex_id is None
+    assert result.label == "—"
+
+
+def test_endpoint_beats_midpoint():
+    from pluton.scene import Scene
+    from pluton.viewport.snap_engine import SnapEngine, SnapKind
+
+    eng = SnapEngine()
+    scene = Scene()
+    # An edge where the midpoint and one endpoint are both within tolerance
+    v0 = scene.add_vertex(np.array([2.0, 0.0, 0.0], dtype=np.float32))
+    v1 = scene.add_vertex(np.array([2.4, 0.0, 0.0], dtype=np.float32))
+    scene.add_edge(v0, v1)
+    cam = _camera_at_default()
+    # Midpoint is (2.2, 0). Cursor close to v0 — within tolerance of both.
+    cursor_world = np.array([2.05, 0.0, 0.0], dtype=np.float32)
+    result = eng.snap(cursor_world, (640.0, 400.0), cam, scene)
+    assert result.kind == SnapKind.ENDPOINT
+    assert result.vertex_id == v0
+
+
+def test_midpoint_beats_axis_lock():
+    from pluton.scene import Scene
+    from pluton.viewport.snap_engine import SnapEngine, SnapKind
+
+    eng = SnapEngine()
+    scene = Scene()
+    v0 = scene.add_vertex(np.array([0.0, 0.0, 0.0], dtype=np.float32))
+    v1 = scene.add_vertex(np.array([4.0, 0.0, 0.0], dtype=np.float32))
+    scene.add_edge(v0, v1)
+    cam = _camera_at_default()
+    anchor = np.array([0.0, 0.0, 0.0], dtype=np.float32)
+    # Cursor near midpoint (2,0) AND axis-locked-to-X-from-origin.
+    cursor_world = np.array([2.05, 0.02, 0.0], dtype=np.float32)
+    result = eng.snap(cursor_world, (640.0, 400.0), cam, scene, anchor=anchor)
+    assert result.kind == SnapKind.MIDPOINT
+
+
+def test_axis_lock_beats_grid():
+    from pluton.scene import Scene
+    from pluton.viewport.snap_engine import SnapEngine, SnapKind
+
+    eng = SnapEngine()
+    scene = Scene()
+    cam = _camera_at_default()
+    anchor = np.array([0.0, 0.0, 0.0], dtype=np.float32)
+    # (3.0, 0.02) is on the +X axis-lock direction; grid snap would be (3,0).
+    # Both produce the same point in this case — but axis-lock label / kind wins.
+    cursor_world = np.array([3.0, 0.02, 0.0], dtype=np.float32)
+    result = eng.snap(cursor_world, (640.0, 400.0), cam, scene, anchor=anchor)
+    assert result.kind == SnapKind.AXIS_LOCK
