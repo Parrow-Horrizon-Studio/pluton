@@ -3,6 +3,7 @@ add_library(pluton_core STATIC
     src/version.cpp
     src/mesh.cpp
     src/primitives.cpp
+    src/halfedge.cpp
 )
 
 target_include_directories(pluton_core PUBLIC
