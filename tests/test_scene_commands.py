@@ -62,3 +62,57 @@ def test_add_face_command_round_trip():
 
     cmd.undo(s)
     assert len(list(s.faces_iter())) == 0
+
+
+def test_remove_face_command_round_trip():
+    from pluton.commands.scene_commands import AddFaceCommand, RemoveFaceCommand
+    from pluton.scene import Scene
+
+    s, v0, v1, v2 = _three_vertex_scene()
+    s.add_edge(v0, v1); s.add_edge(v1, v2); s.add_edge(v2, v0)
+    add = AddFaceCommand((v0, v1, v2))
+    add.do(s)
+    f = next(iter(s.faces_iter())).id
+
+    remove = RemoveFaceCommand(f)
+    remove.do(s)
+    assert len(list(s.faces_iter())) == 0
+
+    remove.undo(s)
+    assert len(list(s.faces_iter())) == 1
+    assert next(iter(s.faces_iter())).id == f
+
+
+def test_remove_edge_command_round_trip():
+    from pluton.commands.scene_commands import AddEdgeCommand, RemoveEdgeCommand
+    from pluton.scene import Scene
+
+    s, v0, v1, _ = _three_vertex_scene()
+    add = AddEdgeCommand(v0, v1)
+    add.do(s)
+    e = next(iter(s.edges_iter())).id
+
+    remove = RemoveEdgeCommand(e)
+    remove.do(s)
+    assert len(list(s.edges_iter())) == 0
+
+    remove.undo(s)
+    assert len(list(s.edges_iter())) == 1
+
+
+def test_remove_vertex_command_round_trip():
+    from pluton.commands.scene_commands import RemoveVertexCommand
+    from pluton.scene import Scene
+
+    s = Scene()
+    v = s.add_vertex(np.array([1.0, 2.0, 0.0], dtype=np.float32))
+
+    remove = RemoveVertexCommand(v)
+    remove.do(s)
+    assert len(list(s.vertices_iter())) == 0
+
+    remove.undo(s)
+    assert len(list(s.vertices_iter())) == 1
+    restored = next(iter(s.vertices_iter()))
+    assert restored.id == v
+    np.testing.assert_array_equal(restored.position, np.array([1.0, 2.0, 0.0], dtype=np.float32))
