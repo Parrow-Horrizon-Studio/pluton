@@ -42,9 +42,6 @@ _BG_COLOR = (0.15, 0.15, 0.18, 1.0)
 
 # Edge / overlay colors (per-vertex, packed into the VBO alongside positions).
 _USER_EDGE_COLOR = (0.85, 0.85, 0.85)
-_OVERLAY_RUBBER_BAND_COLOR = (1.00, 0.80, 0.20)
-_OVERLAY_SNAP_MARKER_COLOR = (0.20, 0.90, 1.00)
-
 # Uniform names looked up once per program in initialize_gl().
 _PHONG_UNIFORMS = (
     "u_view", "u_projection", "u_model", "u_camera_pos",
@@ -432,7 +429,7 @@ class SceneRenderer:
             if segs.shape[0] > 0:
                 n = int(segs.shape[0])
                 colors = np.tile(
-                    np.array(_OVERLAY_RUBBER_BAND_COLOR, dtype=np.float32), (n, 1)
+                    np.array(overlay.rubber_band_color, dtype=np.float32), (n, 1)
                 )
                 data = np.ascontiguousarray(
                     np.concatenate([segs.astype(np.float32), colors], axis=1)
@@ -450,7 +447,7 @@ class SceneRenderer:
                 p = overlay.snap_marker_position
                 # 0.05 m square on the same Z plane as the snap point.
                 s = 0.05
-                cr, cg, cb = _OVERLAY_SNAP_MARKER_COLOR
+                cr, cg, cb = overlay.snap_marker_color
                 quad = np.array(
                     [
                         [p[0] - s, p[1] - s, p[2], cr, cg, cb],
