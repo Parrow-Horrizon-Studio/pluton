@@ -140,3 +140,14 @@ def test_axis_lock_beats_grid():
     cursor_world = np.array([3.0, 0.02, 0.0], dtype=np.float32)
     result = eng.snap(cursor_world, (640.0, 400.0), cam, scene, anchor=anchor)
     assert result.kind == SnapKind.AXIS_LOCK
+
+
+def test_returns_none_when_scene_is_none():
+    """Snap with scene=None must not crash — returns NONE like the no-cursor case."""
+    from pluton.viewport.snap_engine import SnapEngine, SnapKind
+
+    eng = SnapEngine()
+    cam = _camera_at_default()
+    cursor_world = np.array([1.0, 1.0, 0.0], dtype=np.float32)
+    result = eng.snap(cursor_world, (640.0, 400.0), cam, None)  # type: ignore[arg-type]
+    assert result.kind == SnapKind.NONE

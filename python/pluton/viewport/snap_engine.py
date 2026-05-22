@@ -66,6 +66,15 @@ class SnapEngine:
                 label="—",
             )
 
+        if scene is None:
+            return SnapResult(
+                kind=SnapKind.NONE,
+                world_position=np.zeros(3, dtype=np.float32),
+                axis=None,
+                vertex_id=None,
+                label="—",
+            )
+
         # Pixel→world tolerance is approximated as a fixed constant for M2.
         # Rationale: at the default camera distance (~12 m from target) and
         # FOV (45°), 8 px ≈ 0.05–0.2 m depending on cursor depth. The simple

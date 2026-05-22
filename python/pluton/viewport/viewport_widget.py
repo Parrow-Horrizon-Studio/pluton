@@ -71,7 +71,7 @@ class ViewportWidget(QOpenGLWidget):
                 snap = self._snap_for_event(event)
                 active.on_mouse_press(event, snap)
                 if self._status_bar is not None:
-                    self._status_bar.set_snap(snap.label)
+                    self._status_bar.set_snap(snap.label if snap.kind != SnapKind.NONE else "")
                 self.update()
                 event.accept()
                 return
