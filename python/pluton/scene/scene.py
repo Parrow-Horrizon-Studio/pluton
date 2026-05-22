@@ -9,16 +9,14 @@ re-uploading buffers.
 
 from __future__ import annotations
 
-from collections.abc import Iterable
-from typing import TYPE_CHECKING
+from collections.abc import Iterable, Sequence
 
+import mapbox_earcut
 import numpy as np
 
 from pluton.scene.edge import Edge
+from pluton.scene.face import Face
 from pluton.scene.vertex import Vertex
-
-if TYPE_CHECKING:
-    from pluton.scene.face import Face
 
 
 class Scene:
@@ -85,6 +83,52 @@ class Scene:
         self._edge_index[key] = eid
         self._dirty = True
         return eid
+
+    def add_face_from_loop(self, ordered_vertex_ids: Sequence[int]) -> int:
+        """Insert a face bounded by the given closed vertex loop.
+
+        The loop is closed implicitly — the caller does not repeat the first
+        vertex. Requires len(loop) >= 3 and that every vertex ID already
+        exists in the scene.
+
+        Ground-plane convention in M2: plane_normal is hard-coded to (0, 0, 1)
+        and triangulation runs on the XY coordinates via mapbox-earcut.
+        """
+        loop = tuple(ordered_vertex_ids)
+        if len(loop) < 3:
+            raise ValueError(
+                f"face needs at least 3 vertices, got {len(loop)}"
+            )
+        # Validate vertex existence before any partial state mutation.
+        for vid in loop:
+            if vid not in self._vertices:
+                raise KeyError(f"add_face_from_loop: unknown vertex_id={vid}")
+
+        # Build a (N, 2) float32 array of XY for earcut. mapbox-earcut 2.x
+        # takes the 2D shape directly — DO NOT reshape to flat.
+        xy = np.empty((len(loop), 2), dtype=np.float32)
+        for i, vid in enumerate(loop):
+            xy[i] = self._vertices[vid].position[:2]
+        ring_ends = np.array([len(loop)], dtype=np.uint32)
+        # earcut returns a flat uint32 array of length 3*T; reshape to (T, 3).
+        # Indices are into the local ring, so map back to global vertex IDs.
+        local_indices = mapbox_earcut.triangulate_float32(xy, ring_ends)
+        local_indices = np.asarray(local_indices, dtype=np.int32).reshape(-1, 3)
+        triangles = np.array(
+            [[loop[i] for i in tri] for tri in local_indices],
+            dtype=np.int32,
+        )
+
+        fid = self._next_face_id
+        self._next_face_id += 1
+        self._faces[fid] = Face(
+            id=fid,
+            loop_vertex_ids=loop,
+            plane_normal=np.array([0.0, 0.0, 1.0], dtype=np.float32),
+            triangles=triangles,
+        )
+        self._dirty = True
+        return fid
 
     def clear(self) -> None:
         """Reset the scene to empty. Renderer will re-upload empty buffers."""

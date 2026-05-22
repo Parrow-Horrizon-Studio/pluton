@@ -221,3 +221,87 @@ def test_add_edge_rejects_unknown_vertex_ids():
         s.add_edge(999, v0)  # both directions
     # No edge should have been added.
     assert len(list(s.edges_iter())) == 0
+
+
+# ---------------------------------------------------------------------------
+# add_face_from_loop tests (Task 5)
+# ---------------------------------------------------------------------------
+
+
+def test_add_face_from_loop_creates_face_and_triangulates():
+    from pluton.scene import Scene
+
+    s = Scene()
+    # A unit square on Z=0
+    v0 = s.add_vertex(np.array([0.0, 0.0, 0.0], dtype=np.float32))
+    v1 = s.add_vertex(np.array([1.0, 0.0, 0.0], dtype=np.float32))
+    v2 = s.add_vertex(np.array([1.0, 1.0, 0.0], dtype=np.float32))
+    v3 = s.add_vertex(np.array([0.0, 1.0, 0.0], dtype=np.float32))
+
+    fid = s.add_face_from_loop((v0, v1, v2, v3))
+
+    faces = list(s.faces_iter())
+    assert len(faces) == 1
+    f = faces[0]
+    assert f.id == fid
+    assert f.loop_vertex_ids == (v0, v1, v2, v3)
+    # Ground plane normal is +Z
+    np.testing.assert_allclose(f.plane_normal, np.array([0.0, 0.0, 1.0], dtype=np.float32))
+    # Square triangulates to 2 triangles
+    assert f.triangles.shape == (2, 3)
+
+
+def test_add_face_from_loop_rejects_fewer_than_three_vertices():
+    from pluton.scene import Scene
+
+    s = Scene()
+    v0 = s.add_vertex(np.array([0.0, 0.0, 0.0], dtype=np.float32))
+    v1 = s.add_vertex(np.array([1.0, 0.0, 0.0], dtype=np.float32))
+
+    with pytest.raises(ValueError):
+        s.add_face_from_loop((v0, v1))
+
+
+def test_add_face_from_loop_triangulates_concave_polygon():
+    from pluton.scene import Scene
+
+    s = Scene()
+    # An L-shape (6 vertices, concave) on Z=0
+    pts = [(0, 0), (2, 0), (2, 1), (1, 1), (1, 2), (0, 2)]
+    vids = [
+        s.add_vertex(np.array([x, y, 0.0], dtype=np.float32)) for (x, y) in pts
+    ]
+
+    s.add_face_from_loop(tuple(vids))
+
+    f = next(iter(s.faces_iter()))
+    # An L-shape has 6 vertices, so earcut produces 4 triangles
+    assert f.triangles.shape == (4, 3)
+
+
+def test_add_face_from_loop_rejects_unknown_vertex_id():
+    """Phantom vertex IDs in the loop must raise — topology coherence."""
+    from pluton.scene import Scene
+
+    s = Scene()
+    v0 = s.add_vertex(np.array([0.0, 0.0, 0.0], dtype=np.float32))
+    v1 = s.add_vertex(np.array([1.0, 0.0, 0.0], dtype=np.float32))
+    with pytest.raises(KeyError):
+        s.add_face_from_loop((v0, v1, 999))
+    assert len(list(s.faces_iter())) == 0
+
+
+def test_add_face_from_loop_accepts_list_and_stores_as_tuple():
+    """Accept any Sequence; the stored loop_vertex_ids must be a tuple."""
+    from pluton.scene import Scene
+
+    s = Scene()
+    v0 = s.add_vertex(np.array([0.0, 0.0, 0.0], dtype=np.float32))
+    v1 = s.add_vertex(np.array([1.0, 0.0, 0.0], dtype=np.float32))
+    v2 = s.add_vertex(np.array([0.0, 1.0, 0.0], dtype=np.float32))
+
+    fid = s.add_face_from_loop([v0, v1, v2])  # list, not tuple
+
+    f = next(iter(s.faces_iter()))
+    assert isinstance(f.loop_vertex_ids, tuple)
+    assert f.loop_vertex_ids == (v0, v1, v2)
