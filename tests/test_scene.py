@@ -93,6 +93,8 @@ def test_clear_resets_dirty_flag_and_removes_everything():
 
     s.clear()
     assert len(list(s.vertices_iter())) == 0
+    assert len(list(s.edges_iter())) == 0
+    assert len(list(s.faces_iter())) == 0
     assert s.dirty is True
 
 
@@ -146,3 +148,14 @@ def test_face_position_arrays_are_immutable():
         f.plane_normal[0] = 99.0
     with pytest.raises(ValueError):
         f.triangles[0, 0] = 99
+
+
+def test_add_vertex_collapses_negative_zero():
+    """`-0.0` and `0.0` must dedupe to the same vertex (computed coords can produce -0.0)."""
+    from pluton.scene import Scene
+
+    s = Scene()
+    v0 = s.add_vertex(np.array([0.0, 0.0, 0.0], dtype=np.float32))
+    v1 = s.add_vertex(np.array([-0.0, 0.0, 0.0], dtype=np.float32))
+    assert v0 == v1
+    assert len(list(s.vertices_iter())) == 1

@@ -1,8 +1,8 @@
 """The editable polygonal scene.
 
 Pure-Python topology. Stable integer IDs for vertices, edges, and faces.
-Idempotent mutators (`add_vertex`, `add_edge`) so tools never have to check
-existence before inserting. A single `dirty` flag tracks "has the renderer
+Idempotent mutators (`add_vertex`; `add_edge` and `add_face_from_loop` arrive
+in Tasks 4 and 5) so tools never have to check existence before inserting. A single `dirty` flag tracks "has the renderer
 seen the current state yet"; the renderer calls `mark_clean()` after
 re-uploading buffers.
 """
@@ -31,7 +31,7 @@ class Scene:
         self._next_vertex_id = 0
         self._next_edge_id = 0
         self._next_face_id = 0
-        # Maps tuple(position.tobytes()) -> vertex_id for idempotent add_vertex.
+        # Maps position.tobytes() -> vertex_id for idempotent add_vertex.
         self._position_index: dict[bytes, int] = {}
         self._dirty: bool = False
 
@@ -46,6 +46,8 @@ class Scene:
         """
         if position.dtype != np.float32 or position.shape != (3,):
             position = np.asarray(position, dtype=np.float32).reshape(3)
+        # Collapse negative zero to positive zero so -0.0 and 0.0 hash identically.
+        position = position + np.float32(0.0)
         key = position.tobytes()
         existing = self._position_index.get(key)
         if existing is not None:
