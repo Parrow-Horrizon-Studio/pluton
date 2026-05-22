@@ -80,9 +80,58 @@ std::uint32_t HalfEdgeMesh::add_halfedge_pair(std::uint32_t v1_id, std::uint32_t
     return edge_id;
 }
 
-std::uint32_t HalfEdgeMesh::add_face_from_loop(const std::vector<std::uint32_t>&,
-                                                const std::vector<std::int32_t>&) {
-    throw std::runtime_error("HalfEdgeMesh::add_face_from_loop not implemented yet");
+std::uint32_t HalfEdgeMesh::add_face_from_loop(const std::vector<std::uint32_t>& loop,
+                                                const std::vector<std::int32_t>& triangles) {
+    if (loop.size() < 3) {
+        throw std::invalid_argument("HalfEdgeMesh::add_face_from_loop: loop has " + std::to_string(loop.size()) + " vertices; minimum 3");
+    }
+    for (auto v : loop) {
+        if (!vertex_is_live(v)) {
+            throw std::out_of_range("HalfEdgeMesh::add_face_from_loop: vertex " + std::to_string(v) + " is not live");
+        }
+    }
+    const std::uint32_t f_id = static_cast<std::uint32_t>(faces_.size());
+    Face f{INVALID_ID, {0.0f, 0.0f, 1.0f}, triangles, loop, true};
+
+    // Wire each loop[i] → loop[i+1] half-edge to point to loop[i+1] → loop[i+2].
+    // The half-edge from v_from to v_to has origin = v_from. Given the canonical
+    // convention (he[2*e].origin = min, he[2*e+1].origin = max), pick the index
+    // that matches v_from.
+    const std::size_t n = loop.size();
+    std::vector<std::uint32_t> loop_halfedges(n, INVALID_ID);
+    for (std::size_t i = 0; i < n; ++i) {
+        const std::uint32_t v_from = loop[i];
+        const std::uint32_t v_to = loop[(i + 1) % n];
+        const std::uint32_t v_min = std::min(v_from, v_to);
+        const std::uint32_t v_max = std::max(v_from, v_to);
+        const std::uint64_t key = pack_pair(v_min, v_max);
+        auto it = edge_index_.find(key);
+        if (it == edge_index_.end() || !edge_is_live(it->second)) {
+            throw std::invalid_argument("HalfEdgeMesh::add_face_from_loop: edge ("
+                + std::to_string(v_from) + ", " + std::to_string(v_to) + ") is missing");
+        }
+        const std::uint32_t edge_id = it->second;
+        loop_halfedges[i] = (v_from < v_to) ? (edge_id * 2) : (edge_id * 2 + 1);
+    }
+    // Wire next pointers + face pointers.
+    for (std::size_t i = 0; i < n; ++i) {
+        const std::uint32_t he = loop_halfedges[i];
+        const std::uint32_t he_next = loop_halfedges[(i + 1) % n];
+        halfedges_[he].next = he_next;
+        halfedges_[he].face = f_id;
+    }
+    f.boundary_he = loop_halfedges[0];
+    // outgoing_he on each loop vertex points to one of its outgoing half-edges
+    // (any will do for now; M3b's adjacency walks pick a starting half-edge).
+    for (std::size_t i = 0; i < n; ++i) {
+        if (vertices_[loop[i]].outgoing_he == INVALID_ID) {
+            vertices_[loop[i]].outgoing_he = loop_halfedges[i];
+        }
+    }
+
+    faces_.push_back(std::move(f));
+    dirty_ = true;
+    return f_id;
 }
 
 void HalfEdgeMesh::remove_vertex(std::uint32_t) {

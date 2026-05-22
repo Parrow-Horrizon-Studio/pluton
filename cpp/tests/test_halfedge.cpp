@@ -102,3 +102,55 @@ TEST(HalfEdgeMeshTest, AddHalfedgePairWiresTwinsAndOrigins) {
     EXPECT_EQ(m.halfedge_face(he_a), pluton::HalfEdgeMesh::INVALID_ID);
     EXPECT_EQ(m.halfedge_face(he_b), pluton::HalfEdgeMesh::INVALID_ID);
 }
+
+TEST(HalfEdgeMeshTest, AddFaceFromLoopWiresBoundaryCycle) {
+    pluton::HalfEdgeMesh m;
+    auto v0 = m.add_vertex(0.0f, 0.0f, 0.0f);
+    auto v1 = m.add_vertex(1.0f, 0.0f, 0.0f);
+    auto v2 = m.add_vertex(1.0f, 1.0f, 0.0f);
+    auto v3 = m.add_vertex(0.0f, 1.0f, 0.0f);
+    m.add_halfedge_pair(v0, v1);
+    m.add_halfedge_pair(v1, v2);
+    m.add_halfedge_pair(v2, v3);
+    m.add_halfedge_pair(v3, v0);
+
+    const std::vector<std::uint32_t> loop = {v0, v1, v2, v3};
+    const std::vector<std::int32_t> tris = {static_cast<std::int32_t>(v0), static_cast<std::int32_t>(v1), static_cast<std::int32_t>(v2),
+                                            static_cast<std::int32_t>(v0), static_cast<std::int32_t>(v2), static_cast<std::int32_t>(v3)};
+    auto f = m.add_face_from_loop(loop, tris);
+    EXPECT_EQ(f, 0u);
+    EXPECT_TRUE(m.face_is_live(f));
+    EXPECT_EQ(m.face_loop_vertices(f), loop);
+    EXPECT_EQ(m.face_triangles(f), tris);
+}
+
+TEST(HalfEdgeMeshTest, AddFaceFromLoopRejectsShortLoop) {
+    pluton::HalfEdgeMesh m;
+    auto v0 = m.add_vertex(0.0f, 0.0f, 0.0f);
+    auto v1 = m.add_vertex(1.0f, 0.0f, 0.0f);
+    EXPECT_THROW(m.add_face_from_loop({v0, v1}, {}), std::invalid_argument);
+}
+
+TEST(HalfEdgeMeshTest, AddFaceFromLoopSetsHalfedgeFacePointers) {
+    pluton::HalfEdgeMesh m;
+    auto v0 = m.add_vertex(0.0f, 0.0f, 0.0f);
+    auto v1 = m.add_vertex(1.0f, 0.0f, 0.0f);
+    auto v2 = m.add_vertex(0.0f, 1.0f, 0.0f);
+    m.add_halfedge_pair(v0, v1);
+    m.add_halfedge_pair(v1, v2);
+    m.add_halfedge_pair(v2, v0);
+    const std::vector<std::int32_t> tris = {static_cast<std::int32_t>(v0),
+                                            static_cast<std::int32_t>(v1),
+                                            static_cast<std::int32_t>(v2)};
+    auto f = m.add_face_from_loop({v0, v1, v2}, tris);
+
+    // For each edge in the loop, exactly ONE of the two halfedges should have
+    // its face set to f (the one walking the loop in order). The twin should
+    // stay at INVALID_ID (it's a boundary edge).
+    for (std::uint32_t e = 0; e < 3; ++e) {
+        const std::uint32_t he_a = e * 2;
+        const std::uint32_t he_b = he_a + 1;
+        EXPECT_TRUE(m.halfedge_face(he_a) == f || m.halfedge_face(he_b) == f);
+        EXPECT_TRUE(m.halfedge_face(he_a) == pluton::HalfEdgeMesh::INVALID_ID || m.halfedge_face(he_b) == pluton::HalfEdgeMesh::INVALID_ID);
+    }
+}
