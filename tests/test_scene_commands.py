@@ -1,0 +1,64 @@
+"""Tests for AddVertex / AddEdge / AddFace / Remove* / ClearScene commands."""
+
+from __future__ import annotations
+
+import numpy as np
+
+
+def _three_vertex_scene():
+    from pluton.scene import Scene
+
+    s = Scene()
+    v0 = s.add_vertex(np.array([0.0, 0.0, 0.0], dtype=np.float32))
+    v1 = s.add_vertex(np.array([1.0, 0.0, 0.0], dtype=np.float32))
+    v2 = s.add_vertex(np.array([0.0, 1.0, 0.0], dtype=np.float32))
+    return s, v0, v1, v2
+
+
+def test_add_vertex_command_round_trip():
+    from pluton.commands.scene_commands import AddVertexCommand
+    from pluton.scene import Scene
+
+    s = Scene()
+    pos = np.array([3.0, 4.0, 0.0], dtype=np.float32)
+    cmd = AddVertexCommand(pos)
+
+    cmd.do(s)
+    assert len(list(s.vertices_iter())) == 1
+
+    cmd.undo(s)
+    assert len(list(s.vertices_iter())) == 0
+
+    cmd.do(s)
+    assert len(list(s.vertices_iter())) == 1
+
+
+def test_add_edge_command_round_trip():
+    from pluton.commands.scene_commands import AddEdgeCommand
+    from pluton.scene import Scene
+
+    s = Scene()
+    v0 = s.add_vertex(np.array([0.0, 0.0, 0.0], dtype=np.float32))
+    v1 = s.add_vertex(np.array([1.0, 0.0, 0.0], dtype=np.float32))
+    cmd = AddEdgeCommand(v0, v1)
+
+    cmd.do(s)
+    assert len(list(s.edges_iter())) == 1
+
+    cmd.undo(s)
+    assert len(list(s.edges_iter())) == 0
+
+
+def test_add_face_command_round_trip():
+    from pluton.commands.scene_commands import AddFaceCommand
+    from pluton.scene import Scene
+
+    s, v0, v1, v2 = _three_vertex_scene()
+    s.add_edge(v0, v1); s.add_edge(v1, v2); s.add_edge(v2, v0)
+    cmd = AddFaceCommand((v0, v1, v2))
+
+    cmd.do(s)
+    assert len(list(s.faces_iter())) == 1
+
+    cmd.undo(s)
+    assert len(list(s.faces_iter())) == 0
