@@ -1,4 +1,4 @@
-"""The main application window — hosts the viewport, status bar, and ToolManager."""
+"""The main application window — hosts the viewport, status bar, ToolManager, and CommandStack."""
 
 from __future__ import annotations
 
@@ -6,6 +6,8 @@ from PySide6.QtCore import Qt
 from PySide6.QtGui import QKeySequence, QShortcut
 from PySide6.QtWidgets import QMainWindow, QVBoxLayout, QWidget
 
+from pluton.commands import CommandStack
+from pluton.commands.scene_commands import ClearSceneCommand
 from pluton.scene import Scene
 from pluton.tools import LineTool, RectangleTool, ToolContext, ToolManager
 from pluton.ui.status_bar import StatusBar
@@ -20,14 +22,17 @@ class MainWindow(QMainWindow):
         self.setWindowTitle("Pluton")
         self.resize(1280, 800)
 
-        # Scene + tool manager
+        # Scene + tool manager + command stack
         self._scene = Scene()
+        self._command_stack = CommandStack()
         self._tool_manager = ToolManager()
-        self._tool_manager.set_context(ToolContext(scene=self._scene))
+        self._tool_manager.set_context(
+            ToolContext(scene=self._scene, command_stack=self._command_stack)
+        )
         self._tool_manager.register(LineTool())
         self._tool_manager.register(RectangleTool())
 
-        # Viewport + status bar in a vertical layout
+        # Viewport + status bar
         self._viewport = ViewportWidget(self._scene, self._tool_manager, self)
         self._status_bar = StatusBar()
 
@@ -39,14 +44,16 @@ class MainWindow(QMainWindow):
         layout.addWidget(self._status_bar, stretch=0)
         self.setCentralWidget(container)
 
-        # Wire the status bar to ViewportWidget updates
         self._viewport.set_status_bar(self._status_bar)
 
-        # Keyboard shortcuts (work regardless of focus)
+        # Keyboard shortcuts
         QShortcut(QKeySequence("L"), self, activated=lambda: self._activate("L"))
         QShortcut(QKeySequence("R"), self, activated=lambda: self._activate("R"))
         QShortcut(QKeySequence("Esc"), self, activated=self._on_escape)
         QShortcut(QKeySequence("Ctrl+N"), self, activated=self._on_clear_scene)
+        QShortcut(QKeySequence("Ctrl+Z"), self, activated=self._on_undo)
+        QShortcut(QKeySequence("Ctrl+Y"), self, activated=self._on_redo)
+        QShortcut(QKeySequence("Ctrl+Shift+Z"), self, activated=self._on_redo)
 
     # --- Slots -----------------------------------------------------------
 
@@ -58,16 +65,9 @@ class MainWindow(QMainWindow):
             self._viewport.update()
 
     def _on_escape(self) -> None:
-        """Two-stage ESC per spec §4.5.
-
-        - If the active tool has an in-progress gesture, forward ESC to it
-          (the tool cancels the gesture, stays active).
-        - Otherwise, deactivate the tool entirely (back to camera-only).
-        """
         active = self._tool_manager.active
         if active is None:
             return
-
         if active.has_active_gesture:
             from PySide6.QtGui import QKeyEvent
 
@@ -77,9 +77,16 @@ class MainWindow(QMainWindow):
             self._tool_manager.deactivate_current()
             self._status_bar.set_tool("")
             self._status_bar.set_snap("")
-
         self._viewport.update()
 
     def _on_clear_scene(self) -> None:
-        self._scene.clear()
+        self._command_stack.execute(ClearSceneCommand(), self._scene)
         self._viewport.update()
+
+    def _on_undo(self) -> None:
+        if self._command_stack.undo(self._scene):
+            self._viewport.update()
+
+    def _on_redo(self) -> None:
+        if self._command_stack.redo(self._scene):
+            self._viewport.update()

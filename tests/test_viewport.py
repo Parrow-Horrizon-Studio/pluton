@@ -204,3 +204,58 @@ def test_ctrl_n_clears_scene(qtbot):
     assert len(list(window._scene.vertices_iter())) == 1
     qtbot.keyClick(window, Qt.Key.Key_N, modifier=Qt.KeyboardModifier.ControlModifier)
     assert len(list(window._scene.vertices_iter())) == 0
+
+
+def test_ctrl_z_undoes_completed_rectangle(qtbot):
+    from pluton.ui.main_window import MainWindow
+
+    window = MainWindow()
+    qtbot.addWidget(window)
+    window.show()
+    qtbot.waitExposed(window)
+    qtbot.wait(50)
+
+    # Activate Rectangle, simulate two clicks via the tool directly.
+    qtbot.keyClick(window, Qt.Key.Key_R)
+    from pluton.viewport.snap_engine import SnapKind, SnapResult
+    active = window._tool_manager.active
+
+    def snap_at(x, y):
+        return SnapResult(
+            kind=SnapKind.GRID,
+            world_position=np.array([x, y, 0.0], dtype=np.float32),
+            axis=None,
+            vertex_id=None,
+            label="Grid",
+        )
+
+    active.on_mouse_press(None, snap_at(0.0, 0.0))  # type: ignore[arg-type]
+    active.on_mouse_press(None, snap_at(3.0, 2.0))  # type: ignore[arg-type]
+    assert len(list(window._scene.faces_iter())) == 1
+
+    qtbot.keyClick(window, Qt.Key.Key_Z, modifier=Qt.KeyboardModifier.ControlModifier)
+    assert len(list(window._scene.faces_iter())) == 0
+
+    qtbot.keyClick(window, Qt.Key.Key_Y, modifier=Qt.KeyboardModifier.ControlModifier)
+    assert len(list(window._scene.faces_iter())) == 1
+
+
+def test_ctrl_n_is_undoable(qtbot):
+    from pluton.ui.main_window import MainWindow
+
+    window = MainWindow()
+    qtbot.addWidget(window)
+    window.show()
+    qtbot.waitExposed(window)
+    qtbot.wait(50)
+
+    # Seed the scene with two vertices.
+    window._scene.add_vertex(np.array([1.0, 2.0, 0.0], dtype=np.float32))
+    window._scene.add_vertex(np.array([3.0, 4.0, 0.0], dtype=np.float32))
+    assert len(list(window._scene.vertices_iter())) == 2
+
+    qtbot.keyClick(window, Qt.Key.Key_N, modifier=Qt.KeyboardModifier.ControlModifier)
+    assert len(list(window._scene.vertices_iter())) == 0
+
+    qtbot.keyClick(window, Qt.Key.Key_Z, modifier=Qt.KeyboardModifier.ControlModifier)
+    assert len(list(window._scene.vertices_iter())) == 2
