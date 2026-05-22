@@ -26,10 +26,10 @@ class ToolManager:
             return False
         if self._active is target:
             return True
-        if self._active is not None:
-            self._active.deactivate()
         if self._ctx is None:
             raise RuntimeError("ToolManager has no ToolContext; call set_context() first")
+        if self._active is not None:
+            self._active.deactivate()
         target.activate(self._ctx)
         self._active = target
         return True

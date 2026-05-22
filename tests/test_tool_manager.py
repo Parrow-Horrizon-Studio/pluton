@@ -94,3 +94,15 @@ def test_unknown_shortcut_returns_false():
     mgr = ToolManager()
     assert mgr.activate_by_shortcut("X") is False
     assert mgr.active is None
+
+
+def test_activate_without_context_raises_runtime_error():
+    """Activating a tool when no ToolContext has been set must raise."""
+    import pytest as _pytest  # local import — test file doesn't otherwise import pytest
+
+    mgr = ToolManager()  # no ctx
+    mgr.register(FakeTool(name="F", shortcut="F"))
+    with _pytest.raises(RuntimeError):
+        mgr.activate_by_shortcut("F")
+    # And no tool should be left "active" after the failure.
+    assert mgr.active is None
