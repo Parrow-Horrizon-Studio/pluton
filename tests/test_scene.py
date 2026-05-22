@@ -401,3 +401,90 @@ def test_face_triangle_buffer_is_empty_when_no_faces():
     positions, normals = s.face_triangle_buffer()
     assert positions.shape == (0, 3)
     assert normals.shape == (0, 3)
+
+
+# ---------------------------------------------------------------------------
+# remove_* / restore_* tests (Task 12)
+# ---------------------------------------------------------------------------
+
+
+def test_remove_face_leaves_verts_and_edges_alive():
+    from pluton.scene import Scene
+
+    s = Scene()
+    v0 = s.add_vertex(np.array([0.0, 0.0, 0.0], dtype=np.float32))
+    v1 = s.add_vertex(np.array([1.0, 0.0, 0.0], dtype=np.float32))
+    v2 = s.add_vertex(np.array([0.0, 1.0, 0.0], dtype=np.float32))
+    s.add_edge(v0, v1)
+    s.add_edge(v1, v2)
+    s.add_edge(v2, v0)
+    f = s.add_face_from_loop((v0, v1, v2))
+
+    s.remove_face(f)
+
+    assert len(list(s.faces_iter())) == 0
+    # Vertices and edges still alive.
+    assert len(list(s.vertices_iter())) == 3
+    assert len(list(s.edges_iter())) == 3
+
+
+def test_remove_edge_rejects_if_face_still_uses_it():
+    from pluton.scene import Scene
+
+    s = Scene()
+    v0 = s.add_vertex(np.array([0.0, 0.0, 0.0], dtype=np.float32))
+    v1 = s.add_vertex(np.array([1.0, 0.0, 0.0], dtype=np.float32))
+    v2 = s.add_vertex(np.array([0.0, 1.0, 0.0], dtype=np.float32))
+    e0 = s.add_edge(v0, v1)
+    s.add_edge(v1, v2)
+    s.add_edge(v2, v0)
+    s.add_face_from_loop((v0, v1, v2))
+
+    with pytest.raises(ValueError):
+        s.remove_edge(e0)
+
+
+def test_remove_vertex_rejects_if_edge_still_uses_it():
+    from pluton.scene import Scene
+
+    s = Scene()
+    v0 = s.add_vertex(np.array([0.0, 0.0, 0.0], dtype=np.float32))
+    v1 = s.add_vertex(np.array([1.0, 0.0, 0.0], dtype=np.float32))
+    s.add_edge(v0, v1)
+
+    with pytest.raises(ValueError):
+        s.remove_vertex(v0)
+
+
+def test_restore_face_round_trip():
+    from pluton.scene import Scene
+
+    s = Scene()
+    v0 = s.add_vertex(np.array([0.0, 0.0, 0.0], dtype=np.float32))
+    v1 = s.add_vertex(np.array([1.0, 0.0, 0.0], dtype=np.float32))
+    v2 = s.add_vertex(np.array([0.0, 1.0, 0.0], dtype=np.float32))
+    s.add_edge(v0, v1)
+    s.add_edge(v1, v2)
+    s.add_edge(v2, v0)
+    f = s.add_face_from_loop((v0, v1, v2))
+    captured_loop = s.face(f).loop_vertex_ids
+
+    s.remove_face(f)
+    assert len(list(s.faces_iter())) == 0
+
+    s.restore_face(f, captured_loop)
+    assert len(list(s.faces_iter())) == 1
+    restored = s.face(f)
+    assert restored.loop_vertex_ids == captured_loop
+
+
+def test_add_vertex_after_tombstone_at_same_position_allocates_new_id():
+    """Position-index only tracks live vertices; tombstoned slots stay tombstoned."""
+    from pluton.scene import Scene
+
+    s = Scene()
+    pos = np.array([5.0, 5.0, 0.0], dtype=np.float32)
+    v0 = s.add_vertex(pos)
+    s.remove_vertex(v0)
+    v1 = s.add_vertex(pos.copy())
+    assert v1 != v0  # new ID; old slot stays tombstoned
