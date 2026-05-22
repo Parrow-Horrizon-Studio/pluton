@@ -144,10 +144,15 @@ class Camera:
         # Clamp so we can't fly through the target on a single tick.
         step = max(min(step, distance * 0.9), -distance * 5.0)
 
-        self.position = self.position + direction * step
-        # M1 design: orbit pivot stays at the original `target` (world origin).
-        # SketchUp-style "orbit around clicked point" is deferred to a later
-        # milestone once we have ray-mesh hit-testing.
+        delta = direction * step
+        self.position = self.position + delta
+        if cursor_ndc is not None:
+            # Move target with position so the view direction is preserved
+            # (pure zoom-toward-cursor, no rotation). The orbit pivot does
+            # drift along the cursor ray as a consequence — this matches
+            # SketchUp's behavior and the user's stated preference during
+            # M2 visual verification.
+            self.target = self.target + delta
 
     # --- Picking / raycast helpers ----------------------------------------
 

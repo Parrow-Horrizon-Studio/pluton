@@ -70,18 +70,24 @@ def test_middle_button_drag_orbits_camera(qtbot):
 
 
 def test_wheel_event_zooms_camera(qtbot):
-    """Scrolling should change the camera-target distance."""
+    """Scrolling should move the camera position along the zoom direction.
+
+    Since the viewport always passes cursor_ndc to camera.zoom, both position
+    and target move together (pure zoom, no rotation). The camera-to-target
+    distance is preserved; it is camera.position that moves.
+    """
     from pluton.viewport.viewport_widget import ViewportWidget
 
     widget = ViewportWidget()
     qtbot.addWidget(widget)
-    distance_before = float(np.linalg.norm(widget.camera.position - widget.camera.target))
+    pos_before = widget.camera.position.copy()
 
     # Drive the wheel event directly (qtbot doesn't have a wheel helper).
     widget.wheelEvent(_make_wheel_event(widget, delta_y=120))
 
-    distance_after = float(np.linalg.norm(widget.camera.position - widget.camera.target))
-    assert distance_after != distance_before
+    assert not np.allclose(widget.camera.position, pos_before), (
+        "camera position should have moved after a wheel zoom"
+    )
 
 
 def test_wheel_event_with_zero_vertical_delta_does_not_zoom(qtbot):

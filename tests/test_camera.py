@@ -128,16 +128,37 @@ def test_zoom_out_increases_distance():
     assert distance_after > distance_before
 
 
-def test_zoom_toward_cursor_does_not_drift_target():
-    """Cursor-zoom must not move `target` — the orbit pivot must stay anchored."""
+def test_zoom_toward_cursor_moves_position_and_target_together():
+    """Cursor-zoom must move position AND target by the same delta.
+
+    This preserves the view direction (no rotation) at the cost of letting the
+    orbit pivot drift along the cursor ray — matching SketchUp's behavior and
+    the preference established during M2 visual verification.
+    """
+    from pluton.viewport.camera import _normalize
+
     c = Camera()
+    pos_before = c.position.copy()
     target_before = c.target.copy()
-    cursor = np.array([0.3, -0.2], dtype=np.float32)  # arbitrary off-center cursor
+    cursor = np.array([0.5, 0.5], dtype=np.float32)  # off-center cursor
 
-    for _ in range(50):
-        c.zoom(scroll_delta=1.0, cursor_ndc=cursor)
+    c.zoom(scroll_delta=1.0, cursor_ndc=cursor)
 
-    np.testing.assert_allclose(c.target, target_before, atol=1e-5)
+    # Both position and target must have moved.
+    assert not np.allclose(c.position, pos_before), "position should have changed"
+    assert not np.allclose(c.target, target_before), "target should have changed"
+
+    # They must have moved by the same vector (rigid translation).
+    pos_delta = c.position - pos_before
+    target_delta = c.target - target_before
+    np.testing.assert_allclose(pos_delta, target_delta, atol=1e-6,
+                               err_msg="position and target must move by identical delta")
+
+    # View direction must be preserved (no rotation).
+    dir_before = _normalize(target_before - pos_before)
+    dir_after = _normalize(c.target - c.position)
+    np.testing.assert_allclose(dir_after, dir_before, atol=1e-5,
+                               err_msg="view direction must be unchanged after cursor-zoom")
 
 
 # --- Ray from screen / ray intersect ground --------------------------------
