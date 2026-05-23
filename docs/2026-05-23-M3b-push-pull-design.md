@@ -89,7 +89,8 @@ pluton/
 │   │   ├── tool.py                      # MODIFIED — ToolOverlay gains face_fill fields; Tool gets optional status_text property
 │   │   └── __init__.py                  # MODIFIED — export PushPullTool
 │   ├── viewport/
-│   │   └── scene_renderer.py            # MODIFIED — draw_face_fill_overlays pass
+│   │   ├── scene_renderer.py            # MODIFIED — draw_face_fill_overlays pass
+│   │   └── viewport_widget.py           # MODIFIED (if needed) — setMouseTracking(True) for hover-highlight events (verify in Task 13)
 │   └── ui/
 │       └── main_window.py               # MODIFIED — register PushPullTool, bind P, read status_text into status bar
 │
@@ -112,18 +113,20 @@ No new top-level dependencies. `pyproject.toml`, `vcpkg.json`, `CMakeLists.txt` 
 namespace pluton {
 
 struct RayMeshHit {
-    uint32_t face_id;
-    float    t;      // ray parameter at hit (always > 0)
-    Vector3  point;  // origin + t * direction
+    std::uint32_t        face_id;
+    float                t;      // ray parameter at hit (always > 0)
+    std::array<float, 3> point;  // origin + t * direction
 };
 
 std::optional<RayMeshHit> ray_intersect_mesh(
     const HalfEdgeMesh& mesh,
-    const Vector3& origin,
-    const Vector3& direction);
+    const std::array<float, 3>& origin,
+    const std::array<float, 3>& direction);
 
 }  // namespace pluton
 ```
+
+(Pluton's kernel uses `std::array<float, 3>` for 3D vectors — see `HalfEdgeMesh::vertex_position`. M3b follows that precedent rather than introducing a new `Vector3` type.)
 
 ```cpp
 // pluton/halfedge.h additions
@@ -221,9 +224,9 @@ Everything else is the same as M3a.
 | `IDLE → IDLE` | `on_mouse_press` (no face hovered) | No-op. |
 | `HOVERING → DRAGGING` | `on_mouse_press` | Cache `_armed_face_id`, `_armed_face_loop`, `_armed_face_normal`, `_armed_face_center`. `_current_depth = 0.0`. |
 | `DRAGGING → DRAGGING` | `on_mouse_move` | Update `_current_depth` via line-line CPA (see §4.2). |
-| `DRAGGING → IDLE/HOVERING` | `on_mouse_press` AND `_current_depth ≥ 1e-3` | Build composite, `command_stack.push_executed(composite)`. Reset; transition to HOVERING if cursor still over a face, else IDLE. |
-| `DRAGGING → IDLE/HOVERING` | `on_mouse_press` AND `_current_depth < 1e-3` | Cancel (no push). Reset to IDLE or HOVERING per cursor. |
-| `DRAGGING → IDLE/HOVERING` | `Esc` | Cancel (no push). Reset to IDLE or HOVERING per cursor. |
+| `DRAGGING → IDLE/HOVERING` | `on_mouse_press` AND `_current_depth ≥ 1e-3` | Build composite, `command_stack.push_executed(composite)`. Then `ray_pick_face` at the current cursor position to determine whether to transition to HOVERING (new face under cursor — typically the top face of the just-committed prism) or IDLE. |
+| `DRAGGING → IDLE/HOVERING` | `on_mouse_press` AND `_current_depth < 1e-3` | Cancel (no push). Then `ray_pick_face` at the current cursor position to determine HOVERING vs IDLE. |
+| `DRAGGING → IDLE/HOVERING` | `Esc` | Cancel (no push). Then `ray_pick_face` at the current cursor position to determine HOVERING vs IDLE. |
 | `any → IDLE` | tool deactivated (different tool, second `Esc` from HOVERING) | Clear all state. |
 
 ### 4.2 Depth metric (line-line closest-point)
