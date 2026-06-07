@@ -122,10 +122,15 @@ class PushPullTool(Tool):
 
     def overlay(self) -> ToolOverlay:
         polygons: list[np.ndarray] = []
+        color = _HOVER_FILL_COLOR
+
         if self._state == _State.HOVERING and self._hovered_face_id is not None:
             polygons = [self._loop_world_coords(self._hovered_face_id)]
-        # DRAGGING overlay is added in Task 9; face_fill_color will switch to
-        # _ARMED_FILL_COLOR / _GHOST_FILL_COLOR depending on state at that point.
+            color = _HOVER_FILL_COLOR
+        elif self._state == _State.DRAGGING and self._armed_face_id is not None:
+            polygons = self._build_ghost_polygons()
+            color = _GHOST_FILL_COLOR
+
         return ToolOverlay(
             rubber_band_segments=np.zeros((0, 3), dtype=np.float32),
             rubber_band_color=(0.85, 0.85, 0.85),
@@ -133,7 +138,7 @@ class PushPullTool(Tool):
             snap_marker_color=(0.85, 0.85, 0.85),
             snap_marker_kind=0,
             face_fill_polygons=polygons,
-            face_fill_color=_HOVER_FILL_COLOR,
+            face_fill_color=color,
         )
 
     # ---- Helpers -------------------------------------------------------
@@ -199,6 +204,34 @@ class PushPullTool(Tool):
         d_param = float(np.dot(d_hat, w))
         t = (e - b * d_param) / denom
         self._current_depth = max(0.0, t)
+
+    def _build_ghost_polygons(self) -> list[np.ndarray]:
+        """Return [armed_face_loop, ghost_top, *ghost_sides] all in world coords."""
+        assert self._armed_face_id is not None
+        assert self._armed_face_normal is not None
+        assert self._armed_face_center is not None
+        assert self._scene is not None
+
+        source_loop_xyz = self._loop_world_coords(self._armed_face_id)  # (N, 3)
+        n = self._armed_face_normal
+        depth = self._current_depth
+        top_loop_xyz = source_loop_xyz + depth * n[np.newaxis, :]
+
+        polygons: list[np.ndarray] = [source_loop_xyz, top_loop_xyz]
+        # Side polygons (one per source edge): (V_i, V_{i+1}, V'_{i+1}, V'_i).
+        n_verts = source_loop_xyz.shape[0]
+        for i in range(n_verts):
+            j = (i + 1) % n_verts
+            side = np.stack(
+                [
+                    source_loop_xyz[i],
+                    source_loop_xyz[j],
+                    top_loop_xyz[j],
+                    top_loop_xyz[i],
+                ]
+            ).astype(np.float32)
+            polygons.append(side)
+        return polygons
 
     def _reset_to_idle(self) -> None:
         self._state = _State.IDLE
