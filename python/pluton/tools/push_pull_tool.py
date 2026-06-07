@@ -16,6 +16,7 @@ from __future__ import annotations
 from enum import Enum
 
 import numpy as np
+from PySide6.QtCore import Qt
 from PySide6.QtGui import QKeyEvent, QMouseEvent
 
 from pluton.commands import CompositeCommand
@@ -133,8 +134,6 @@ class PushPullTool(Tool):
             self._hovered_face_id = hit.face_id
 
     def on_key_press(self, event: QKeyEvent) -> None:
-        from PySide6.QtCore import Qt
-
         if event.key() != Qt.Key.Key_Escape:
             return
         if self._state == _State.DRAGGING:
