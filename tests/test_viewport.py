@@ -259,3 +259,25 @@ def test_ctrl_n_is_undoable(qtbot):
 
     qtbot.keyClick(window, Qt.Key.Key_Z, modifier=Qt.KeyboardModifier.ControlModifier)
     assert len(list(window._scene.vertices_iter())) == 2
+
+
+class TestStatusBarThirdSlot:
+    def test_set_status_appends_third_segment(self, qtbot):  # noqa: ARG002
+        from pluton.ui.status_bar import StatusBar
+
+        bar = StatusBar()
+        qtbot.addWidget(bar)
+        bar.set_tool("Push/Pull")
+        bar.set_snap("")
+        bar.set_status("depth: 1.500")
+        assert bar.text() == "Push/Pull · — · depth: 1.500"
+
+    def test_set_status_empty_omits_the_third_segment(self, qtbot):  # noqa: ARG002
+        from pluton.ui.status_bar import StatusBar
+
+        bar = StatusBar()
+        qtbot.addWidget(bar)
+        bar.set_tool("Rectangle")
+        bar.set_snap("Endpoint")
+        bar.set_status("")  # PushPullTool's status_text returns None outside DRAGGING
+        assert bar.text() == "Rectangle · Endpoint"

@@ -45,6 +45,7 @@ class MainWindow(QMainWindow):
         self.setCentralWidget(container)
 
         self._viewport.set_status_bar(self._status_bar)
+        self._viewport.set_event_finished_callback(self._refresh_status_text)
 
         # Keyboard shortcuts
         QShortcut(QKeySequence("L"), self, activated=lambda: self._activate("L"))
@@ -57,11 +58,19 @@ class MainWindow(QMainWindow):
 
     # --- Slots -----------------------------------------------------------
 
+    def _refresh_status_text(self) -> None:
+        active = self._tool_manager.active
+        if active is None:
+            self._status_bar.set_status("")
+            return
+        self._status_bar.set_status(active.status_text or "")
+
     def _activate(self, shortcut: str) -> None:
         if self._tool_manager.activate_by_shortcut(shortcut):
             active = self._tool_manager.active
             self._status_bar.set_tool(active.name if active else "")
             self._status_bar.set_snap("")
+            self._refresh_status_text()
             self._viewport.update()
 
     def _on_escape(self) -> None:
@@ -77,16 +86,20 @@ class MainWindow(QMainWindow):
             self._tool_manager.deactivate_current()
             self._status_bar.set_tool("")
             self._status_bar.set_snap("")
+        self._refresh_status_text()
         self._viewport.update()
 
     def _on_clear_scene(self) -> None:
         self._command_stack.execute(ClearSceneCommand(), self._scene)
+        self._refresh_status_text()
         self._viewport.update()
 
     def _on_undo(self) -> None:
         if self._command_stack.undo(self._scene):
+            self._refresh_status_text()
             self._viewport.update()
 
     def _on_redo(self) -> None:
         if self._command_stack.redo(self._scene):
+            self._refresh_status_text()
             self._viewport.update()

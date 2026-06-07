@@ -31,6 +31,7 @@ class ViewportWidget(QOpenGLWidget):
         self.tool_manager = tool_manager
         self.snap_engine = SnapEngine()
         self._status_bar = None
+        self._on_event_finished = None
 
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         self.setMouseTracking(True)
@@ -41,6 +42,9 @@ class ViewportWidget(QOpenGLWidget):
 
     def set_status_bar(self, status_bar) -> None:  # noqa: ANN001
         self._status_bar = status_bar
+
+    def set_event_finished_callback(self, fn) -> None:  # noqa: ANN001
+        self._on_event_finished = fn
 
     # --- GL lifecycle -----------------------------------------------------
 
@@ -72,6 +76,8 @@ class ViewportWidget(QOpenGLWidget):
                 active.on_mouse_press(event, snap)
                 if self._status_bar is not None:
                     self._status_bar.set_snap(snap.label if snap.kind != SnapKind.NONE else "")
+                if self._on_event_finished is not None:
+                    self._on_event_finished()
                 self.update()
                 event.accept()
                 return
@@ -102,6 +108,8 @@ class ViewportWidget(QOpenGLWidget):
             active.on_mouse_move(event, snap)
             if self._status_bar is not None:
                 self._status_bar.set_snap(snap.label if snap.kind != SnapKind.NONE else "")
+            if self._on_event_finished is not None:
+                self._on_event_finished()
             self.update()
             event.accept()
             return
