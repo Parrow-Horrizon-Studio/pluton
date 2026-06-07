@@ -48,13 +48,15 @@ def test_ray_intersect_mesh_empty_mesh_returns_none():
 
 
 def test_ray_intersect_mesh_accepts_numpy_arrays():
-    """Common caller shape: pass numpy float32 (3,) arrays. nanobind should
-    accept these because of the stl/array conversion."""
+    """Common caller shape: pass numpy float32 (3,) arrays directly.
+
+    nanobind's stl/array converter accepts numpy ndarrays without explicit
+    list conversion — this exercises the code path PushPullTool will use."""
     from pluton._core import ray_intersect_mesh
 
     mesh, f = _make_ground_rect()
     origin = np.array([0.5, 0.5, 5.0], dtype=np.float32)
     direction = np.array([0.0, 0.0, -1.0], dtype=np.float32)
-    hit = ray_intersect_mesh(mesh, list(origin), list(direction))
+    hit = ray_intersect_mesh(mesh, origin, direction)
     assert hit is not None
     assert hit.face_id == f

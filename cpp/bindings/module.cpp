@@ -127,12 +127,7 @@ NB_MODULE(_core, m) {
     nb::class_<RayMeshHit>(m, "RayMeshHit", "Result of pluton::ray_intersect_mesh")
         .def_ro("face_id", &RayMeshHit::face_id)
         .def_ro("t",       &RayMeshHit::t)
-        .def_prop_ro(
-            "point",
-            [](RayMeshHit& self) {
-                return std::array<float, 3>{self.point[0], self.point[1], self.point[2]};
-            },
-            "Hit point in world coordinates (3-tuple).");
+        .def_ro("point", &RayMeshHit::point, "Hit point in world coordinates (3-tuple).");
 
     m.def("ray_intersect_mesh", &ray_intersect_mesh,
           nb::arg("mesh"), nb::arg("origin"), nb::arg("direction"),
