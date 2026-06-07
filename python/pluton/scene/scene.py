@@ -14,11 +14,15 @@ re-uploading buffers.
 from __future__ import annotations
 
 from collections.abc import Iterable, Sequence
+from typing import TYPE_CHECKING
 
 import mapbox_earcut
 import numpy as np
 
-from pluton._core import HalfEdgeMesh
+from pluton._core import HalfEdgeMesh, ray_intersect_mesh
+
+if TYPE_CHECKING:
+    from pluton._core import RayMeshHit
 from pluton.scene.edge import Edge
 from pluton.scene.face import Face
 from pluton.scene.vertex import Vertex
@@ -147,15 +151,13 @@ class Scene:
         self,
         origin: np.ndarray,
         direction: np.ndarray,
-    ):
+    ) -> "RayMeshHit | None":
         """Return the closest live face hit, or None.
 
         Thin wrapper around the C++ pluton._core.ray_intersect_mesh. Caller
         passes a 3-vector origin + 3-vector direction (need not be unit length).
         The returned RayMeshHit exposes .face_id, .t, .point.
         """
-        from pluton._core import ray_intersect_mesh
-
         origin_list = [float(origin[0]), float(origin[1]), float(origin[2])]
         direction_list = [float(direction[0]), float(direction[1]), float(direction[2])]
         return ray_intersect_mesh(self._mesh, origin_list, direction_list)
