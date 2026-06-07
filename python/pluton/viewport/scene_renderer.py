@@ -50,6 +50,7 @@ _PHONG_UNIFORMS = (
     "u_material_specular", "u_material_shininess",
 )
 _LINE_UNIFORMS = ("u_view", "u_projection")
+_GHOST_FILL_UNIFORMS = ("u_view", "u_projection", "u_color")
 
 
 def _load_shader_source(name: str) -> str:
@@ -156,6 +157,16 @@ class SceneRenderer:
         self._overlay_marker_vao: int = 0
         self._overlay_marker_vbo: int = 0
 
+        # Ghost-fill overlay (M3b)
+        self._ghost_fill_program: int = 0
+        self._ghost_fill_locs: dict[str, int] = {}
+        self._ghost_fill_vao: int = 0
+        self._ghost_fill_vbo: int = 0
+        # View / projection matrices captured each frame so draw_face_fill_overlays
+        # (called by tool overlays) can reuse them without re-deriving from camera.
+        self._current_view_matrix: np.ndarray | None = None
+        self._current_projection_matrix: np.ndarray | None = None
+
     # --- Lifecycle --------------------------------------------------------
 
     def initialize_gl(self) -> None:
@@ -179,10 +190,19 @@ class SceneRenderer:
         self._phong_locs = _cache_uniform_locations(self._phong_program, _PHONG_UNIFORMS)
         self._line_locs = _cache_uniform_locations(self._line_program, _LINE_UNIFORMS)
 
+        self._ghost_fill_program = _link_program(
+            _load_shader_source("ghost_fill.vert"),
+            _load_shader_source("ghost_fill.frag"),
+        )
+        self._ghost_fill_locs = _cache_uniform_locations(
+            self._ghost_fill_program, _GHOST_FILL_UNIFORMS
+        )
+
         self._init_grid_buffers()
         self._init_axes_buffers()
         self._init_user_buffers()
         self._init_overlay_buffers()
+        self._init_ghost_fill_buffers()
 
         self._initialized = True
 
@@ -205,6 +225,8 @@ class SceneRenderer:
 
         view = camera.view_matrix()
         projection = camera.projection_matrix()
+        self._current_view_matrix = view
+        self._current_projection_matrix = projection
 
         # 1. Grid (M1)
         self._draw_lines(self._grid_vao, self._grid_vertex_count, view, projection)
@@ -224,6 +246,13 @@ class SceneRenderer:
         # 5. Tool overlay (NEW) — drawn on top with depth-test disabled
         if tool_overlay is not None:
             self._draw_tool_overlay(tool_overlay, view, projection)
+
+        # 6. Face fills (M3b) — drawn last (on top of edges/markers).
+        if tool_overlay is not None and tool_overlay.face_fill_polygons:
+            self.draw_face_fill_overlays(
+                polygons=tool_overlay.face_fill_polygons,
+                color=tool_overlay.face_fill_color,
+            )
 
     # --- Init helpers -----------------------------------------------------
 
@@ -483,6 +512,102 @@ class SceneRenderer:
                 GL.glBindVertexArray(0)
         finally:
             GL.glEnable(GL.GL_DEPTH_TEST)
+        GL.glUseProgram(0)
+
+    def _init_ghost_fill_buffers(self) -> None:
+        """Create the (empty) VAO/VBO for the ghost-fill overlay pass.
+
+        Layout: position-only (vec3) at attribute 0. Buffer is re-uploaded
+        on every draw_face_fill_overlays call.
+        """
+        self._ghost_fill_vao = int(GL.glGenVertexArrays(1))
+        self._ghost_fill_vbo = int(GL.glGenBuffers(1))
+        GL.glBindVertexArray(self._ghost_fill_vao)
+        GL.glBindBuffer(GL.GL_ARRAY_BUFFER, self._ghost_fill_vbo)
+        GL.glBufferData(GL.GL_ARRAY_BUFFER, 0, None, GL.GL_DYNAMIC_DRAW)
+        stride = 3 * ctypes.sizeof(ctypes.c_float)
+        GL.glVertexAttribPointer(0, 3, GL.GL_FLOAT, GL.GL_FALSE, stride, ctypes.c_void_p(0))
+        GL.glEnableVertexAttribArray(0)
+        GL.glBindVertexArray(0)
+
+    def draw_face_fill_overlays(
+        self,
+        polygons: list[np.ndarray],
+        color: tuple[float, float, float, float] = (0.4, 0.7, 1.0, 0.15),
+    ) -> None:
+        """Draw alpha-blended filled polygons on top of the scene.
+
+        Each polygon is an (N, 3) float32 ndarray (a closed loop in world
+        coords). Earcut-triangulates each by projecting onto its dominant
+        axis-aligned plane (XY / XZ / YZ — picked from the polygon's geometric
+        normal). Depth-test enabled (overlays behind opaque geometry are
+        occluded), depth-write disabled (successive overlay passes don't
+        z-fight against each other), standard alpha blend.
+
+        Empty polygon list is a no-op (and avoids touching GL state if the
+        renderer wasn't initialized — useful for unit tests).
+        """
+        if not polygons:
+            return
+        if not self._initialized:
+            return  # tests may call before initialize_gl; no-op
+        if self._current_view_matrix is None or self._current_projection_matrix is None:
+            return
+
+        import mapbox_earcut
+
+        triangle_vertices: list[float] = []
+        for loop in polygons:
+            if loop.shape[0] < 3:
+                continue
+            e1 = loop[1] - loop[0]
+            e2 = loop[-1] - loop[0]
+            n = np.cross(e1, e2)
+            ax, ay, az = abs(float(n[0])), abs(float(n[1])), abs(float(n[2]))
+            if az >= ax and az >= ay:
+                xy = loop[:, :2].astype(np.float32)
+            elif ax >= ay:
+                xy = np.stack([loop[:, 1], loop[:, 2]], axis=1).astype(np.float32)
+            else:
+                xy = np.stack([loop[:, 0], loop[:, 2]], axis=1).astype(np.float32)
+            ring_ends = np.array([len(loop)], dtype=np.uint32)
+            tri_indices = mapbox_earcut.triangulate_float32(xy, ring_ends)
+            tri_indices = np.asarray(tri_indices, dtype=np.int32).reshape(-1, 3)
+            for tri in tri_indices:
+                for vi in tri:
+                    triangle_vertices.extend(
+                        [float(loop[vi, 0]), float(loop[vi, 1]), float(loop[vi, 2])]
+                    )
+
+        if not triangle_vertices:
+            return
+
+        verts = np.array(triangle_vertices, dtype=np.float32)
+
+        GL.glBindVertexArray(self._ghost_fill_vao)
+        GL.glBindBuffer(GL.GL_ARRAY_BUFFER, self._ghost_fill_vbo)
+        GL.glBufferData(GL.GL_ARRAY_BUFFER, verts.nbytes, verts, GL.GL_DYNAMIC_DRAW)
+
+        GL.glUseProgram(self._ghost_fill_program)
+        GL.glUniformMatrix4fv(
+            self._ghost_fill_locs["u_view"], 1, GL.GL_TRUE, self._current_view_matrix
+        )
+        GL.glUniformMatrix4fv(
+            self._ghost_fill_locs["u_projection"], 1, GL.GL_TRUE, self._current_projection_matrix
+        )
+        GL.glUniform4f(self._ghost_fill_locs["u_color"], *color)
+
+        # GL state: alpha-blended, depth-test on, depth-write off, no cull.
+        GL.glEnable(GL.GL_BLEND)
+        GL.glBlendFunc(GL.GL_SRC_ALPHA, GL.GL_ONE_MINUS_SRC_ALPHA)
+        GL.glDisable(GL.GL_CULL_FACE)
+        GL.glDepthMask(GL.GL_FALSE)
+
+        GL.glDrawArrays(GL.GL_TRIANGLES, 0, verts.shape[0] // 3)
+
+        GL.glDepthMask(GL.GL_TRUE)
+        GL.glDisable(GL.GL_BLEND)
+        GL.glBindVertexArray(0)
         GL.glUseProgram(0)
 
 
