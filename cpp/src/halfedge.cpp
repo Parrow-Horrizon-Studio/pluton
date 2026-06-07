@@ -1,6 +1,7 @@
 #include "pluton/halfedge.h"
 
 #include <algorithm>
+#include <cmath>
 #include <cstring>
 
 namespace pluton {
@@ -91,7 +92,28 @@ std::uint32_t HalfEdgeMesh::add_face_from_loop(const std::vector<std::uint32_t>&
         }
     }
     const std::uint32_t f_id = static_cast<std::uint32_t>(faces_.size());
-    Face f{INVALID_ID, {0.0f, 0.0f, 1.0f}, triangles, loop, true};
+    // Compute geometric normal from the first three boundary vertices.
+    // Assumes planar face — M2/M3a only produce planar faces; M4+ will revisit.
+    const auto& p0 = vertices_[loop[0]].pos;
+    const auto& p1 = vertices_[loop[1]].pos;
+    const auto& p2 = vertices_[loop[2]].pos;
+    const float e1x = p1[0] - p0[0];
+    const float e1y = p1[1] - p0[1];
+    const float e1z = p1[2] - p0[2];
+    const float e2x = p2[0] - p0[0];
+    const float e2y = p2[1] - p0[1];
+    const float e2z = p2[2] - p0[2];
+    float nx = e1y * e2z - e1z * e2y;
+    float ny = e1z * e2x - e1x * e2z;
+    float nz = e1x * e2y - e1y * e2x;
+    const float length = std::sqrt(nx * nx + ny * ny + nz * nz);
+    if (length > 1e-9f) {
+        nx /= length; ny /= length; nz /= length;
+    } else {
+        // Degenerate (collinear) — keep a sensible default; renderer will see weak lighting.
+        nx = 0.0f; ny = 0.0f; nz = 1.0f;
+    }
+    Face f{INVALID_ID, {nx, ny, nz}, triangles, loop, true};
 
     // Wire each loop[i] → loop[i+1] half-edge to point to loop[i+1] → loop[i+2].
     // The half-edge from v_from to v_to has origin = v_from. Given the canonical
@@ -261,6 +283,30 @@ void HalfEdgeMesh::restore_face(std::uint32_t f_id,
     f.tris = triangles;
     f.loop = loop;
     f.alive = true;
+    // Recompute geometric normal (same logic as add_face_from_loop) so that
+    // undo→redo round-trips produce the correct normal rather than preserving
+    // a stale value from before the fix.
+    {
+        const auto& rp0 = vertices_[loop[0]].pos;
+        const auto& rp1 = vertices_[loop[1]].pos;
+        const auto& rp2 = vertices_[loop[2]].pos;
+        const float re1x = rp1[0] - rp0[0];
+        const float re1y = rp1[1] - rp0[1];
+        const float re1z = rp1[2] - rp0[2];
+        const float re2x = rp2[0] - rp0[0];
+        const float re2y = rp2[1] - rp0[1];
+        const float re2z = rp2[2] - rp0[2];
+        float rnx = re1y * re2z - re1z * re2y;
+        float rny = re1z * re2x - re1x * re2z;
+        float rnz = re1x * re2y - re1y * re2x;
+        const float rlen = std::sqrt(rnx * rnx + rny * rny + rnz * rnz);
+        if (rlen > 1e-9f) {
+            rnx /= rlen; rny /= rlen; rnz /= rlen;
+        } else {
+            rnx = 0.0f; rny = 0.0f; rnz = 1.0f;
+        }
+        f.normal[0] = rnx; f.normal[1] = rny; f.normal[2] = rnz;
+    }
     dirty_ = true;
 }
 

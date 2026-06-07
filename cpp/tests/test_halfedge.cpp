@@ -380,9 +380,47 @@ TEST(HalfEdgeMeshTest, FaceTriangleBufferShape) {
     EXPECT_EQ(positions.size(), 9u);  // 1 triangle × 3 verts × 3 floats
     EXPECT_EQ(normals.size(), 9u);
     // Normal of every vertex is the face's +Z normal.
+    // Loop (0,0,0)→(1,0,0)→(0,1,0) is CCW when viewed from +Z, so cross
+    // product e1=(1,0,0) × e2=(0,1,0) = (0,0,1).
     for (std::size_t i = 0; i + 2 < normals.size(); i += 3) {
         EXPECT_FLOAT_EQ(normals[i + 0], 0.0f);
         EXPECT_FLOAT_EQ(normals[i + 1], 0.0f);
         EXPECT_FLOAT_EQ(normals[i + 2], 1.0f);
+    }
+}
+
+// Regression test: add_face_from_loop must compute the geometric normal from
+// the cross product of the first two boundary edges — NOT hardcode (0,0,1).
+// A face on the YZ-plane (x=0) with CCW winding (viewed from +X) should have
+// normal (+1, 0, 0).
+//
+// Vertices: A=(0,0,0), B=(0,1,0), C=(0,1,1), D=(0,0,1)
+// e1 = B - A = (0,1,0)
+// e2 = C - A = (0,1,1)
+// n = e1 × e2 = (1*1 - 0*1, 0*0 - 0*1, 0*1 - 1*0) = (1, 0, 0)  → normalised: (+1, 0, 0)
+TEST(HalfEdgeMeshTest, FaceNormalComputedGeometricallyYZPlane) {
+    pluton::HalfEdgeMesh m;
+    // YZ-plane quad: x=0, CCW from +X
+    auto vA = m.add_vertex(0.0f, 0.0f, 0.0f);
+    auto vB = m.add_vertex(0.0f, 1.0f, 0.0f);
+    auto vC = m.add_vertex(0.0f, 1.0f, 1.0f);
+    auto vD = m.add_vertex(0.0f, 0.0f, 1.0f);
+    m.add_halfedge_pair(vA, vB);
+    m.add_halfedge_pair(vB, vC);
+    m.add_halfedge_pair(vC, vD);
+    m.add_halfedge_pair(vD, vA);
+    const std::vector<std::int32_t> tris = {
+        static_cast<std::int32_t>(vA), static_cast<std::int32_t>(vB), static_cast<std::int32_t>(vC),
+        static_cast<std::int32_t>(vA), static_cast<std::int32_t>(vC), static_cast<std::int32_t>(vD),
+    };
+    m.add_face_from_loop({vA, vB, vC, vD}, tris);
+
+    auto [positions, normals] = m.face_triangle_buffer();
+    ASSERT_EQ(normals.size(), 18u);  // 2 triangles × 3 verts × 3 floats
+    // Every vertex should share the face normal: (+1, 0, 0)
+    for (std::size_t i = 0; i + 2 < normals.size(); i += 3) {
+        EXPECT_NEAR(normals[i + 0], +1.0f, 1e-6f);
+        EXPECT_NEAR(normals[i + 1],  0.0f, 1e-6f);
+        EXPECT_NEAR(normals[i + 2],  0.0f, 1e-6f);
     }
 }

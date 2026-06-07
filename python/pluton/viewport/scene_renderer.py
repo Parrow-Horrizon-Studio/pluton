@@ -597,14 +597,19 @@ class SceneRenderer:
         )
         GL.glUniform4f(self._ghost_fill_locs["u_color"], *color)
 
-        # GL state: alpha-blended, depth-test on, depth-write off, no cull.
+        # GL state: alpha-blended, depth-test on (LEQUAL so coplanar overlays
+        # don't z-fight against source-face geometry already in the depth buffer),
+        # depth-write off (successive overlay passes don't z-fight each other),
+        # no cull (overlay polygons may be viewed from either side during orbit).
         GL.glEnable(GL.GL_BLEND)
         GL.glBlendFunc(GL.GL_SRC_ALPHA, GL.GL_ONE_MINUS_SRC_ALPHA)
         GL.glDisable(GL.GL_CULL_FACE)
         GL.glDepthMask(GL.GL_FALSE)
+        GL.glDepthFunc(GL.GL_LEQUAL)  # fixes hover-highlight on coplanar source face
 
         GL.glDrawArrays(GL.GL_TRIANGLES, 0, verts.shape[0] // 3)
 
+        GL.glDepthFunc(GL.GL_LESS)  # restore default
         GL.glDepthMask(GL.GL_TRUE)
         GL.glDisable(GL.GL_BLEND)
         GL.glBindVertexArray(0)
