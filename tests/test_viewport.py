@@ -281,3 +281,32 @@ class TestStatusBarThirdSlot:
         bar.set_snap("Endpoint")
         bar.set_status("")  # PushPullTool's status_text returns None outside DRAGGING
         assert bar.text() == "Rectangle · Endpoint"
+
+
+class TestPushPullToolIntegration:
+    def test_p_keybind_activates_push_pull_tool(self, qtbot):
+        from PySide6.QtCore import Qt
+
+        from pluton.ui.main_window import MainWindow
+
+        win = MainWindow()
+        qtbot.addWidget(win)
+        win.show()
+        qtbot.waitExposed(win)
+        qtbot.wait(50)
+        qtbot.keyClick(win, Qt.Key.Key_P)
+        assert win._tool_manager.active is not None
+        assert win._tool_manager.active.name == "Push/Pull"
+
+    def test_tool_context_carries_camera_and_widget_size_provider(self, qtbot):  # noqa: ARG002
+        """Sanity: MainWindow wires the viewport's camera + size accessor
+        into the ToolContext so PushPullTool can compute camera rays."""
+        from pluton.ui.main_window import MainWindow
+
+        win = MainWindow()
+        ctx = win._tool_manager._ctx  # noqa: SLF001
+        assert ctx.camera is win._viewport.camera
+        assert callable(ctx.widget_size_provider)
+        size = ctx.widget_size_provider()
+        assert isinstance(size, tuple)
+        assert len(size) == 2

@@ -9,7 +9,7 @@ from PySide6.QtWidgets import QMainWindow, QVBoxLayout, QWidget
 from pluton.commands import CommandStack
 from pluton.commands.scene_commands import ClearSceneCommand
 from pluton.scene import Scene
-from pluton.tools import LineTool, RectangleTool, ToolContext, ToolManager
+from pluton.tools import LineTool, PushPullTool, RectangleTool, ToolContext, ToolManager
 from pluton.ui.status_bar import StatusBar
 from pluton.viewport.viewport_widget import ViewportWidget
 
@@ -26,15 +26,24 @@ class MainWindow(QMainWindow):
         self._scene = Scene()
         self._command_stack = CommandStack()
         self._tool_manager = ToolManager()
-        self._tool_manager.set_context(
-            ToolContext(scene=self._scene, command_stack=self._command_stack)
-        )
         self._tool_manager.register(LineTool())
         self._tool_manager.register(RectangleTool())
+        self._tool_manager.register(PushPullTool())
 
-        # Viewport + status bar
+        # Viewport + status bar (created BEFORE setting ToolContext so we can
+        # wire the camera + widget_size_provider into the context).
         self._viewport = ViewportWidget(self._scene, self._tool_manager, self)
         self._status_bar = StatusBar()
+
+        # NOW we can build the ToolContext that includes the viewport refs.
+        self._tool_manager.set_context(
+            ToolContext(
+                scene=self._scene,
+                command_stack=self._command_stack,
+                camera=self._viewport.camera,
+                widget_size_provider=lambda: (self._viewport.width(), self._viewport.height()),
+            )
+        )
 
         container = QWidget(self)
         layout = QVBoxLayout(container)
@@ -50,6 +59,7 @@ class MainWindow(QMainWindow):
         # Keyboard shortcuts
         QShortcut(QKeySequence("L"), self, activated=lambda: self._activate("L"))
         QShortcut(QKeySequence("R"), self, activated=lambda: self._activate("R"))
+        QShortcut(QKeySequence("P"), self, activated=lambda: self._activate("P"))
         QShortcut(QKeySequence("Esc"), self, activated=self._on_escape)
         QShortcut(QKeySequence("Ctrl+N"), self, activated=self._on_clear_scene)
         QShortcut(QKeySequence("Ctrl+Z"), self, activated=self._on_undo)
