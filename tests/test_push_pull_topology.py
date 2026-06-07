@@ -102,6 +102,12 @@ class TestPushPullCommit:
         assert _live_vertex_count(scene) == 8
         assert _live_edge_count(scene) == 12
         assert _live_face_count(scene) == 5
+        # Every live face must have at least one triangle. Regression for the
+        # XY-only earcut projection bug that made vertical side faces have 0
+        # triangles (M3b visual verification turned this up).
+        for face in scene.faces_iter():
+            tris = list(scene._mesh.face_triangles(face.id))
+            assert len(tris) >= 3, f"face {face.id} has no triangles (len={len(tris)})"
         # Source face is gone.
         with pytest.raises(KeyError):
             scene.face(source_f)

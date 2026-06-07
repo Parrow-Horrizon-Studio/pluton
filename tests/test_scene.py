@@ -601,3 +601,53 @@ class TestSceneFaceLoopNormalCenter:
         f = scene.add_face_from_loop([v0, v1, v2, v3])
         n = scene.face_normal(f)
         np.testing.assert_allclose(n, [0.0, -1.0, 0.0], atol=1e-6)
+
+
+# ---------------------------------------------------------------------------
+# Regression: vertical face triangulation (M3b side-face wireframe-only bug)
+# ---------------------------------------------------------------------------
+
+
+class TestSceneVerticalFaceTriangulation:
+    """Regression: faces lying outside the XY plane must still triangulate.
+    Before the fix, Scene.add_face_from_loop only projected XY for earcut,
+    so vertical (XZ/YZ-plane) faces produced zero triangles and rendered
+    as wireframe-only. This test pins the dominant-axis projection fix."""
+
+    def test_xz_plane_face_produces_triangles(self):
+        from pluton.scene import Scene
+
+        scene = Scene()
+        v0 = scene.add_vertex(np.array([0.0, 0.0, 0.0], dtype=np.float32))
+        v1 = scene.add_vertex(np.array([1.0, 0.0, 0.0], dtype=np.float32))
+        v2 = scene.add_vertex(np.array([1.0, 0.0, 1.0], dtype=np.float32))
+        v3 = scene.add_vertex(np.array([0.0, 0.0, 1.0], dtype=np.float32))
+        f = scene.add_face_from_loop([v0, v1, v2, v3])
+        tris = list(scene._mesh.face_triangles(f))
+        # 4-vertex face → 2 triangles → 6 vertex IDs in the flat buffer.
+        assert len(tris) == 6, f"expected 6 vertex IDs for 2 triangles; got {len(tris)}"
+
+    def test_yz_plane_face_produces_triangles(self):
+        from pluton.scene import Scene
+
+        scene = Scene()
+        v0 = scene.add_vertex(np.array([0.0, 0.0, 0.0], dtype=np.float32))
+        v1 = scene.add_vertex(np.array([0.0, 1.0, 0.0], dtype=np.float32))
+        v2 = scene.add_vertex(np.array([0.0, 1.0, 1.0], dtype=np.float32))
+        v3 = scene.add_vertex(np.array([0.0, 0.0, 1.0], dtype=np.float32))
+        f = scene.add_face_from_loop([v0, v1, v2, v3])
+        tris = list(scene._mesh.face_triangles(f))
+        assert len(tris) == 6
+
+    def test_xy_plane_face_still_works(self):
+        """Regression sanity: the existing M2 ground-plane rectangle keeps working."""
+        from pluton.scene import Scene
+
+        scene = Scene()
+        v0 = scene.add_vertex(np.array([0.0, 0.0, 0.0], dtype=np.float32))
+        v1 = scene.add_vertex(np.array([1.0, 0.0, 0.0], dtype=np.float32))
+        v2 = scene.add_vertex(np.array([1.0, 1.0, 0.0], dtype=np.float32))
+        v3 = scene.add_vertex(np.array([0.0, 1.0, 0.0], dtype=np.float32))
+        f = scene.add_face_from_loop([v0, v1, v2, v3])
+        tris = list(scene._mesh.face_triangles(f))
+        assert len(tris) == 6

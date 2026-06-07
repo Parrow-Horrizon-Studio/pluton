@@ -28,6 +28,34 @@ from pluton.scene.face import Face
 from pluton.scene.vertex import Vertex
 
 
+def _project_loop_to_2d_for_earcut(positions_3d: np.ndarray) -> np.ndarray:
+    """Project an (N, 3) loop onto its dominant axis-aligned plane.
+
+    Returns an (N, 2) float32 array suitable for mapbox_earcut. The projection
+    plane is the one perpendicular to the largest component of the polygon's
+    geometric normal (cross product of the first two boundary edges):
+      - normal mostly +Z → XY projection
+      - normal mostly +X → YZ projection
+      - normal mostly +Y → XZ projection
+    Without this, vertical faces collapse to collinear points in XY and earcut
+    returns zero triangles.
+    """
+    if positions_3d.shape[0] < 3:
+        return positions_3d[:, :2].astype(np.float32)
+    p0 = positions_3d[0]
+    p1 = positions_3d[1]
+    p2 = positions_3d[2]
+    e1 = p1 - p0
+    e2 = p2 - p0
+    n = np.cross(e1, e2)
+    ax, ay, az = abs(float(n[0])), abs(float(n[1])), abs(float(n[2]))
+    if az >= ax and az >= ay:
+        return positions_3d[:, :2].astype(np.float32)              # XY
+    if ax >= ay:
+        return np.stack([positions_3d[:, 1], positions_3d[:, 2]], axis=1).astype(np.float32)  # YZ
+    return np.stack([positions_3d[:, 0], positions_3d[:, 2]], axis=1).astype(np.float32)      # XZ
+
+
 class Scene:
     """Editable polygonal scene with stable integer IDs (C++ HalfEdgeMesh backed)."""
 
@@ -69,15 +97,17 @@ class Scene:
             if not self._mesh.vertex_is_live(vid):
                 raise KeyError(f"add_face_from_loop: unknown vertex_id={vid}")
 
-        # Build the (N, 2) float32 XY array for earcut.
-        xy = np.empty((len(loop), 2), dtype=np.float32)
+        # Build an (N, 3) array of the loop's 3D positions for projection.
+        xyz = np.empty((len(loop), 3), dtype=np.float32)
         for i, vid in enumerate(loop):
             pos = self._mesh.vertex_position(vid)
-            xy[i] = (pos[0], pos[1])
+            xyz[i] = (pos[0], pos[1], pos[2])
+        # Project onto the dominant axis-aligned plane so vertical faces don't
+        # collapse to collinear points (which would yield zero triangles).
+        projected = _project_loop_to_2d_for_earcut(xyz)
         ring_ends = np.array([len(loop)], dtype=np.uint32)
-        local_indices = mapbox_earcut.triangulate_float32(xy, ring_ends)
+        local_indices = mapbox_earcut.triangulate_float32(projected, ring_ends)
         local_indices = np.asarray(local_indices, dtype=np.int32).reshape(-1, 3)
-        # Map local-ring indices to global vertex IDs (flat, length 3*T).
         triangles = [int(loop[i]) for tri in local_indices for i in tri]
 
         # Auto-insert any loop edges that don't already exist (M2 callers do
@@ -126,12 +156,13 @@ class Scene:
     def restore_face(self, f_id: int, ordered_vertex_ids: Sequence[int]) -> None:
         """Restore a previously-removed face with its original ID. Used by undo."""
         loop = tuple(ordered_vertex_ids)
-        xy = np.empty((len(loop), 2), dtype=np.float32)
+        xyz = np.empty((len(loop), 3), dtype=np.float32)
         for i, vid in enumerate(loop):
             pos = self._mesh.vertex_position(vid)
-            xy[i] = (pos[0], pos[1])
+            xyz[i] = (pos[0], pos[1], pos[2])
+        projected = _project_loop_to_2d_for_earcut(xyz)
         ring_ends = np.array([len(loop)], dtype=np.uint32)
-        local_indices = mapbox_earcut.triangulate_float32(xy, ring_ends)
+        local_indices = mapbox_earcut.triangulate_float32(projected, ring_ends)
         local_indices = np.asarray(local_indices, dtype=np.int32).reshape(-1, 3)
         triangles = [int(loop[i]) for tri in local_indices for i in tri]
         self._mesh.restore_face(f_id, list(loop), triangles)
