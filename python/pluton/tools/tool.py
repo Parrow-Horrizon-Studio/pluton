@@ -22,8 +22,7 @@ class ToolContext:
     scene: object
     command_stack: object = None  # M3a-introduced — pluton.commands.CommandStack
     camera: object = None  # M3b-introduced — pluton.viewport.camera.Camera
-    widget_size_provider: object = None
-    """M3b-introduced — callable () -> tuple[int, int] returning (width, height)."""
+    widget_size_provider: object = None  # M3b-introduced — callable () -> tuple[int, int] returning (width, height)
 
 
 @dataclass(frozen=True, slots=True)
@@ -38,10 +37,10 @@ class ToolOverlay:
 
     # M3b: filled face overlays (hover-highlight / armed face / ghost prism faces).
     face_fill_polygons: list[np.ndarray] = field(default_factory=list)
-    """List of (N, 3) float32 world-space vertex loops. Renderer earcut-triangulates each at draw time."""
+    # List of (N, 3) float32 world-space vertex loops. Renderer earcut-triangulates each at draw time.
 
     face_fill_color: tuple[float, float, float, float] = (0.4, 0.7, 1.0, 0.15)
-    """RGBA. Default is M3b's "ghost prism" color (light blue, 15% alpha)."""
+    # RGBA. Default is M3b's "ghost prism" color (light blue, 15% alpha).
 
 
 class Tool(ABC):
