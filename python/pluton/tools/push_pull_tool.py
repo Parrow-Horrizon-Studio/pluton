@@ -95,7 +95,7 @@ class PushPullTool(Tool):
 
     def on_mouse_move(self, event: QMouseEvent, snap) -> None:  # noqa: ANN001
         if self._state == _State.DRAGGING:
-            # Depth update — Task 8 fills this in.
+            self._update_depth_from_event(event)
             return
         # IDLE / HOVERING — per-frame ray-pick.
         hit = self._pick_face_under_cursor(event)
@@ -107,7 +107,12 @@ class PushPullTool(Tool):
             self._hovered_face_id = hit.face_id
 
     def on_mouse_press(self, event: QMouseEvent, snap) -> None:  # noqa: ANN001
-        # IDLE / HOVERING / DRAGGING — Tasks 8-11 fill in the rest.
+        if self._state == _State.IDLE:
+            return  # clicking empty space is a no-op
+        if self._state == _State.HOVERING:
+            self._arm_face(self._hovered_face_id)
+            return
+        # DRAGGING — Task 10 wires commit; Task 11 wires near-zero cancel.
         return
 
     def on_key_press(self, event: QKeyEvent) -> None:
@@ -152,6 +157,47 @@ class PushPullTool(Tool):
             v = self._scene.vertex(vid)
             coords[i] = v.position
         return coords
+
+    def _arm_face(self, face_id: int) -> None:
+        """Cache the source face's data and enter DRAGGING."""
+        assert self._scene is not None
+        self._armed_face_id = face_id
+        self._armed_face_loop = self._scene.face_loop(face_id)
+        self._armed_face_normal = self._scene.face_normal(face_id)
+        self._armed_face_center = self._scene.face_center(face_id)
+        self._current_depth = 0.0
+        self._state = _State.DRAGGING
+
+    def _update_depth_from_event(self, event: QMouseEvent) -> None:
+        """Update self._current_depth via line-line CPA between the camera ray
+        and the line (face_center, +normal). Holds the previous depth if the
+        view is ~parallel to the normal (degenerate case)."""
+        if self._camera is None or self._widget_size_provider is None:
+            return
+        assert self._armed_face_normal is not None
+        assert self._armed_face_center is not None
+
+        pos = event.position()
+        width, height = self._widget_size_provider()
+        origin, direction = self._camera.ray_from_screen(
+            float(pos.x()), float(pos.y()), int(width), int(height)
+        )
+        d_norm = float(np.linalg.norm(direction))
+        if d_norm < 1e-9:
+            return
+        d_hat = direction / d_norm
+        n_hat = self._armed_face_normal  # already unit
+        c = self._armed_face_center
+
+        b = float(np.dot(d_hat, n_hat))
+        denom = 1.0 - b * b
+        if abs(denom) < _DEGENERATE_VIEW_EPSILON:
+            return  # depth frozen
+        w = origin.astype(np.float32) - c
+        e = float(np.dot(n_hat, w))
+        d_param = float(np.dot(d_hat, w))
+        t = (e - b * d_param) / denom
+        self._current_depth = max(0.0, t)
 
     def _reset_to_idle(self) -> None:
         self._state = _State.IDLE

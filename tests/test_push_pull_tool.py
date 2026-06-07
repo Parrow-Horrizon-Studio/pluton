@@ -120,3 +120,79 @@ class TestPushPullHovering:
         tool, scene, f, camera, _ = _make_tool_with_unit_rect()
         tool.on_mouse_move(_make_event(), snap=MagicMock())
         assert tool.status_text is None
+
+
+class TestPushPullArmingAndDepth:
+    """HOVERING → DRAGGING transition + line-line CPA depth metric."""
+
+    def test_click_in_hovering_arms_the_face(self):
+        tool, scene, f, camera, _ = _make_tool_with_unit_rect()
+        # Enter HOVERING
+        tool.on_mouse_move(_make_event(), snap=None)
+        # Click to arm
+        tool.on_mouse_press(_make_event(kind=QMouseEvent.Type.MouseButtonPress), snap=None)
+        assert tool.has_active_gesture is True
+        assert tool.status_text == "depth: 0.000"
+
+    def test_click_in_idle_does_nothing(self):
+        tool, scene, f, camera, _ = _make_tool_with_unit_rect()
+        # Camera ray misses the rectangle.
+        camera.ray_from_screen.return_value = (
+            np.array([5.0, 5.0, 5.0], dtype=np.float32),
+            np.array([0.0, 0.0, -1.0], dtype=np.float32),
+        )
+        tool.on_mouse_move(_make_event(), snap=None)  # IDLE
+        tool.on_mouse_press(_make_event(kind=QMouseEvent.Type.MouseButtonPress), snap=None)
+        assert tool.has_active_gesture is False
+
+    def test_depth_increases_as_camera_ray_aims_above_face(self):
+        """Line-line CPA: if the camera ray's closest approach to the normal
+        line (face_center, +Z) is at z=2, depth should be 2."""
+        tool, scene, f, camera, _ = _make_tool_with_unit_rect()
+        # Hover + arm.
+        tool.on_mouse_move(_make_event(), snap=None)
+        tool.on_mouse_press(_make_event(kind=QMouseEvent.Type.MouseButtonPress), snap=None)
+        # Now move: rotate the camera so its ray aims at (0.5, 0.5, 2).
+        # A horizontal ray at z=2 with direction +X, origin (-3, 0.5, 2):
+        camera.ray_from_screen.return_value = (
+            np.array([-3.0, 0.5, 2.0], dtype=np.float32),
+            np.array([1.0, 0.0, 0.0], dtype=np.float32),
+        )
+        tool.on_mouse_move(_make_event(), snap=None)
+        # CPA between this horizontal ray and the +Z normal line through
+        # (0.5, 0.5, 0) gives t = 2.0 on the normal line. So depth = 2.0.
+        assert tool.status_text == "depth: 2.000"
+
+    def test_depth_clamps_to_zero_on_negative_drag(self):
+        tool, scene, f, camera, _ = _make_tool_with_unit_rect()
+        tool.on_mouse_move(_make_event(), snap=None)
+        tool.on_mouse_press(_make_event(kind=QMouseEvent.Type.MouseButtonPress), snap=None)
+        # Horizontal ray at z = -3 (below the source face).
+        camera.ray_from_screen.return_value = (
+            np.array([-3.0, 0.5, -3.0], dtype=np.float32),
+            np.array([1.0, 0.0, 0.0], dtype=np.float32),
+        )
+        tool.on_mouse_move(_make_event(), snap=None)
+        assert tool.status_text == "depth: 0.000"
+
+    def test_depth_frozen_when_view_parallel_to_normal(self):
+        """Camera looking straight down — ray direction == -normal — the depth
+        metric's denominator goes to ~0; depth should NOT update."""
+        tool, scene, f, camera, _ = _make_tool_with_unit_rect()
+        tool.on_mouse_move(_make_event(), snap=None)
+        tool.on_mouse_press(_make_event(kind=QMouseEvent.Type.MouseButtonPress), snap=None)
+        # First move: drive depth to a non-zero value.
+        camera.ray_from_screen.return_value = (
+            np.array([-3.0, 0.5, 2.0], dtype=np.float32),
+            np.array([1.0, 0.0, 0.0], dtype=np.float32),
+        )
+        tool.on_mouse_move(_make_event(), snap=None)
+        assert tool.status_text == "depth: 2.000"
+        # Second move: ray collinear with normal (degenerate case).
+        camera.ray_from_screen.return_value = (
+            np.array([0.5, 0.5, 5.0], dtype=np.float32),
+            np.array([0.0, 0.0, -1.0], dtype=np.float32),
+        )
+        tool.on_mouse_move(_make_event(), snap=None)
+        # Depth should be FROZEN at the previous value (2.0), not reset to 0.
+        assert tool.status_text == "depth: 2.000"
