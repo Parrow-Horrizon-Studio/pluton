@@ -110,6 +110,7 @@ class PushPullTool(Tool):
         if self._state == _State.IDLE:
             return  # clicking empty space is a no-op
         if self._state == _State.HOVERING:
+            assert self._hovered_face_id is not None  # invariant: HOVERING implies hovered_face_id set
             self._arm_face(self._hovered_face_id)
             return
         # DRAGGING — Task 10 wires commit; Task 11 wires near-zero cancel.
