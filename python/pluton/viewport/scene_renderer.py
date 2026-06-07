@@ -33,7 +33,7 @@ _AXIS_Z_COLOR = (0.20, 0.40, 0.90)
 # Phong material + light — used for user geometry.
 _LIGHT_DIR = (-1.0, +1.0, -2.0)
 _LIGHT_COLOR = (1.00, 0.97, 0.92)
-_MATERIAL_AMBIENT = (0.15, 0.15, 0.17)
+_MATERIAL_AMBIENT = (0.40, 0.40, 0.42)
 _MATERIAL_DIFFUSE = (0.65, 0.65, 0.70)
 _MATERIAL_SPECULAR = (0.10, 0.10, 0.10)
 _MATERIAL_SHININESS = 16.0
