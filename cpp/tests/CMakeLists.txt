@@ -5,6 +5,7 @@ add_executable(pluton_tests
     test_mesh.cpp
     test_primitives.cpp
     test_halfedge.cpp
+    test_ray_intersect.cpp
 )
 
 target_link_libraries(pluton_tests PRIVATE

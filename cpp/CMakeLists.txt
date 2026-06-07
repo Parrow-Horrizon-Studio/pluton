@@ -4,6 +4,7 @@ add_library(pluton_core STATIC
     src/mesh.cpp
     src/primitives.cpp
     src/halfedge.cpp
+    src/ray_intersect.cpp
 )
 
 target_include_directories(pluton_core PUBLIC
