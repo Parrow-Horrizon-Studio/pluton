@@ -116,11 +116,10 @@ class PushPullTool(Tool):
 
     def overlay(self) -> ToolOverlay:
         polygons: list[np.ndarray] = []
-        color = _HOVER_FILL_COLOR
         if self._state == _State.HOVERING and self._hovered_face_id is not None:
             polygons = [self._loop_world_coords(self._hovered_face_id)]
-            color = _HOVER_FILL_COLOR
-        # DRAGGING overlay is added in Task 9.
+        # DRAGGING overlay is added in Task 9; face_fill_color will switch to
+        # _ARMED_FILL_COLOR / _GHOST_FILL_COLOR depending on state at that point.
         return ToolOverlay(
             rubber_band_segments=np.zeros((0, 3), dtype=np.float32),
             rubber_band_color=(0.85, 0.85, 0.85),
@@ -128,7 +127,7 @@ class PushPullTool(Tool):
             snap_marker_color=(0.85, 0.85, 0.85),
             snap_marker_kind=0,
             face_fill_polygons=polygons,
-            face_fill_color=color,
+            face_fill_color=_HOVER_FILL_COLOR,
         )
 
     # ---- Helpers -------------------------------------------------------
@@ -146,6 +145,7 @@ class PushPullTool(Tool):
 
     def _loop_world_coords(self, face_id: int) -> np.ndarray:
         """Return the face's boundary loop as an (N, 3) float32 ndarray."""
+        assert self._scene is not None, "_loop_world_coords requires an active scene"
         loop_ids = self._scene.face_loop(face_id)
         coords = np.zeros((len(loop_ids), 3), dtype=np.float32)
         for i, vid in enumerate(loop_ids):
