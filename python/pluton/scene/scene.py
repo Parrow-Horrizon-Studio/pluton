@@ -141,6 +141,65 @@ class Scene:
     def mark_clean(self) -> None:
         self._mesh.mark_clean()
 
+    # --- M3b picking + face geometry helpers ---------------------------------
+
+    def ray_pick_face(
+        self,
+        origin: np.ndarray,
+        direction: np.ndarray,
+    ):
+        """Return the closest live face hit, or None.
+
+        Thin wrapper around the C++ pluton._core.ray_intersect_mesh. Caller
+        passes a 3-vector origin + 3-vector direction (need not be unit length).
+        The returned RayMeshHit exposes .face_id, .t, .point.
+        """
+        from pluton._core import ray_intersect_mesh
+
+        origin_list = [float(origin[0]), float(origin[1]), float(origin[2])]
+        direction_list = [float(direction[0]), float(direction[1]), float(direction[2])]
+        return ray_intersect_mesh(self._mesh, origin_list, direction_list)
+
+    def face_loop(self, f_id: int) -> list[int]:
+        """Ordered boundary vertex IDs of the given live face."""
+        if not self._mesh.face_is_live(f_id):
+            raise KeyError(f"face_loop: face {f_id} is not live")
+        return list(self._mesh.face_loop_vertices(f_id))
+
+    def face_normal(self, f_id: int) -> np.ndarray:
+        """Geometric normal of the planar face, computed from the first three
+        boundary vertices via cross product, then normalized.
+
+        Assumes the face is planar (M2 / M3a only produce planar faces).
+        # TODO M4+: handle non-planar faces (Newell's method, or fan-from-centroid).
+        """
+        if not self._mesh.face_is_live(f_id):
+            raise KeyError(f"face_normal: face {f_id} is not live")
+        loop = self._mesh.face_loop_vertices(f_id)
+        if len(loop) < 3:
+            raise ValueError(f"face_normal: face {f_id} has fewer than 3 vertices")
+        p0 = np.asarray(self._mesh.vertex_position(loop[0]), dtype=np.float32)
+        p1 = np.asarray(self._mesh.vertex_position(loop[1]), dtype=np.float32)
+        p2 = np.asarray(self._mesh.vertex_position(loop[2]), dtype=np.float32)
+        n = np.cross(p1 - p0, p2 - p0).astype(np.float32)
+        length = float(np.linalg.norm(n))
+        if length < 1e-9:
+            raise ValueError(
+                f"face_normal: face {f_id} is degenerate (first 3 vertices collinear)"
+            )
+        return (n / length).astype(np.float32)
+
+    def face_center(self, f_id: int) -> np.ndarray:
+        """Centroid (mean) of the face's boundary vertex positions."""
+        if not self._mesh.face_is_live(f_id):
+            raise KeyError(f"face_center: face {f_id} is not live")
+        loop = self._mesh.face_loop_vertices(f_id)
+        acc = np.zeros(3, dtype=np.float32)
+        for vid in loop:
+            pos = self._mesh.vertex_position(vid)
+            acc += np.asarray(pos, dtype=np.float32)
+        return (acc / float(len(loop))).astype(np.float32)
+
     # --- Queries ----------------------------------------------------------
 
     @property

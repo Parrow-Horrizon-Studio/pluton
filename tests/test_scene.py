@@ -488,3 +488,116 @@ def test_add_vertex_after_tombstone_at_same_position_allocates_new_id():
     s.remove_vertex(v0)
     v1 = s.add_vertex(pos.copy())
     assert v1 != v0  # new ID; old slot stays tombstoned
+
+
+# ---------------------------------------------------------------------------
+# M3b: ray_pick_face / face_loop / face_normal / face_center (Task 4)
+# ---------------------------------------------------------------------------
+
+
+class TestSceneRayPickFace:
+    """Scene.ray_pick_face — thin wrapper over pluton._core.ray_intersect_mesh."""
+
+    def test_returns_none_for_empty_scene(self):
+        from pluton.scene import Scene
+
+        scene = Scene()
+        hit = scene.ray_pick_face(
+            origin=np.array([0.0, 0.0, 5.0], dtype=np.float32),
+            direction=np.array([0.0, 0.0, -1.0], dtype=np.float32),
+        )
+        assert hit is None
+
+    def test_returns_face_id_when_ray_hits(self):
+        from pluton.scene import Scene
+
+        scene = Scene()
+        v0 = scene.add_vertex(np.array([0.0, 0.0, 0.0], dtype=np.float32))
+        v1 = scene.add_vertex(np.array([1.0, 0.0, 0.0], dtype=np.float32))
+        v2 = scene.add_vertex(np.array([1.0, 1.0, 0.0], dtype=np.float32))
+        v3 = scene.add_vertex(np.array([0.0, 1.0, 0.0], dtype=np.float32))
+        f = scene.add_face_from_loop([v0, v1, v2, v3])
+
+        hit = scene.ray_pick_face(
+            origin=np.array([0.5, 0.5, 5.0], dtype=np.float32),
+            direction=np.array([0.0, 0.0, -1.0], dtype=np.float32),
+        )
+        assert hit is not None
+        assert hit.face_id == f
+        assert hit.t == pytest.approx(5.0, abs=1e-4)
+
+    def test_returns_none_after_face_removed(self):
+        from pluton.scene import Scene
+
+        scene = Scene()
+        v0 = scene.add_vertex(np.array([0.0, 0.0, 0.0], dtype=np.float32))
+        v1 = scene.add_vertex(np.array([1.0, 0.0, 0.0], dtype=np.float32))
+        v2 = scene.add_vertex(np.array([1.0, 1.0, 0.0], dtype=np.float32))
+        v3 = scene.add_vertex(np.array([0.0, 1.0, 0.0], dtype=np.float32))
+        f = scene.add_face_from_loop([v0, v1, v2, v3])
+        scene.remove_face(f)
+
+        hit = scene.ray_pick_face(
+            origin=np.array([0.5, 0.5, 5.0], dtype=np.float32),
+            direction=np.array([0.0, 0.0, -1.0], dtype=np.float32),
+        )
+        assert hit is None
+
+
+class TestSceneFaceLoopNormalCenter:
+    """face_loop / face_normal / face_center — extrusion composite needs these."""
+
+    def _make_unit_rect(self):
+        from pluton.scene import Scene
+
+        scene = Scene()
+        v0 = scene.add_vertex(np.array([0.0, 0.0, 0.0], dtype=np.float32))
+        v1 = scene.add_vertex(np.array([1.0, 0.0, 0.0], dtype=np.float32))
+        v2 = scene.add_vertex(np.array([1.0, 1.0, 0.0], dtype=np.float32))
+        v3 = scene.add_vertex(np.array([0.0, 1.0, 0.0], dtype=np.float32))
+        f = scene.add_face_from_loop([v0, v1, v2, v3])
+        return scene, f, (v0, v1, v2, v3)
+
+    def test_face_loop_returns_boundary_vertex_ids_in_insertion_order(self):
+        scene, f, (v0, v1, v2, v3) = self._make_unit_rect()
+        loop = scene.face_loop(f)
+        assert loop == [v0, v1, v2, v3]
+
+    def test_face_loop_raises_keyerror_on_invalid_face_id(self):
+        from pluton.scene import Scene
+
+        scene = Scene()
+        with pytest.raises(KeyError):
+            scene.face_loop(99)
+
+    def test_face_normal_on_xy_face_is_plus_z(self):
+        scene, f, _ = self._make_unit_rect()
+        n = scene.face_normal(f)
+        assert n.shape == (3,)
+        assert n.dtype == np.float32
+        np.testing.assert_allclose(n, [0.0, 0.0, 1.0], atol=1e-6)
+
+    def test_face_center_returns_centroid(self):
+        scene, f, _ = self._make_unit_rect()
+        c = scene.face_center(f)
+        assert c.shape == (3,)
+        assert c.dtype == np.float32
+        np.testing.assert_allclose(c, [0.5, 0.5, 0.0], atol=1e-6)
+
+    def test_face_normal_planar_face_in_xz_plane_is_plus_y(self):
+        """A face with vertices at z varying and y=0 — normal should be ±Y.
+
+        Loop V0(0,0,0)→V1(1,0,0)→V2(1,0,1)→V3(0,0,1): first two edges
+        e1=(1,0,0) and e2=(0,0,1). Cross product e1 × e2 = (0·1−0·0,
+        0·0−1·1, 1·0−0·0) = (0, −1, 0). So the geometric normal is (0,-1,0).
+        """
+        from pluton.scene import Scene
+
+        scene = Scene()
+        v0 = scene.add_vertex(np.array([0.0, 0.0, 0.0], dtype=np.float32))
+        v1 = scene.add_vertex(np.array([1.0, 0.0, 0.0], dtype=np.float32))
+        v2 = scene.add_vertex(np.array([1.0, 0.0, 1.0], dtype=np.float32))
+        v3 = scene.add_vertex(np.array([0.0, 0.0, 1.0], dtype=np.float32))
+        f = scene.add_face_from_loop([v0, v1, v2, v3])
+        n = scene.face_normal(f)
+        np.testing.assert_allclose(n, [0.0, -1.0, 0.0], atol=1e-6)
