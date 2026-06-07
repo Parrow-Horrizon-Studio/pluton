@@ -7,8 +7,9 @@ and M4's full roster plug into the same shapes.
 from __future__ import annotations
 
 from pluton.tools.line_tool import LineTool
+from pluton.tools.push_pull_tool import PushPullTool
 from pluton.tools.rectangle_tool import RectangleTool
 from pluton.tools.tool import Tool, ToolContext, ToolOverlay
 from pluton.tools.tool_manager import ToolManager
 
-__all__ = ["LineTool", "RectangleTool", "Tool", "ToolContext", "ToolManager", "ToolOverlay"]
+__all__ = ["LineTool", "PushPullTool", "RectangleTool", "Tool", "ToolContext", "ToolManager", "ToolOverlay"]
