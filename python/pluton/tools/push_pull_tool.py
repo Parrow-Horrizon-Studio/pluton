@@ -272,7 +272,7 @@ class PushPullTool(Tool):
         # 2. Add top vertices.
         top_vert_cmds: list[AddVertexCommand] = []
         for src_vid in loop:
-            src_pos = np.asarray(scene._mesh.vertex_position(src_vid), dtype=np.float32)
+            src_pos = scene.vertex(src_vid).position  # already float32 (3,) ndarray
             top_pos = src_pos + depth * normal
             c = AddVertexCommand(top_pos)
             c.do(scene)
