@@ -196,3 +196,51 @@ class TestPushPullArmingAndDepth:
         tool.on_mouse_move(_make_event(), snap=None)
         # Depth should be FROZEN at the previous value (2.0), not reset to 0.
         assert tool.status_text == "depth: 2.000"
+
+
+class TestPushPullCancel:
+    def test_esc_in_dragging_clears_state_without_committing(self):
+        from PySide6.QtCore import Qt
+        from PySide6.QtGui import QKeyEvent
+
+        tool, scene, f, camera, cmd_stack = _make_tool_with_unit_rect()
+        # Hover + arm + drag.
+        tool.on_mouse_move(_make_event(), snap=None)
+        tool.on_mouse_press(_make_event(kind=QMouseEvent.Type.MouseButtonPress), snap=None)
+        camera.ray_from_screen.return_value = (
+            np.array([-3.0, 0.5, 2.0], dtype=np.float32),
+            np.array([1.0, 0.0, 0.0], dtype=np.float32),
+        )
+        tool.on_mouse_move(_make_event(), snap=None)
+        assert tool.has_active_gesture is True
+        # ESC
+        esc = QKeyEvent(QKeyEvent.Type.KeyPress, Qt.Key.Key_Escape, Qt.KeyboardModifier.NoModifier)
+        tool.on_key_press(esc)
+        # No command pushed.
+        cmd_stack.push_executed.assert_not_called()
+        # State reset.
+        assert tool.has_active_gesture is False
+
+    def test_second_click_below_threshold_cancels(self):
+        tool, scene, f, camera, cmd_stack = _make_tool_with_unit_rect()
+        tool.on_mouse_move(_make_event(), snap=None)
+        tool.on_mouse_press(_make_event(kind=QMouseEvent.Type.MouseButtonPress), snap=None)
+        # Don't move; depth stays at 0. Second click should cancel.
+        tool.on_mouse_press(_make_event(kind=QMouseEvent.Type.MouseButtonPress), snap=None)
+        cmd_stack.push_executed.assert_not_called()
+        assert tool.has_active_gesture is False
+
+    def test_esc_in_hovering_or_idle_is_noop_for_the_tool(self):
+        """The two-stage ESC behavior (deactivating the tool) is owned by
+        MainWindow. The tool itself should treat ESC in non-DRAGGING as a no-op
+        (it should not crash, it should not clear state)."""
+        from PySide6.QtCore import Qt
+        from PySide6.QtGui import QKeyEvent
+
+        tool, scene, f, camera, cmd_stack = _make_tool_with_unit_rect()
+        tool.on_mouse_move(_make_event(), snap=None)  # HOVERING
+        assert tool._state.name == "HOVERING"
+        esc = QKeyEvent(QKeyEvent.Type.KeyPress, Qt.Key.Key_Escape, Qt.KeyboardModifier.NoModifier)
+        tool.on_key_press(esc)
+        # Still HOVERING — the tool itself doesn't deactivate; MainWindow does.
+        assert tool._state.name == "HOVERING"

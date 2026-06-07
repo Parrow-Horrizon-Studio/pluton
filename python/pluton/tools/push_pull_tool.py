@@ -133,8 +133,16 @@ class PushPullTool(Tool):
             self._hovered_face_id = hit.face_id
 
     def on_key_press(self, event: QKeyEvent) -> None:
-        # Task 11 wires ESC cancel for DRAGGING.
-        return
+        from PySide6.QtCore import Qt
+
+        if event.key() != Qt.Key.Key_Escape:
+            return
+        if self._state == _State.DRAGGING:
+            # Cancel — no command pushed, scene was never mutated during DRAGGING
+            # (M3b uses overlay-only preview, not scene mutation).
+            self._reset_to_idle()
+            return
+        # ESC in IDLE/HOVERING is owned by MainWindow's two-stage logic; no-op here.
 
     def overlay(self) -> ToolOverlay:
         polygons: list[np.ndarray] = []
