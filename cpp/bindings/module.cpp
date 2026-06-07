@@ -3,6 +3,7 @@
 #include <nanobind/nanobind.h>
 #include <nanobind/ndarray.h>
 #include <nanobind/stl/array.h>
+#include <nanobind/stl/optional.h>
 #include <nanobind/stl/pair.h>
 #include <nanobind/stl/string.h>
 #include <nanobind/stl/vector.h>
@@ -10,11 +11,14 @@
 #include "pluton/halfedge.h"
 #include "pluton/mesh.h"
 #include "pluton/primitives.h"
+#include "pluton/ray_intersect.h"
 #include "pluton/version.h"
 
 namespace nb = nanobind;
 using pluton::HalfEdgeMesh;
 using pluton::Mesh;
+using pluton::RayMeshHit;
+using pluton::ray_intersect_mesh;
 
 namespace {
 
@@ -119,4 +123,18 @@ NB_MODULE(_core, m) {
         .def("face_slab_size", &HalfEdgeMesh::face_slab_size)
 
         .def_ro_static("INVALID_ID", &HalfEdgeMesh::INVALID_ID);
+
+    nb::class_<RayMeshHit>(m, "RayMeshHit", "Result of pluton::ray_intersect_mesh")
+        .def_ro("face_id", &RayMeshHit::face_id)
+        .def_ro("t",       &RayMeshHit::t)
+        .def_prop_ro(
+            "point",
+            [](RayMeshHit& self) {
+                return std::array<float, 3>{self.point[0], self.point[1], self.point[2]};
+            },
+            "Hit point in world coordinates (3-tuple).");
+
+    m.def("ray_intersect_mesh", &ray_intersect_mesh,
+          nb::arg("mesh"), nb::arg("origin"), nb::arg("direction"),
+          "Brute-force ray-mesh face picking. Returns RayMeshHit or None.");
 }
