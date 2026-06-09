@@ -468,6 +468,10 @@ TEST(HalfEdgeMeshTest, FacesAreCoplanar_TrueWithinAngleTolerance) {
     float c = std::cos(0.3f * 3.14159265f / 180.0f);
     float s = std::sin(0.3f * 3.14159265f / 180.0f);
     auto f2 = add_triangle(m, {2,2,0}, {3,2,0}, {2, 2 + c, s});
+    // Loosened dist_tol: 0.3° tilt on a face anchored 2 units from origin gives
+    // a ~1.05e-2 worst-case plane offset in the symmetric distance check, so
+    // the project default 1e-4 would fail this geometry. The angle test is
+    // what's being exercised here.
     EXPECT_TRUE(m.faces_are_coplanar(f1, f2, kCos05Deg, 2e-2f));   // looser dist
 }
 
