@@ -64,6 +64,14 @@ public:
                             float angle_tol_cos,
                             float dist_tol) const;
 
+    /// Dissolve an edge between two adjacent faces — merges the faces into one.
+    /// Returns the new (surviving) face id on success.
+    /// Returns INVALID_ID if the edge is on the mesh boundary (only 1 incident
+    /// face), already tombstoned, or if the two adjacent faces share more than
+    /// one edge (would create a degenerate result).
+    /// The dissolved edge id is tombstoned (never reused).
+    std::uint32_t dissolve_edge(std::uint32_t e_id);
+
     std::uint32_t halfedge_origin(std::uint32_t he_id) const noexcept;
     std::uint32_t halfedge_next(std::uint32_t he_id) const noexcept;
     std::uint32_t halfedge_twin(std::uint32_t he_id) const noexcept;

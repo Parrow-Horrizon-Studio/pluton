@@ -508,3 +508,80 @@ TEST(HalfEdgeMeshTest, FacesAreCoplanar_FalseForDegenerateNormal) {
     EXPECT_FALSE(m.faces_are_coplanar(f_degen, f_good, kCos05Deg, kDistTol));
     EXPECT_FALSE(m.faces_are_coplanar(f_good, f_degen, kCos05Deg, kDistTol));
 }
+
+// ====================================================================
+// M3c: dissolve_edge — happy path
+// ====================================================================
+
+TEST(HalfEdgeMeshTest, DissolveEdge_TwoTrianglesIntoQuad) {
+    // Build two triangles sharing edge v1—v2:
+    //   T1 = (v0, v1, v2)   T2 = (v1, v3, v2)   shared edge: v1—v2
+    pluton::HalfEdgeMesh m;
+    auto v0 = m.add_vertex(0,0,0);
+    auto v1 = m.add_vertex(1,0,0);
+    auto v2 = m.add_vertex(1,1,0);
+    auto v3 = m.add_vertex(2,1,0);
+    m.add_halfedge_pair(v0, v1);
+    m.add_halfedge_pair(v1, v2);                                       // shared
+    m.add_halfedge_pair(v2, v0);
+    m.add_halfedge_pair(v1, v3);
+    m.add_halfedge_pair(v3, v2);
+
+    auto f1 = m.add_face_from_loop({v0, v1, v2}, {(int)v0, (int)v1, (int)v2});
+    auto f2 = m.add_face_from_loop({v1, v3, v2}, {(int)v1, (int)v3, (int)v2});
+
+    // Find the shared edge id (the v1—v2 pair).
+    std::uint32_t shared_edge = pluton::HalfEdgeMesh::INVALID_ID;
+    for (std::uint32_t e = 0; e < m.halfedge_slab_size() / 2; ++e) {
+        auto verts = m.edge_vertices(e);
+        if ((verts[0] == v1 && verts[1] == v2) || (verts[0] == v2 && verts[1] == v1)) {
+            shared_edge = e;
+            break;
+        }
+    }
+    ASSERT_NE(shared_edge, pluton::HalfEdgeMesh::INVALID_ID);
+
+    auto merged = m.dissolve_edge(shared_edge);
+
+    EXPECT_NE(merged, pluton::HalfEdgeMesh::INVALID_ID);
+    EXPECT_FALSE(m.face_is_live(f1));
+    EXPECT_FALSE(m.face_is_live(f2));
+    EXPECT_FALSE(m.edge_is_live(shared_edge));
+    EXPECT_TRUE(m.face_is_live(merged));
+
+    // The merged face is a quad with 4 vertices.
+    auto loop = m.face_loop_vertices(merged);
+    EXPECT_EQ(loop.size(), 4u);
+}
+
+TEST(HalfEdgeMeshTest, DissolveEdge_TombstonesEdgeId) {
+    // After dissolve, the edge slot should be tombstoned (not compacted).
+    // Querying the now-dead edge returns invalid; slab size unchanged.
+    pluton::HalfEdgeMesh m;
+    auto v0 = m.add_vertex(0,0,0);
+    auto v1 = m.add_vertex(1,0,0);
+    auto v2 = m.add_vertex(1,1,0);
+    auto v3 = m.add_vertex(2,1,0);
+    m.add_halfedge_pair(v0, v1);
+    m.add_halfedge_pair(v1, v2);
+    m.add_halfedge_pair(v2, v0);
+    m.add_halfedge_pair(v1, v3);
+    m.add_halfedge_pair(v3, v2);
+    m.add_face_from_loop({v0, v1, v2}, {(int)v0, (int)v1, (int)v2});
+    m.add_face_from_loop({v1, v3, v2}, {(int)v1, (int)v3, (int)v2});
+
+    // Find the shared edge again.
+    std::uint32_t shared_edge = pluton::HalfEdgeMesh::INVALID_ID;
+    for (std::uint32_t e = 0; e < m.halfedge_slab_size() / 2; ++e) {
+        auto verts = m.edge_vertices(e);
+        if ((verts[0] == v1 && verts[1] == v2) || (verts[0] == v2 && verts[1] == v1)) {
+            shared_edge = e;
+            break;
+        }
+    }
+
+    auto slab_before = m.halfedge_slab_size();
+    m.dissolve_edge(shared_edge);
+    EXPECT_EQ(m.halfedge_slab_size(), slab_before);     // no compaction
+    EXPECT_FALSE(m.edge_is_live(shared_edge));
+}

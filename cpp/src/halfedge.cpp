@@ -427,6 +427,110 @@ bool pluton::HalfEdgeMesh::faces_are_coplanar(std::uint32_t f1_id,
     return check_side(n1, f1_id, f2_id) && check_side(n2, f2_id, f1_id);
 }
 
+std::uint32_t pluton::HalfEdgeMesh::dissolve_edge(std::uint32_t e_id) {
+    // The two half-edges of edge e are at slab indices 2e and 2e+1.
+    std::uint32_t he_a = 2u * e_id;
+    std::uint32_t he_b = 2u * e_id + 1u;
+    if (he_b >= halfedges_.size()) return INVALID_ID;
+    if (!halfedges_[he_a].alive || !halfedges_[he_b].alive) return INVALID_ID;
+
+    std::uint32_t f1 = halfedges_[he_a].face;
+    std::uint32_t f2 = halfedges_[he_b].face;
+    if (f1 == INVALID_ID || f2 == INVALID_ID) return INVALID_ID;  // boundary edge
+    if (f1 == f2) return INVALID_ID;                              // same face on both sides
+
+    // Reject multi-shared-edge: count how many edges f1 and f2 share. Walk f1's
+    // boundary half-edges; for each, see if its twin is on f2. If more than one
+    // such half-edge exists, refuse.
+    {
+        std::uint32_t shared_count = 0;
+        std::uint32_t start = faces_[f1].boundary_he;
+        std::uint32_t cur = start;
+        do {
+            std::uint32_t twin = halfedges_[cur].twin;
+            if (twin != INVALID_ID && halfedges_[twin].face == f2) ++shared_count;
+            cur = halfedges_[cur].next;
+        } while (cur != start);
+        if (shared_count > 1) return INVALID_ID;
+    }
+
+    // Splice the two boundary loops at the shared edge.
+    //   Loop of f1: ... -> A -> he_a -> B -> ...   (B = he_a.next, A's next was he_a)
+    //   Loop of f2: ... -> C -> he_b -> D -> ...
+    // After dissolve the merged loop becomes:
+    //   ... -> A -> D -> ... -> C -> B -> ...
+    // (skipping he_a and he_b, splicing across the gap.)
+
+    // Find A (predecessor of he_a in f1's loop).
+    std::uint32_t A = INVALID_ID;
+    {
+        std::uint32_t cur = halfedges_[he_a].next;
+        while (halfedges_[cur].next != he_a) cur = halfedges_[cur].next;
+        A = cur;
+    }
+    // Find C (predecessor of he_b in f2's loop).
+    std::uint32_t C = INVALID_ID;
+    {
+        std::uint32_t cur = halfedges_[he_b].next;
+        while (halfedges_[cur].next != he_b) cur = halfedges_[cur].next;
+        C = cur;
+    }
+    std::uint32_t B = halfedges_[he_a].next;
+    std::uint32_t D = halfedges_[he_b].next;
+
+    // Splice next-pointers across the gap.
+    halfedges_[A].next = D;
+    halfedges_[C].next = B;
+
+    // Walk the new merged loop, reassigning face pointers and collecting
+    // vertex IDs for the new face's `loop` cache.
+    std::vector<std::uint32_t> merged_loop;
+    std::uint32_t walk_start = D;
+    std::uint32_t walk_cur = walk_start;
+    do {
+        merged_loop.push_back(halfedges_[walk_cur].origin);
+        walk_cur = halfedges_[walk_cur].next;
+    } while (walk_cur != walk_start);
+
+    // Retriangulate the merged loop with a simple fan (works for convex; the
+    // merged shape from coplanar dissolves is convex by construction in M3c's
+    // Case 2). For now use fan from vertex 0.
+    std::vector<std::int32_t> tris;
+    tris.reserve((merged_loop.size() - 2) * 3);
+    for (std::size_t i = 1; i + 1 < merged_loop.size(); ++i) {
+        tris.push_back((std::int32_t)merged_loop[0]);
+        tris.push_back((std::int32_t)merged_loop[i]);
+        tris.push_back((std::int32_t)merged_loop[i + 1]);
+    }
+
+    // Tombstone the two source faces and the dissolved edge's two half-edges.
+    faces_[f1].alive = false;
+    faces_[f2].alive = false;
+    halfedges_[he_a].alive = false;
+    halfedges_[he_b].alive = false;
+
+    // Also tombstone the edge's entry in edge_index_ so add_halfedge_pair can't
+    // resurrect it as live (the slot stays dead — IDs are never reused).
+    {
+        // Origins were the (v_min, v_max) pair before tombstoning above; they're
+        // still readable in the struct (we only flipped `alive`).
+        const std::uint32_t v_min = halfedges_[he_a].origin;
+        const std::uint32_t v_max = halfedges_[he_b].origin;
+        edge_index_.erase(pack_pair(v_min, v_max));
+    }
+
+    // Allocate the new face on the merged loop. Note: this calls
+    // add_face_from_loop, which re-walks half-edges — they must already point
+    // to a consistent next-chain. Splicing above ensured this.
+    auto new_face = add_face_from_loop(merged_loop, tris);
+
+    // After add_face_from_loop, the merged_loop's half-edges now have face = new_face.
+    // (add_face_from_loop sets this internally.)
+
+    dirty_ = true;
+    return new_face;
+}
+
 std::uint32_t HalfEdgeMesh::halfedge_origin(std::uint32_t he_id) const noexcept {
     return he_id < halfedges_.size() && halfedges_[he_id].alive ? halfedges_[he_id].origin : INVALID_ID;
 }
