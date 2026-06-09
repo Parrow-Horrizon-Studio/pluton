@@ -361,6 +361,72 @@ std::vector<std::int32_t> HalfEdgeMesh::face_triangles(std::uint32_t f_id) const
     return faces_[f_id].tris;
 }
 
+namespace {
+
+inline std::array<float, 3> sub3(std::array<float, 3> a, std::array<float, 3> b) {
+    return { a[0]-b[0], a[1]-b[1], a[2]-b[2] };
+}
+inline std::array<float, 3> cross3(std::array<float, 3> a, std::array<float, 3> b) {
+    return {
+        a[1]*b[2] - a[2]*b[1],
+        a[2]*b[0] - a[0]*b[2],
+        a[0]*b[1] - a[1]*b[0],
+    };
+}
+inline float dot3(std::array<float, 3> a, std::array<float, 3> b) {
+    return a[0]*b[0] + a[1]*b[1] + a[2]*b[2];
+}
+inline float len3(std::array<float, 3> a) {
+    return std::sqrt(dot3(a, a));
+}
+
+// Compute geometric face normal from the first three boundary vertices.
+// Returns zero vector if the face is degenerate (collinear or repeated vertices).
+std::array<float, 3> compute_face_normal_geometric(
+        const pluton::HalfEdgeMesh& m, std::uint32_t f_id) {
+    auto loop = m.face_loop_vertices(f_id);
+    if (loop.size() < 3) return {0, 0, 0};
+    auto p0 = m.vertex_position(loop[0]);
+    auto p1 = m.vertex_position(loop[1]);
+    auto p2 = m.vertex_position(loop[2]);
+    auto n  = cross3(sub3(p1, p0), sub3(p2, p0));
+    float L = len3(n);
+    if (L < 1e-7f) return {0, 0, 0};
+    return { n[0]/L, n[1]/L, n[2]/L };
+}
+
+}  // namespace
+
+bool pluton::HalfEdgeMesh::faces_are_coplanar(std::uint32_t f1_id,
+                                              std::uint32_t f2_id,
+                                              float angle_tol_cos,
+                                              float dist_tol) const {
+    if (!face_is_live(f1_id) || !face_is_live(f2_id)) return false;
+    auto n1 = compute_face_normal_geometric(*this, f1_id);
+    auto n2 = compute_face_normal_geometric(*this, f2_id);
+    // Degenerate normal → refuse.
+    if (len3(n1) < 1e-7f || len3(n2) < 1e-7f) return false;
+
+    // Angle test: |dot(n1, n2)| > tolerance — accept either winding direction.
+    float ang = std::abs(dot3(n1, n2));
+    if (ang < angle_tol_cos) return false;
+
+    // Distance test: every vertex of f2 within `dist_tol` of f1's plane, and vv.
+    auto check_side = [&](std::array<float, 3> n, std::uint32_t plane_face,
+                          std::uint32_t other_face) -> bool {
+        auto plane_loop = face_loop_vertices(plane_face);
+        auto p_anchor = vertex_position(plane_loop[0]);
+        float d_anchor = dot3(n, p_anchor);
+        for (auto v : face_loop_vertices(other_face)) {
+            auto p = vertex_position(v);
+            float signed_d = dot3(n, p) - d_anchor;
+            if (std::abs(signed_d) > dist_tol) return false;
+        }
+        return true;
+    };
+    return check_side(n1, f1_id, f2_id) && check_side(n2, f2_id, f1_id);
+}
+
 std::uint32_t HalfEdgeMesh::halfedge_origin(std::uint32_t he_id) const noexcept {
     return he_id < halfedges_.size() && halfedges_[he_id].alive ? halfedges_[he_id].origin : INVALID_ID;
 }

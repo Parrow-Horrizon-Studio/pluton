@@ -53,6 +53,17 @@ public:
     std::vector<std::uint32_t> face_loop_vertices(std::uint32_t f_id) const;
     std::vector<std::int32_t> face_triangles(std::uint32_t f_id) const;
 
+    /// Robust planar-coplanarity test for two faces.
+    /// Returns true iff both:
+    ///   - the angle between unit normals satisfies dot(n1, n2) > angle_tol_cos, AND
+    ///   - every vertex of either face lies within `dist_tol` of the other face's plane.
+    /// Returns false (without crashing) for degenerate-normal faces (|n| < 1e-7).
+    /// Project defaults: angle_tol_cos = cos(0.5°) ≈ 0.9999619f, dist_tol = 1e-4f.
+    bool faces_are_coplanar(std::uint32_t f1_id,
+                            std::uint32_t f2_id,
+                            float angle_tol_cos,
+                            float dist_tol) const;
+
     std::uint32_t halfedge_origin(std::uint32_t he_id) const noexcept;
     std::uint32_t halfedge_next(std::uint32_t he_id) const noexcept;
     std::uint32_t halfedge_twin(std::uint32_t he_id) const noexcept;

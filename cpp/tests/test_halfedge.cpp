@@ -1,6 +1,8 @@
 #include <gtest/gtest.h>
 
 #include <algorithm>
+#include <array>
+#include <cmath>
 
 #include "pluton/halfedge.h"
 
@@ -423,4 +425,82 @@ TEST(HalfEdgeMeshTest, FaceNormalComputedGeometricallyYZPlane) {
         EXPECT_NEAR(normals[i + 1],  0.0f, 1e-6f);
         EXPECT_NEAR(normals[i + 2],  0.0f, 1e-6f);
     }
+}
+
+// ====================================================================
+// M3c: faces_are_coplanar
+// ====================================================================
+
+namespace {
+
+// Helper: build a triangle face from 3 explicit positions, return face id.
+std::uint32_t add_triangle(pluton::HalfEdgeMesh& m,
+                           std::array<float, 3> p0,
+                           std::array<float, 3> p1,
+                           std::array<float, 3> p2) {
+    auto v0 = m.add_vertex(p0[0], p0[1], p0[2]);
+    auto v1 = m.add_vertex(p1[0], p1[1], p1[2]);
+    auto v2 = m.add_vertex(p2[0], p2[1], p2[2]);
+    m.add_halfedge_pair(v0, v1);
+    m.add_halfedge_pair(v1, v2);
+    m.add_halfedge_pair(v2, v0);
+    return m.add_face_from_loop({v0, v1, v2}, {(int)v0, (int)v1, (int)v2});
+}
+
+constexpr float kCos05Deg = 0.99996192306f;   // cos(0.5°)
+constexpr float kDistTol  = 1.0e-4f;
+
+}  // namespace
+
+TEST(HalfEdgeMeshTest, FacesAreCoplanar_TrueForIdenticalPlanes) {
+    pluton::HalfEdgeMesh m;
+    auto f1 = add_triangle(m, {0,0,0}, {1,0,0}, {0,1,0});       // XY plane
+    auto f2 = add_triangle(m, {2,2,0}, {3,2,0}, {2,3,0});       // also XY plane
+    EXPECT_TRUE(m.faces_are_coplanar(f1, f2, kCos05Deg, kDistTol));
+    EXPECT_TRUE(m.faces_are_coplanar(f2, f1, kCos05Deg, kDistTol));  // symmetric
+}
+
+TEST(HalfEdgeMeshTest, FacesAreCoplanar_TrueWithinAngleTolerance) {
+    // Two faces on planes whose normals differ by 0.3° — under the 0.5° tolerance.
+    pluton::HalfEdgeMesh m;
+    auto f1 = add_triangle(m, {0,0,0}, {1,0,0}, {0,1,0});  // normal (0,0,1)
+    // Rotate the second face by 0.3° about X: normal becomes (0, -sin(0.3°), cos(0.3°))
+    float c = std::cos(0.3f * 3.14159265f / 180.0f);
+    float s = std::sin(0.3f * 3.14159265f / 180.0f);
+    auto f2 = add_triangle(m, {2,2,0}, {3,2,0}, {2, 2 + c, s});
+    EXPECT_TRUE(m.faces_are_coplanar(f1, f2, kCos05Deg, 2e-2f));   // looser dist
+}
+
+TEST(HalfEdgeMeshTest, FacesAreCoplanar_FalseBeyondAngleTolerance) {
+    // 1.0° apart — over the 0.5° tolerance.
+    pluton::HalfEdgeMesh m;
+    auto f1 = add_triangle(m, {0,0,0}, {1,0,0}, {0,1,0});
+    float c = std::cos(1.0f * 3.14159265f / 180.0f);
+    float s = std::sin(1.0f * 3.14159265f / 180.0f);
+    auto f2 = add_triangle(m, {2,2,0}, {3,2,0}, {2, 2 + c, s});
+    EXPECT_FALSE(m.faces_are_coplanar(f1, f2, kCos05Deg, 1.0f));
+}
+
+TEST(HalfEdgeMeshTest, FacesAreCoplanar_FalseBeyondDistanceTolerance) {
+    // Two parallel XY planes offset by 1e-3 (over the 1e-4 dist tolerance).
+    pluton::HalfEdgeMesh m;
+    auto f1 = add_triangle(m, {0,0,0}, {1,0,0}, {0,1,0});       // z = 0
+    auto f2 = add_triangle(m, {2,2,1e-3f}, {3,2,1e-3f}, {2,3,1e-3f});  // z = 0.001
+    EXPECT_FALSE(m.faces_are_coplanar(f1, f2, kCos05Deg, kDistTol));
+}
+
+TEST(HalfEdgeMeshTest, FacesAreCoplanar_FalseForDegenerateNormal) {
+    // f1 has zero area (all 3 vertices collinear). Must not crash; must return false.
+    pluton::HalfEdgeMesh m;
+    auto v0 = m.add_vertex(0,0,0);
+    auto v1 = m.add_vertex(1,0,0);
+    auto v2 = m.add_vertex(2,0,0);
+    m.add_halfedge_pair(v0, v1);
+    m.add_halfedge_pair(v1, v2);
+    m.add_halfedge_pair(v2, v0);
+    auto f_degen = m.add_face_from_loop({v0, v1, v2}, {(int)v0, (int)v1, (int)v2});
+
+    auto f_good = add_triangle(m, {5,0,0}, {6,0,0}, {5,1,0});
+    EXPECT_FALSE(m.faces_are_coplanar(f_degen, f_good, kCos05Deg, kDistTol));
+    EXPECT_FALSE(m.faces_are_coplanar(f_good, f_degen, kCos05Deg, kDistTol));
 }
