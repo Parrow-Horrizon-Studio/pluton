@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <set>
 
 #include "pluton/halfedge.h"
 
@@ -552,6 +553,37 @@ TEST(HalfEdgeMeshTest, DissolveEdge_TwoTrianglesIntoQuad) {
     // The merged face is a quad with 4 vertices.
     auto loop = m.face_loop_vertices(merged);
     EXPECT_EQ(loop.size(), 4u);
+
+    // Verify the merged loop contains exactly {v0, v1, v2, v3} (set equality).
+    std::set<std::uint32_t> loop_set(loop.begin(), loop.end());
+    std::set<std::uint32_t> expected{v0, v1, v2, v3};
+    EXPECT_EQ(loop_set, expected);
+
+    // Verify each consecutive pair in the merged loop is connected by a live
+    // half-edge pair (i.e. the spliced loop is a valid traversable cycle, not
+    // four disconnected vertices).
+    for (std::size_t i = 0; i < loop.size(); ++i) {
+        std::uint32_t a = loop[i];
+        std::uint32_t b = loop[(i + 1) % loop.size()];
+        // Find the edge slot for (a, b); both halves must be live and at least
+        // one half must belong to the merged face.
+        bool found_live_edge_to_merged = false;
+        for (std::uint32_t e = 0; e < m.halfedge_slab_size() / 2u; ++e) {
+            if (!m.edge_is_live(e)) continue;
+            auto verts = m.edge_vertices(e);
+            if ((verts[0] == a && verts[1] == b) || (verts[0] == b && verts[1] == a)) {
+                std::uint32_t he_lo = 2u * e;
+                std::uint32_t he_hi = 2u * e + 1u;
+                if (m.halfedge_face(he_lo) == merged || m.halfedge_face(he_hi) == merged) {
+                    found_live_edge_to_merged = true;
+                }
+                break;
+            }
+        }
+        EXPECT_TRUE(found_live_edge_to_merged)
+            << "Consecutive merged-loop pair (" << a << ", " << b
+            << ") has no live edge belonging to merged face " << merged;
+    }
 }
 
 TEST(HalfEdgeMeshTest, DissolveEdge_TombstonesEdgeId) {

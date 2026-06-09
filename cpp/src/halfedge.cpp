@@ -482,8 +482,8 @@ std::uint32_t pluton::HalfEdgeMesh::dissolve_edge(std::uint32_t e_id) {
     halfedges_[A].next = D;
     halfedges_[C].next = B;
 
-    // Walk the new merged loop, reassigning face pointers and collecting
-    // vertex IDs for the new face's `loop` cache.
+    // Walk the new merged loop, collecting vertex IDs for the new face's
+    // `loop` cache. Face pointers are reassigned later inside add_face_from_loop().
     std::vector<std::uint32_t> merged_loop;
     std::uint32_t walk_start = D;
     std::uint32_t walk_cur = walk_start;
