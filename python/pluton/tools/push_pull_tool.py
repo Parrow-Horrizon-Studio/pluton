@@ -256,12 +256,28 @@ class PushPullTool(Tool):
             polygons.append(side)
         return polygons
 
+    def _should_add_bottom_cap(self, src_face_id: int) -> bool:
+        """True iff every boundary edge of the source face has only one
+        incident half-edge — meaning the source was standalone (Case 1) and
+        adding a bottom cap will close the prism manifold-correctly without
+        creating a non-manifold edge."""
+        assert self._scene is not None
+        for e in self._scene.face_edges(src_face_id):
+            if not self._scene.edge_is_boundary(e):
+                return False
+        return True
+
     def _commit_extrusion(self) -> None:
         """Build the extrusion CompositeCommand and push it to the command stack."""
         assert self._armed_face_id is not None
         assert self._armed_face_loop, "armed loop must be populated"
         assert self._armed_face_normal is not None
         assert self._scene is not None
+
+        # Capture M3c "is this a standalone source?" check BEFORE we remove
+        # the source face. Determines whether we add a bottom cap (Case 1) or
+        # leave it open (Case 2 — to be handled by seam-merge in Task 8).
+        is_standalone = self._should_add_bottom_cap(self._armed_face_id)
 
         scene = self._scene
         loop = self._armed_face_loop
@@ -313,6 +329,14 @@ class PushPullTool(Tool):
         c = AddFaceCommand(tuple(top_vids))
         c.do(scene)
         composite.children.append(c)
+
+        # 7. (M3c) Bottom cap — only for standalone sources (Case 1).
+        # Reversed source loop so the cap's normal points opposite the
+        # extrusion direction (down, when extruding up).
+        if is_standalone:
+            cap = AddFaceCommand(tuple(reversed(loop)))
+            cap.do(scene)
+            composite.children.append(cap)
 
         if self._command_stack is not None:
             self._command_stack.push_executed(composite)

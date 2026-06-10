@@ -98,10 +98,10 @@ class TestPushPullCommit:
         # Post-commit counts:
         #   verts: 4 source + 4 top                = 8
         #   edges: 4 source + 4 vertical + 4 top   = 12
-        #   faces: 4 sides + 1 top (source removed)= 5
+        #   faces: 4 sides + 1 top + 1 bottom (source removed)= 6
         assert _live_vertex_count(scene) == 8
         assert _live_edge_count(scene) == 12
-        assert _live_face_count(scene) == 5
+        assert _live_face_count(scene) == 6
         # Every live face must have at least one triangle. Regression for the
         # XY-only earcut projection bug that made vertical side faces have 0
         # triangles (M3b visual verification turned this up).
@@ -157,7 +157,7 @@ class TestPushPullCommit:
         cmd_stack.redo(scene)
         assert _live_vertex_count(scene) == 8
         assert _live_edge_count(scene) == 12
-        assert _live_face_count(scene) == 5
+        assert _live_face_count(scene) == 6
 
     def test_top_face_normal_matches_source_normal_direction(self):
         tool, scene, source_f, camera, cmd_stack = _setup_push_pull()
@@ -169,7 +169,15 @@ class TestPushPullCommit:
         )
         tool.on_mouse_move(_make_move(), snap=None)
         tool.on_mouse_press(_make_press(), snap=None)
-        # The most recently added face has the highest id.
-        top_face_id = max(f.id for f in scene.faces_iter())
+        # Find the top face explicitly by its +Z normal. NOTE: M3c adds a
+        # bottom cap (normal -Z) as the most-recently-added face, so the old
+        # "highest id = top" heuristic no longer holds.
+        top_candidates = [
+            f.id
+            for f in scene.faces_iter()
+            if float(np.dot(scene.face_normal(f.id), [0.0, 0.0, 1.0])) > 0.5
+        ]
+        assert len(top_candidates) == 1
+        top_face_id = top_candidates[0]
         normal = scene.face_normal(top_face_id)
         np.testing.assert_allclose(normal, [0.0, 0.0, 1.0], atol=1e-5)
