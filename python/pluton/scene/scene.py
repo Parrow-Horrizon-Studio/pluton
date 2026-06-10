@@ -233,6 +233,68 @@ class Scene:
             acc += np.asarray(pos, dtype=np.float32)
         return (acc / float(len(loop))).astype(np.float32)
 
+    # ---- M3c additions ----
+
+    # Project-default tolerances for faces_are_coplanar.
+    _ANGLE_TOL_COS = 0.9999619  # cos(0.5°)
+    _DIST_TOL = 1e-4
+
+    def dissolve_edge(self, edge_id: int) -> int | None:
+        """Dissolve an edge between two adjacent faces.
+
+        Returns the new (surviving) face id on success, or None if the edge
+        is boundary / dead / would create a degenerate result.
+        """
+        result = self._mesh.dissolve_edge(edge_id)
+        if result == self._mesh.INVALID_ID:
+            return None
+        return int(result)
+
+    def faces_are_coplanar(self, f1_id: int, f2_id: int) -> bool:
+        """Project-default tolerances applied. See HalfEdgeMesh.faces_are_coplanar."""
+        return bool(self._mesh.faces_are_coplanar(
+            f1_id, f2_id, self._ANGLE_TOL_COS, self._DIST_TOL,
+        ))
+
+    def face_edges(self, f_id: int) -> list[int]:
+        """Edge IDs around the face's boundary loop, in order.
+
+        For each consecutive vertex pair (v_i, v_{i+1}) in the boundary loop,
+        looks up the edge id via the kernel's idempotent add_halfedge_pair,
+        which returns the EXISTING edge id for an already-present live pair
+        (no mutation). add_halfedge_pair returns the edge id directly — do
+        NOT divide by 2.
+        """
+        if not self._mesh.face_is_live(f_id):
+            raise IndexError(f"Face {f_id} is not live")
+        loop = list(self._mesh.face_loop_vertices(f_id))
+        edges: list[int] = []
+        n = len(loop)
+        for i in range(n):
+            v_a, v_b = loop[i], loop[(i + 1) % n]
+            edge_id = self._mesh.add_halfedge_pair(v_a, v_b)  # returns the edge id
+            edges.append(int(edge_id))
+        return edges
+
+    def edge_faces(self, e_id: int) -> tuple[int | None, int | None]:
+        """The pair of face ids on each side of the edge. None if no face on that side."""
+        if not self._mesh.edge_is_live(e_id):
+            raise IndexError(f"Edge {e_id} is not live")
+        he_a = 2 * e_id
+        he_b = 2 * e_id + 1
+        f_a = self._mesh.halfedge_face(he_a)
+        f_b = self._mesh.halfedge_face(he_b)
+        INVALID = self._mesh.INVALID_ID
+        return (
+            None if f_a == INVALID else int(f_a),
+            None if f_b == INVALID else int(f_b),
+        )
+
+    def edge_is_boundary(self, e_id: int) -> bool:
+        """True iff the edge has fewer than two incident faces."""
+        f_a, f_b = self.edge_faces(e_id)
+        return f_a is None or f_b is None
+
     # --- Queries ----------------------------------------------------------
 
     @property
