@@ -36,6 +36,14 @@ def _draw_pentagon(scene: Scene) -> int:
     return scene.add_face_from_loop(verts)
 
 
+def _live_vertex_positions(scene: Scene) -> list:
+    """Sorted multiset of live vertex positions, rounded for float-stable compare."""
+    return sorted(
+        tuple(round(float(c), 5) for c in scene.vertex(v.id).position)
+        for v in scene.vertices_iter()
+    )
+
+
 def _commit_pp_directly(scene: Scene, face_id: int, depth: float) -> CommandStack:
     """Skip the click-move-click state machine: directly invoke _commit_extrusion
     with armed-face state populated, simulating a user gesture."""
@@ -147,17 +155,20 @@ def test_case2_old_top_loop_edges_dissolved():
 
 
 def test_case2_composite_undoes_atomically():
-    """One Ctrl+Z must restore the pre-P/P state exactly (face + edge counts)."""
+    """One Ctrl+Z must restore the pre-P/P state exactly — face + edge counts
+    AND vertex geometry."""
     scene = Scene()
     top = _build_unit_box(scene)
     pre_face_count = sum(1 for _ in scene.faces_iter())
     pre_edge_count = sum(1 for _ in scene.edges_iter())
+    pre_positions = _live_vertex_positions(scene)
 
     stack = _commit_pp_directly(scene, top, depth=1.0)
     stack.undo(scene)
 
     assert sum(1 for _ in scene.faces_iter()) == pre_face_count
     assert sum(1 for _ in scene.edges_iter()) == pre_edge_count
+    assert _live_vertex_positions(scene) == pre_positions
 
 
 def test_tilted_source_seam_merge_works():
@@ -194,3 +205,26 @@ def test_tilted_source_seam_merge_works():
     _commit_pp_directly(scene, top, depth=0.5)
     # The 4 old + 4 new side faces merge -> still 6 faces.
     assert sum(1 for _ in scene.faces_iter()) == pre_count
+
+
+def test_case2_composite_redo_restores_merged_state():
+    """do -> undo -> redo of the WHOLE Case-2 P/P composite must return to the
+    merged (taller box) state: still 6 faces, and the OLD-top edges dissolved
+    again. Locks in the full-composite redo path (seam-merge re-resolution +
+    AddFaceCommand redo together)."""
+    scene = Scene()
+    top = _build_unit_box(scene)
+    old_top_edge_ids = list(scene.face_edges(top))
+
+    stack = _commit_pp_directly(scene, top, depth=1.0)
+    merged_face_count = sum(1 for _ in scene.faces_iter())
+    assert merged_face_count == 6
+
+    stack.undo(scene)
+    stack.redo(scene)
+
+    assert sum(1 for _ in scene.faces_iter()) == 6
+    for e in old_top_edge_ids:
+        assert not scene._mesh.edge_is_live(e), (
+            f"Edge {e} should be dissolved again after redo"
+        )

@@ -24,6 +24,7 @@ from pluton.commands.scene_commands import (
     AddEdgeCommand,
     AddFaceCommand,
     AddVertexCommand,
+    DissolveEdgeCommand,
     RemoveFaceCommand,
 )
 from pluton.tools.tool import Tool, ToolContext, ToolOverlay
@@ -267,11 +268,10 @@ class PushPullTool(Tool):
                 return False
         return True
 
-    def _seam_merge_pass(self, candidate_edges: list[int]) -> list:
+    def _seam_merge_pass(self, candidate_edges: list[int]) -> list[DissolveEdgeCommand]:
         """Inspect each candidate edge; if its two incident faces are coplanar,
         dissolve it and return the DissolveEdgeCommand. Returns the list of
         commands to append to the composite (in order)."""
-        from pluton.commands.scene_commands import DissolveEdgeCommand
         assert self._scene is not None
         scene = self._scene
         out = []
