@@ -201,9 +201,11 @@ class DissolveEdgeCommand(Command):
           captured vertex pair. Boundary / dead / unresolvable edges make the
           command a clean no-op (do + undo both return early), keeping the
           undo stack consistent.
-    undo(): removes the merged face and restores the two source faces from
-            their captured loops. The shared edge is recreated implicitly by
-            add_face_from_loop (with a fresh id — see redo handling above).
+    undo(): removes the merged face, then restores the dissolved edge and BOTH
+            source faces to their ORIGINAL ids via restore_edge / restore_face
+            (id-preserving — NOT add_face_from_loop). This is required so that,
+            inside a CompositeCommand, sibling AddFaceCommands whose new-side
+            faces this dissolve consumed can still undo by their cached ids.
     """
 
     name = "Dissolve Edge"
@@ -213,6 +215,8 @@ class DissolveEdgeCommand(Command):
         self._shared_verts: tuple[int, int] | None = None
         self._captured_f1: tuple[int, ...] | None = None
         self._captured_f2: tuple[int, ...] | None = None
+        self._f1_id: int | None = None
+        self._f2_id: int | None = None
         self._merged_face_id: int | None = None
         self._was_noop: bool = False
 
@@ -228,6 +232,8 @@ class DissolveEdgeCommand(Command):
                 self._was_noop = True  # boundary edge (only one incident face)
                 return
             f1, f2 = faces
+            self._f1_id = f1
+            self._f2_id = f2
             self._captured_f1 = tuple(scene.face(f1).loop_vertex_ids)
             self._captured_f2 = tuple(scene.face(f2).loop_vertex_ids)
             # Capture the dissolved edge's true endpoints. Vertex ids are stable
@@ -259,13 +265,16 @@ class DissolveEdgeCommand(Command):
         if self._was_noop:
             return
         assert self._merged_face_id is not None, "DissolveEdgeCommand.undo before do"
-        assert self._captured_f1 is not None
-        assert self._captured_f2 is not None
+        assert self._captured_f1 is not None and self._captured_f2 is not None
+        assert self._shared_verts is not None
+        assert self._f1_id is not None and self._f2_id is not None
 
-        # Remove the merged face first (frees up the boundary half-edges),
-        # then restore both source faces from their captured loops. We use
-        # add_face_from_loop (fresh ids) rather than restore_face — the merged
-        # face occupied the tombstoned source-face slots.
+        # Remove the merged face, then restore the dissolved edge and BOTH source
+        # faces to their ORIGINAL ids. Id-preserving restore (not add_face_from_loop)
+        # is required so that, inside a CompositeCommand, sibling AddFaceCommands
+        # whose faces this dissolve consumed can still undo by their cached ids.
+        # restore_edge must run first — restore_face needs the shared edge present.
         scene.remove_face(self._merged_face_id)
-        scene.add_face_from_loop(self._captured_f1)
-        scene.add_face_from_loop(self._captured_f2)
+        scene.restore_edge(self._edge_id, self._shared_verts[0], self._shared_verts[1])
+        scene.restore_face(self._f1_id, self._captured_f1)
+        scene.restore_face(self._f2_id, self._captured_f2)

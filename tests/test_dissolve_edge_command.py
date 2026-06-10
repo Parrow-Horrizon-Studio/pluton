@@ -116,3 +116,43 @@ def test_do_undo_redo_double_cycle():
 
     assert sum(1 for _ in scene.faces_iter()) == pre_face_count
     assert sum(1 for _ in scene.edges_iter()) == pre_edge_count
+
+
+def test_undo_inside_composite_with_sibling_addface():
+    """Regression: a DissolveEdgeCommand that consumes a face created by a
+    sibling AddFaceCommand in the same composite must restore that face to its
+    ORIGINAL id, so the sibling's undo (remove_face by cached id) succeeds.
+    Reproduces the Task 8 atomic-undo bug."""
+    from pluton.commands.command import CompositeCommand
+    from pluton.commands.scene_commands import AddFaceCommand
+
+    scene = Scene()
+    v0 = scene.add_vertex(np.array([0, 0, 0], dtype=np.float32))
+    v1 = scene.add_vertex(np.array([1, 0, 0], dtype=np.float32))
+    v2 = scene.add_vertex(np.array([1, 1, 0], dtype=np.float32))
+    v3 = scene.add_vertex(np.array([0, 1, 0], dtype=np.float32))
+    v4 = scene.add_vertex(np.array([2, 0, 0], dtype=np.float32))
+    v5 = scene.add_vertex(np.array([2, 1, 0], dtype=np.float32))
+    for a, b in [(v0, v1), (v1, v2), (v2, v3), (v3, v0), (v1, v4), (v4, v5), (v5, v2)]:
+        scene.add_edge(a, b)
+    f1 = scene.add_face_from_loop([v0, v1, v2, v3])
+    pre_faces = sum(1 for _ in scene.faces_iter())
+    pre_edges = sum(1 for _ in scene.edges_iter())
+
+    comp = CompositeCommand(name="seam-merge-repro")
+    add_f2 = AddFaceCommand((v1, v4, v5, v2))
+    add_f2.do(scene)
+    comp.children.append(add_f2)
+    shared = next(
+        e
+        for e in scene.face_edges(f1)
+        if {scene.edge(e).v1_id, scene.edge(e).v2_id} == {v1, v2}
+    )
+    dissolve = DissolveEdgeCommand(shared)
+    dissolve.do(scene)
+    comp.children.append(dissolve)
+
+    # One atomic undo must not raise and must round-trip face/edge counts.
+    comp.undo(scene)
+    assert sum(1 for _ in scene.faces_iter()) == pre_faces
+    assert sum(1 for _ in scene.edges_iter()) == pre_edges

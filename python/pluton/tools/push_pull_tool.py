@@ -267,6 +267,26 @@ class PushPullTool(Tool):
                 return False
         return True
 
+    def _seam_merge_pass(self, candidate_edges: list[int]) -> list:
+        """Inspect each candidate edge; if its two incident faces are coplanar,
+        dissolve it and return the DissolveEdgeCommand. Returns the list of
+        commands to append to the composite (in order)."""
+        from pluton.commands.scene_commands import DissolveEdgeCommand
+        assert self._scene is not None
+        scene = self._scene
+        out = []
+        for e in candidate_edges:
+            if not scene._mesh.edge_is_live(e):
+                continue
+            f_a, f_b = scene.edge_faces(e)
+            if f_a is None or f_b is None:
+                continue
+            if scene.faces_are_coplanar(f_a, f_b):
+                cmd = DissolveEdgeCommand(e)
+                cmd.do(scene)
+                out.append(cmd)
+        return out
+
     def _commit_extrusion(self) -> None:
         """Build the extrusion CompositeCommand and push it to the command stack."""
         assert self._armed_face_id is not None
@@ -278,6 +298,11 @@ class PushPullTool(Tool):
         # the source face. Determines whether we add a bottom cap (Case 1) or
         # leave it open (Case 2 — to be handled by seam-merge in Task 8).
         is_standalone = self._should_add_bottom_cap(self._armed_face_id)
+
+        # M3c: capture the OLD source face's boundary edge ids BEFORE removal,
+        # so the seam-merge pass can re-visit them after the new side faces
+        # have populated each edge's second half-edge slot.
+        candidate_seam_edges = list(self._scene.face_edges(self._armed_face_id))
 
         scene = self._scene
         loop = self._armed_face_loop
@@ -337,6 +362,14 @@ class PushPullTool(Tool):
             cap = AddFaceCommand(tuple(reversed(loop)))
             cap.do(scene)
             composite.children.append(cap)
+
+        # 8. (M3c) Seam-merge pass — dissolve OLD-source-boundary edges whose
+        # two incident faces (parent's old side + new prism's side) are coplanar.
+        # Single-pass over the OLD source face's boundary edges only, per design
+        # doc §3.1 decision 6. (For Case 1 the candidate edges border the side +
+        # bottom cap, which are NOT coplanar, so this no-ops correctly.)
+        seam_cmds = self._seam_merge_pass(candidate_seam_edges)
+        composite.children.extend(seam_cmds)
 
         if self._command_stack is not None:
             self._command_stack.push_executed(composite)

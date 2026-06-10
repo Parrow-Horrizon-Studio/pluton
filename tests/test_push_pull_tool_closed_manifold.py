@@ -89,3 +89,108 @@ def test_case1_pentagon_source_produces_7_faces():
     _commit_pp_directly(scene, f, depth=0.5)
 
     assert sum(1 for _ in scene.faces_iter()) == 7
+
+
+def _build_unit_box(scene: Scene) -> int:
+    """Draw a 1x1 rect and P/P it up by 1 -> returns the id of the new TOP face.
+    The standard "existing solid" fixture for Case 2 tests."""
+    f_src = _draw_rectangle(scene, 1.0, 1.0)
+    _commit_pp_directly(scene, f_src, depth=1.0)
+    for f in scene.faces_iter():
+        verts = [scene.vertex(vid).position for vid in f.loop_vertex_ids]
+        if all(abs(v[2] - 1.0) < 1e-4 for v in verts):
+            return f.id
+    raise RuntimeError("Could not locate top face of unit box")
+
+
+# ---- Case 2 — P/P on existing solid produces seamless extension ----------
+
+def test_case2_stacked_pp_face_count_correct():
+    """Box (6 faces) + P/P top upward -> still 6 faces (taller box)."""
+    scene = Scene()
+    top = _build_unit_box(scene)
+    assert sum(1 for _ in scene.faces_iter()) == 6  # baseline
+
+    _commit_pp_directly(scene, top, depth=1.0)
+
+    # After seam-merge, the 4 old side faces merged with the 4 new side faces:
+    # 4 merged sides + 1 new top + 1 original bottom = 6.
+    assert sum(1 for _ in scene.faces_iter()) == 6
+
+
+def test_case2_no_bottom_cap_for_attached_source():
+    """No face should exist at the OLD top height (z=1.0) after the second P/P."""
+    scene = Scene()
+    top = _build_unit_box(scene)
+    _commit_pp_directly(scene, top, depth=1.0)
+
+    for f in scene.faces_iter():
+        verts = [scene.vertex(vid).position for vid in f.loop_vertex_ids]
+        all_at_one = all(abs(v[2] - 1.0) < 1e-4 for v in verts)
+        assert not all_at_one, f"Face {f.id} should not be at z=1.0 after seam merge"
+
+
+def test_case2_old_top_loop_edges_dissolved():
+    """All 4 edges of the OLD top loop must be tombstoned after Case 2 P/P."""
+    scene = Scene()
+    top = _build_unit_box(scene)
+    old_top_edge_ids = list(scene.face_edges(top))
+    assert len(old_top_edge_ids) == 4
+    assert all(scene._mesh.edge_is_live(e) for e in old_top_edge_ids)
+
+    _commit_pp_directly(scene, top, depth=1.0)
+
+    for e in old_top_edge_ids:
+        assert not scene._mesh.edge_is_live(e), (
+            f"Edge {e} on the OLD top loop should have been dissolved by seam-merge"
+        )
+
+
+def test_case2_composite_undoes_atomically():
+    """One Ctrl+Z must restore the pre-P/P state exactly (face + edge counts)."""
+    scene = Scene()
+    top = _build_unit_box(scene)
+    pre_face_count = sum(1 for _ in scene.faces_iter())
+    pre_edge_count = sum(1 for _ in scene.edges_iter())
+
+    stack = _commit_pp_directly(scene, top, depth=1.0)
+    stack.undo(scene)
+
+    assert sum(1 for _ in scene.faces_iter()) == pre_face_count
+    assert sum(1 for _ in scene.edges_iter()) == pre_edge_count
+
+
+def test_tilted_source_seam_merge_works():
+    """A tilted source face's normal is geometry-derived and the coplanarity
+    test is rotation-agnostic, so seam-merge still fires on a tilted box."""
+    import math
+
+    scene = Scene()
+    s = math.sin(math.radians(30))
+    c = math.cos(math.radians(30))
+    v0 = scene.add_vertex(np.array([0, 0, 0], dtype=np.float32))
+    v1 = scene.add_vertex(np.array([1, 0, 0], dtype=np.float32))
+    v2 = scene.add_vertex(np.array([1, c, s], dtype=np.float32))
+    v3 = scene.add_vertex(np.array([0, c, s], dtype=np.float32))
+    scene.add_edge(v0, v1)
+    scene.add_edge(v1, v2)
+    scene.add_edge(v2, v3)
+    scene.add_edge(v3, v0)
+    f_src = scene.add_face_from_loop([v0, v1, v2, v3])
+
+    _commit_pp_directly(scene, f_src, depth=1.0)
+    assert sum(1 for _ in scene.faces_iter()) == 6
+
+    # The new top face is the only one with all vertices above z=0.5.
+    top = None
+    for f in scene.faces_iter():
+        verts = [scene.vertex(vid).position for vid in f.loop_vertex_ids]
+        if len(verts) == 4 and all(v[2] > 0.5 for v in verts):
+            top = f.id
+            break
+    assert top is not None
+
+    pre_count = sum(1 for _ in scene.faces_iter())
+    _commit_pp_directly(scene, top, depth=0.5)
+    # The 4 old + 4 new side faces merge -> still 6 faces.
+    assert sum(1 for _ in scene.faces_iter()) == pre_count
