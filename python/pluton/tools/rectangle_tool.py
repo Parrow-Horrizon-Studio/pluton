@@ -98,13 +98,21 @@ class RectangleTool(Tool):
         x0, y0 = float(self._first_corner[0]), float(self._first_corner[1])
         x1, y1 = float(second[0]), float(second[1])
 
+        # Normalize to a canonical CCW-from-above winding (min -> max on each
+        # axis) so the face normal always points +Z (up), regardless of which
+        # diagonal the user dragged the second corner toward. Without this, a
+        # down-right / up-left drag yields a -Z normal and push/pull would
+        # extrude the rectangle downward instead of up.
+        xlo, xhi = min(x0, x1), max(x0, x1)
+        ylo, yhi = min(y0, y1), max(y0, y1)
+
         composite = CompositeCommand(name="Draw Rectangle")
         s = self._scene  # type: ignore[assignment]
         v_cmds = [
-            AddVertexCommand(np.array([x0, y0, 0.0], dtype=np.float32)),
-            AddVertexCommand(np.array([x1, y0, 0.0], dtype=np.float32)),
-            AddVertexCommand(np.array([x1, y1, 0.0], dtype=np.float32)),
-            AddVertexCommand(np.array([x0, y1, 0.0], dtype=np.float32)),
+            AddVertexCommand(np.array([xlo, ylo, 0.0], dtype=np.float32)),
+            AddVertexCommand(np.array([xhi, ylo, 0.0], dtype=np.float32)),
+            AddVertexCommand(np.array([xhi, yhi, 0.0], dtype=np.float32)),
+            AddVertexCommand(np.array([xlo, yhi, 0.0], dtype=np.float32)),
         ]
         for c in v_cmds:
             c.do(s)

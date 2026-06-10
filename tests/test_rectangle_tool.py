@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import numpy as np
+import pytest
 
 
 def _snap_at(world):
@@ -90,12 +91,11 @@ def test_rectangle_tool_has_active_gesture_reflects_state():
 
 
 def test_rectangle_tool_esc_cancels_mid_drag():
-    from PySide6.QtCore import Qt
-    from PySide6.QtGui import QKeyEvent
-
     from pluton.scene import Scene
     from pluton.tools import ToolContext
     from pluton.tools.rectangle_tool import RectangleTool
+    from PySide6.QtCore import Qt
+    from PySide6.QtGui import QKeyEvent
 
     scene = Scene()
     tool = RectangleTool()
@@ -131,3 +131,36 @@ def test_rectangle_tool_pushes_composite_to_command_stack():
     stack.redo(scene)
     assert len(list(scene.vertices_iter())) == 4
     assert len(list(scene.faces_iter())) == 1
+
+
+@pytest.mark.parametrize(
+    "second_corner",
+    [
+        (3.0, 2.0, 0.0),    # up-right
+        (3.0, -2.0, 0.0),   # down-right
+        (-3.0, 2.0, 0.0),   # up-left
+        (-3.0, -2.0, 0.0),  # down-left
+    ],
+)
+def test_rectangle_face_normal_always_points_up(second_corner):
+    """A ground-plane rectangle must always have a +Z (upward) face normal,
+    regardless of which diagonal the second corner is dragged toward — so
+    push/pull extrudes upward consistently. Regression for the un-normalized
+    winding bug where down-right / up-left drags produced a -Z (downward)
+    normal and push/pull went the wrong way."""
+    from pluton.scene import Scene
+    from pluton.tools import ToolContext
+    from pluton.tools.rectangle_tool import RectangleTool
+
+    scene = Scene()
+    tool = RectangleTool()
+    tool.activate(ToolContext(scene=scene))
+    tool.on_mouse_press(None, _snap_at((0.0, 0.0, 0.0)))  # type: ignore[arg-type]
+    tool.on_mouse_press(None, _snap_at(second_corner))  # type: ignore[arg-type]
+
+    face = next(iter(scene.faces_iter()))
+    normal = scene.face_normal(face.id)
+    assert normal[2] > 0.99, (
+        f"Rectangle dragged to {second_corner} has normal {normal}; "
+        f"expected +Z (up) so push/pull extrudes upward."
+    )
