@@ -98,6 +98,21 @@ NB_MODULE(_core, m) {
         .def("face_loop_vertices", &HalfEdgeMesh::face_loop_vertices)
         .def("face_triangles", &HalfEdgeMesh::face_triangles)
 
+        // M3c: topology editing + coplanarity
+        .def("dissolve_edge",
+             &HalfEdgeMesh::dissolve_edge,
+             nb::arg("edge_id"),
+             "Collapse two adjacent faces sharing this edge into one merged face. "
+             "Returns the new face id, or INVALID_ID if the edge is boundary/dead "
+             "or the two faces share more than one edge.")
+        .def("faces_are_coplanar",
+             &HalfEdgeMesh::faces_are_coplanar,
+             nb::arg("f1_id"), nb::arg("f2_id"),
+             nb::arg("angle_tol_cos"), nb::arg("dist_tol"),
+             "True iff |dot(n1, n2)| > angle_tol_cos AND every vertex of either "
+             "face lies within dist_tol of the other face's plane. Project defaults: "
+             "cos(0.5°) ≈ 0.9999619, 1e-4.")
+
         // Half-edge adjacency (used by M3b push/pull)
         .def("halfedge_origin", &HalfEdgeMesh::halfedge_origin)
         .def("halfedge_next", &HalfEdgeMesh::halfedge_next)
