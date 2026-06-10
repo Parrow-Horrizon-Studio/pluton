@@ -114,6 +114,26 @@ class TestPushPullCommit:
         # Tool returns to IDLE / HOVERING (DRAGGING done).
         assert tool.has_active_gesture is False
 
+        # M3c: closed-manifold guard — every face must have at least one triangle
+        # (complements the _mesh.face_triangles check; asserts via the Scene
+        # Face.triangles (N,3) array that earcut produced a non-empty fan).
+        for f in scene.faces_iter():
+            assert len(f.triangles) > 0, (
+                f"Face {f.id} (loop={f.loop_vertex_ids}) has no triangles; "
+                f"earcut likely silently failed (regression of M3b XY-only bug)."
+            )
+
+        # M3c: every interior edge (two live faces) must have both half-edges
+        # bound to a live face — the closed-manifold invariant for the capped box.
+        for e in scene.edges_iter():
+            faces = scene.edge_faces(e.id)
+            if faces[0] is not None and faces[1] is not None:
+                he_a = 2 * e.id
+                he_b = 2 * e.id + 1
+                invalid = scene._mesh.INVALID_ID
+                assert scene._mesh.halfedge_face(he_a) != invalid
+                assert scene._mesh.halfedge_face(he_b) != invalid
+
     def test_commit_pushes_one_composite_command(self):
         tool, scene, source_f, camera, cmd_stack = _setup_push_pull()
         tool.on_mouse_move(_make_move(), snap=None)
