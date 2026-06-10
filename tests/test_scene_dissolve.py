@@ -2,10 +2,7 @@
 
 from __future__ import annotations
 
-import math
-
 import numpy as np
-import pytest
 
 from pluton.scene.scene import Scene
 
@@ -107,14 +104,19 @@ def test_edge_faces_returns_both_adjacent_faces():
 
 def test_edge_faces_returns_none_on_boundary_side():
     scene = Scene()
-    f1, _, _ = _build_two_quads_sharing_edge(scene)
-    # An edge on f1 that's not the shared edge has only one face (f1).
-    e_boundary = scene.face_edges(f1)[0]
-    # If this is the shared edge, pick a different one; otherwise expect (f1, None).
+    f1, f2, e_shared = _build_two_quads_sharing_edge(scene)
+    # f1's loop is [v0,v1,v2,v3]; face_edges returns its boundary edges in that
+    # order. The shared edge (v1,v2) touches both f1 and f2; every OTHER edge of
+    # f1 touches only f1. Pick a guaranteed true-boundary edge by excluding the
+    # shared edge explicitly.
+    boundary_edges = [e for e in scene.face_edges(f1) if e != e_shared]
+    assert boundary_edges, "f1 must have at least one non-shared boundary edge"
+    e_boundary = boundary_edges[0]
+
     faces = scene.edge_faces(e_boundary)
-    # Exactly one of the two slots should be f1; the other may be a sibling
-    # face (if shared) or None (if true boundary).
+    # A true boundary edge has exactly one incident face (f1) and one None side.
     assert f1 in faces
+    assert None in faces
 
 
 def test_edge_is_boundary_true_for_standalone_face_edges():

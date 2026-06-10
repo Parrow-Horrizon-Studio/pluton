@@ -266,7 +266,7 @@ class Scene:
         NOT divide by 2.
         """
         if not self._mesh.face_is_live(f_id):
-            raise IndexError(f"Face {f_id} is not live")
+            raise KeyError(f"Face {f_id} is not live")
         loop = list(self._mesh.face_loop_vertices(f_id))
         edges: list[int] = []
         n = len(loop)
@@ -279,7 +279,7 @@ class Scene:
     def edge_faces(self, e_id: int) -> tuple[int | None, int | None]:
         """The pair of face ids on each side of the edge. None if no face on that side."""
         if not self._mesh.edge_is_live(e_id):
-            raise IndexError(f"Edge {e_id} is not live")
+            raise KeyError(f"Edge {e_id} is not live")
         he_a = 2 * e_id
         he_b = 2 * e_id + 1
         f_a = self._mesh.halfedge_face(he_a)
