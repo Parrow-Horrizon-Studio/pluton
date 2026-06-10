@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import numpy as np
-
 from pluton.commands.scene_commands import DissolveEdgeCommand
 from pluton.scene.scene import Scene
 
@@ -45,7 +44,7 @@ def test_do_removes_shared_edge_and_merges_faces():
 
 def test_undo_restores_both_original_faces():
     scene = Scene()
-    f1_orig, f2_orig, e_shared = _two_quads_sharing_edge(scene)
+    _, _, e_shared = _two_quads_sharing_edge(scene)
     pre_face_count = sum(1 for _ in scene.faces_iter())
     pre_edge_count = sum(1 for _ in scene.edges_iter())
 
@@ -66,7 +65,9 @@ def test_do_returns_none_op_on_boundary_edge():
     v0 = scene.add_vertex(np.array([0, 0, 0], dtype=np.float32))
     v1 = scene.add_vertex(np.array([1, 0, 0], dtype=np.float32))
     v2 = scene.add_vertex(np.array([0, 1, 0], dtype=np.float32))
-    scene.add_edge(v0, v1); scene.add_edge(v1, v2); scene.add_edge(v2, v0)
+    scene.add_edge(v0, v1)
+    scene.add_edge(v1, v2)
+    scene.add_edge(v2, v0)
     f = scene.add_face_from_loop([v0, v1, v2])
     e_boundary = scene.face_edges(f)[0]
 
@@ -81,7 +82,7 @@ def test_do_returns_none_op_on_boundary_edge():
 
 def test_do_undo_redo_round_trip():
     scene = Scene()
-    f1_orig, f2_orig, e_shared = _two_quads_sharing_edge(scene)
+    _, _, e_shared = _two_quads_sharing_edge(scene)
 
     cmd = DissolveEdgeCommand(e_shared)
     cmd.do(scene)
@@ -97,3 +98,21 @@ def test_do_undo_redo_round_trip():
     merged_id_after_redo = live_faces[0]
     assert scene._mesh.face_is_live(merged_id_after_redo)
     assert len(scene.face(merged_id_after_redo).loop_vertex_ids) == 6
+
+
+def test_do_undo_redo_double_cycle():
+    """do -> undo -> do -> undo round-trips twice, exercising the redo edge
+    re-resolution and the _merged_face_id overwrite together."""
+    scene = Scene()
+    _, _, e_shared = _two_quads_sharing_edge(scene)
+    pre_face_count = sum(1 for _ in scene.faces_iter())
+    pre_edge_count = sum(1 for _ in scene.edges_iter())
+
+    cmd = DissolveEdgeCommand(e_shared)
+    cmd.do(scene)
+    cmd.undo(scene)
+    cmd.do(scene)    # redo
+    cmd.undo(scene)  # undo again
+
+    assert sum(1 for _ in scene.faces_iter()) == pre_face_count
+    assert sum(1 for _ in scene.edges_iter()) == pre_edge_count

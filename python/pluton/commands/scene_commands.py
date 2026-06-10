@@ -228,23 +228,22 @@ class DissolveEdgeCommand(Command):
                 self._was_noop = True  # boundary edge (only one incident face)
                 return
             f1, f2 = faces
-            loop1 = tuple(scene.face(f1).loop_vertex_ids)
-            loop2 = tuple(scene.face(f2).loop_vertex_ids)
-            # The shared edge's endpoints are the vertices common to both loops.
-            # dissolve targets single-shared-edge adjacency, so this is exactly 2.
-            common = [v for v in loop1 if v in loop2]
-            if len(common) != 2:
-                self._was_noop = True
-                return
-            self._shared_verts = (common[0], common[1])
-            self._captured_f1 = loop1
-            self._captured_f2 = loop2
+            self._captured_f1 = tuple(scene.face(f1).loop_vertex_ids)
+            self._captured_f2 = tuple(scene.face(f2).loop_vertex_ids)
+            # Capture the dissolved edge's true endpoints. Vertex ids are stable
+            # across undo (undo recreates the edge/faces but reuses vertices), so
+            # these drive the redo re-resolution below. This is guaranteed to be
+            # the real edge's endpoints — no diagonal-shared-vertex ambiguity.
+            e = scene.edge(self._edge_id)
+            self._shared_verts = (e.v1_id, e.v2_id)
             edge_to_dissolve = self._edge_id
         else:
             # Redo — the original edge id is stale (undo recreated the edge with
-            # a new id). Re-resolve the current edge id from the captured pair.
-            # add_halfedge_pair returns the existing edge id for a live pair
-            # (no mutation); it returns the edge id directly (not a half-edge id).
+            # a fresh id). Re-resolve the current live edge id from the captured
+            # endpoint pair. The endpoints are always a live pair here (undo just
+            # restored both faces), so add_halfedge_pair returns the existing
+            # edge id idempotently (and returns the edge id directly, not a
+            # half-edge id).
             assert self._shared_verts is not None
             va, vb = self._shared_verts
             edge_to_dissolve = scene._mesh.add_halfedge_pair(va, vb)
