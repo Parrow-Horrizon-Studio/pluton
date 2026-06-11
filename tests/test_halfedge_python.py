@@ -169,3 +169,29 @@ def test_faces_are_coplanar_binding():
     assert mesh.faces_are_coplanar(f1, f2, 0.9999619, 1e-4) is True
     # Loosen → still True; tighten dist → still True since both on z=0
     assert mesh.faces_are_coplanar(f1, f2, 0.5, 1e-6) is True
+
+
+def test_split_edge_binding_smoke():
+    from pluton._core import HalfEdgeMesh
+
+    m = HalfEdgeMesh()
+    v0 = m.add_vertex(0.0, 0.0, 0.0)
+    v1 = m.add_vertex(1.0, 0.0, 0.0)
+    v2 = m.add_vertex(1.0, 1.0, 0.0)
+    v3 = m.add_vertex(0.0, 1.0, 0.0)
+    m.add_halfedge_pair(v0, v1)
+    e = m.add_halfedge_pair(v1, v2)
+    m.add_halfedge_pair(v2, v3)
+    m.add_halfedge_pair(v3, v0)
+    m.add_face_from_loop([v0, v1, v2, v3], [v0, v1, v2, v0, v2, v3])
+
+    res = m.split_edge(e, 0.5)
+    assert res is not None
+    assert m.vertex_is_live(res.vertex)
+    assert m.edge_is_live(res.edge_a)
+    assert m.edge_is_live(res.edge_b)
+    # Boundary quad → single incident face rebuilt to 5 vertices.
+    live = res.face_a if res.face_a != HalfEdgeMesh.INVALID_ID else res.face_b
+    assert len(m.face_loop_vertices(live)) == 5
+    # Out-of-range t → None.
+    assert m.split_edge(res.edge_a, 1.0) is None

@@ -18,6 +18,7 @@ namespace nb = nanobind;
 using pluton::HalfEdgeMesh;
 using pluton::Mesh;
 using pluton::RayMeshHit;
+using pluton::SplitEdgeResult;
 using pluton::ray_intersect_mesh;
 
 namespace {
@@ -112,6 +113,12 @@ NB_MODULE(_core, m) {
              "True iff |dot(n1, n2)| > angle_tol_cos AND every vertex of either "
              "face lies within dist_tol of the other face's plane. Project defaults: "
              "cos(0.5°) ≈ 0.9999619, 1e-4.")
+        .def("split_edge",
+             &HalfEdgeMesh::split_edge,
+             nb::arg("edge_id"), nb::arg("t"),
+             "Split an edge at parameter t in (0,1), inserting a vertex and "
+             "rebuilding incident faces. Returns a SplitEdgeResult, or None if "
+             "the edge is dead, t is out of range, or w coincides with an existing vertex.")
 
         // Half-edge adjacency (used by M3b push/pull)
         .def("halfedge_origin", &HalfEdgeMesh::halfedge_origin)
@@ -138,6 +145,13 @@ NB_MODULE(_core, m) {
         .def("face_slab_size", &HalfEdgeMesh::face_slab_size)
 
         .def_ro_static("INVALID_ID", &HalfEdgeMesh::INVALID_ID);
+
+    nb::class_<SplitEdgeResult>(m, "SplitEdgeResult", "Result of HalfEdgeMesh.split_edge")
+        .def_ro("vertex", &SplitEdgeResult::vertex)
+        .def_ro("edge_a", &SplitEdgeResult::edge_a)
+        .def_ro("edge_b", &SplitEdgeResult::edge_b)
+        .def_ro("face_a", &SplitEdgeResult::face_a)
+        .def_ro("face_b", &SplitEdgeResult::face_b);
 
     nb::class_<RayMeshHit>(m, "RayMeshHit", "Result of pluton::ray_intersect_mesh")
         .def_ro("face_id", &RayMeshHit::face_id)
