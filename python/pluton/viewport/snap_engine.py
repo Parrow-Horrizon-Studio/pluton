@@ -25,6 +25,9 @@ class SnapKind(IntEnum):
     AXIS_LOCK = 2
     MIDPOINT = 3
     ENDPOINT = 4
+    ON_FACE = 5
+    ON_EDGE = 6
+    INTERSECTION = 7
 
 
 @dataclass(frozen=True, slots=True)
@@ -36,9 +39,52 @@ class SnapResult:
     axis: int | None  # 0=X (red), 1=Y (green), 2=Z (blue); only AXIS_LOCK
     vertex_id: int | None  # only ENDPOINT
     label: str
+    edge_id: int | None = None  # MIDPOINT / ON_EDGE / INTERSECTION
+    face_id: int | None = None  # ON_FACE
+    edge_t: float | None = None  # parameter along edge_id (drives split_edge)
 
 
 _AXIS_NAMES = {0: "Red", 1: "Green", 2: "Blue"}
+
+# Snap-marker colors, keyed by kind. Shared by tools (overlay color); the
+# renderer is shape-only. AXIS_LOCK has no marker color (the rubber-band shows
+# the axis color instead).
+MARKER_COLOR_BY_KIND = {
+    SnapKind.GRID: (0.70, 0.70, 0.70),
+    SnapKind.MIDPOINT: (0.13, 0.77, 0.84),       # cyan
+    SnapKind.ENDPOINT: (0.15, 0.75, 0.26),       # green
+    SnapKind.ON_EDGE: (0.89, 0.23, 0.18),        # red
+    SnapKind.ON_FACE: (0.18, 0.42, 0.88),        # blue
+    SnapKind.INTERSECTION: (0.82, 0.23, 0.82),   # magenta
+}
+
+# Precedence, highest first. Decoupled from the enum's integer values.
+_PRECEDENCE = [
+    SnapKind.ENDPOINT,
+    SnapKind.INTERSECTION,
+    SnapKind.MIDPOINT,
+    SnapKind.ON_EDGE,
+    SnapKind.ON_FACE,
+    SnapKind.AXIS_LOCK,
+    SnapKind.GRID,
+]
+_PRECEDENCE_RANK = {k: i for i, k in enumerate(_PRECEDENCE)}  # lower = higher precedence
+
+
+@dataclass
+class _Candidate:
+    """One in-tolerance snap candidate, before precedence selection."""
+
+    kind: SnapKind
+    world_position: np.ndarray
+    screen_dist: float
+    depth: float
+    label: str
+    vertex_id: int | None = None
+    edge_id: int | None = None
+    face_id: int | None = None
+    axis: int | None = None
+    edge_t: float | None = None
 
 
 class SnapEngine:
@@ -159,3 +205,32 @@ class SnapEngine:
             vertex_id=None,
             label="Grid",
         )
+
+
+def _closest_points_two_lines(p1, d1, p2, d2):
+    """Closest points between two infinite lines L1=p1+s*d1, L2=p2+t*d2.
+
+    Returns (s, t, c1, c2). For parallel lines s=0 (and t follows). All inputs
+    are float32 (3,) numpy arrays; d1/d2 need not be unit length.
+    """
+    r = p1 - p2
+    a = float(np.dot(d1, d1))
+    e = float(np.dot(d2, d2))
+    f = float(np.dot(d2, r))
+    b = float(np.dot(d1, d2))
+    c = float(np.dot(d1, r))
+    denom = a * e - b * b
+    s = 0.0 if abs(denom) < 1e-12 else (b * f - c * e) / denom
+    t = (b * s + f) / e if e > 1e-12 else 0.0
+    c1 = p1 + s * d1
+    c2 = p2 + t * d2
+    return s, t, c1.astype(np.float32), c2.astype(np.float32)
+
+
+def _closest_point_on_segment_to_ray(ray_origin, ray_dir, a, b):
+    """Closest point ON segment [a, b] to the (infinite) ray line. Returns
+    (point, t) with t clamped to [0, 1]."""
+    d2 = b - a
+    _, t, _, _ = _closest_points_two_lines(ray_origin, ray_dir, a, d2)
+    t = max(0.0, min(1.0, t))
+    return (a + t * d2).astype(np.float32), float(t)

@@ -151,3 +151,33 @@ def test_returns_none_when_scene_is_none():
     cursor_world = np.array([1.0, 1.0, 0.0], dtype=np.float32)
     result = eng.snap(cursor_world, (640.0, 400.0), cam, None)  # type: ignore[arg-type]
     assert result.kind == SnapKind.NONE
+
+
+def test_closest_points_two_lines_perpendicular_crossing():
+    from pluton.viewport.snap_engine import _closest_points_two_lines
+
+    p1 = np.array([0, 0, 0], np.float32); d1 = np.array([1, 0, 0], np.float32)
+    p2 = np.array([3, 0, 1], np.float32); d2 = np.array([0, 1, 0], np.float32)
+    _, _, c1, c2 = _closest_points_two_lines(p1, d1, p2, d2)
+    np.testing.assert_allclose(c1, [3, 0, 0], atol=1e-5)
+    np.testing.assert_allclose(c2, [3, 0, 1], atol=1e-5)
+
+
+def test_closest_point_on_segment_to_ray_clamps():
+    from pluton.viewport.snap_engine import _closest_point_on_segment_to_ray
+
+    ro = np.array([5, 0, 10], np.float32); rd = np.array([0, 0, -1], np.float32)
+    a = np.array([0, 0, 0], np.float32); b = np.array([2, 0, 0], np.float32)
+    pt, t = _closest_point_on_segment_to_ray(ro, rd, a, b)
+    np.testing.assert_allclose(pt, [2, 0, 0], atol=1e-5)  # clamped to far endpoint
+    assert t == 1.0
+
+
+def test_precedence_rank_orders_endpoint_above_on_face():
+    from pluton.viewport.snap_engine import SnapKind, _PRECEDENCE_RANK
+
+    assert _PRECEDENCE_RANK[SnapKind.ENDPOINT] < _PRECEDENCE_RANK[SnapKind.MIDPOINT]
+    assert _PRECEDENCE_RANK[SnapKind.MIDPOINT] < _PRECEDENCE_RANK[SnapKind.ON_EDGE]
+    assert _PRECEDENCE_RANK[SnapKind.ON_EDGE] < _PRECEDENCE_RANK[SnapKind.ON_FACE]
+    assert _PRECEDENCE_RANK[SnapKind.ON_FACE] < _PRECEDENCE_RANK[SnapKind.GRID]
+    assert _PRECEDENCE_RANK[SnapKind.INTERSECTION] < _PRECEDENCE_RANK[SnapKind.MIDPOINT]
