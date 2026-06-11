@@ -16,6 +16,7 @@ import numpy as np
 from OpenGL import GL
 
 from pluton.viewport.camera import Camera
+from pluton.viewport.snap_engine import SnapKind
 
 
 # --- Constants for the scene -----------------------------------------------
@@ -120,6 +121,46 @@ def _build_axes_vertex_array() -> np.ndarray:
             [0.0, 0.0, 0.0, *_AXIS_Z_COLOR],
             [0.0, 0.0, _AXIS_LENGTH, *_AXIS_Z_COLOR],
         ],
+        dtype=np.float32,
+    )
+
+
+def _snap_marker_vertices(kind: int, p) -> np.ndarray:
+    """GL_LINES vertices (N, 3) for a snap marker centered at world point p.
+
+    Shape per kind: triangle (Midpoint), diamond (On-Edge), X (Intersection),
+    square (Endpoint / On-Face / Grid / Axis / default). Drawn flat in the XY
+    plane at p.z (a billboard approximation, matching M2/M3b markers).
+    """
+    s = 0.05
+    x, y, z = float(p[0]), float(p[1]), float(p[2])
+    if kind == int(SnapKind.MIDPOINT):
+        return np.array(
+            [[x - s, y - s, z], [x + s, y - s, z],
+             [x + s, y - s, z], [x, y + s, z],
+             [x, y + s, z], [x - s, y - s, z]],
+            dtype=np.float32,
+        )
+    if kind == int(SnapKind.ON_EDGE):  # diamond
+        return np.array(
+            [[x, y + s, z], [x + s, y, z],
+             [x + s, y, z], [x, y - s, z],
+             [x, y - s, z], [x - s, y, z],
+             [x - s, y, z], [x, y + s, z]],
+            dtype=np.float32,
+        )
+    if kind == int(SnapKind.INTERSECTION):  # X
+        return np.array(
+            [[x - s, y - s, z], [x + s, y + s, z],
+             [x - s, y + s, z], [x + s, y - s, z]],
+            dtype=np.float32,
+        )
+    # default: square
+    return np.array(
+        [[x - s, y - s, z], [x + s, y - s, z],
+         [x + s, y - s, z], [x + s, y + s, z],
+         [x + s, y + s, z], [x - s, y + s, z],
+         [x - s, y + s, z], [x - s, y - s, z]],
         dtype=np.float32,
     )
 
@@ -472,31 +513,10 @@ class SceneRenderer:
                 GL.glBindVertexArray(0)
 
             # Snap marker — small wireframe shape at the snap point.
-            # Shape depends on snap kind: MIDPOINT → triangle, others → square.
+            # Shape depends on snap kind: see _snap_marker_vertices.
             if overlay.snap_marker_position is not None:
                 p = overlay.snap_marker_position
-                s = 0.05
-                if overlay.snap_marker_kind == 3:  # SnapKind.MIDPOINT
-                    # Equilateral-ish triangle with apex at +Y, base along -Y
-                    pos = np.array(
-                        [
-                            [p[0] - s, p[1] - s, p[2]], [p[0] + s, p[1] - s, p[2]],   # base
-                            [p[0] + s, p[1] - s, p[2]], [p[0], p[1] + s, p[2]],        # right slope up
-                            [p[0], p[1] + s, p[2]],     [p[0] - s, p[1] - s, p[2]],    # left slope down
-                        ],
-                        dtype=np.float32,
-                    )
-                else:
-                    # Square
-                    pos = np.array(
-                        [
-                            [p[0] - s, p[1] - s, p[2]], [p[0] + s, p[1] - s, p[2]],
-                            [p[0] + s, p[1] - s, p[2]], [p[0] + s, p[1] + s, p[2]],
-                            [p[0] + s, p[1] + s, p[2]], [p[0] - s, p[1] + s, p[2]],
-                            [p[0] - s, p[1] + s, p[2]], [p[0] - s, p[1] - s, p[2]],
-                        ],
-                        dtype=np.float32,
-                    )
+                pos = _snap_marker_vertices(overlay.snap_marker_kind, p)
 
                 n = pos.shape[0]
                 cr, cg, cb = overlay.snap_marker_color

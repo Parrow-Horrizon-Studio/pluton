@@ -42,3 +42,20 @@ class TestFaceFillOverlayPass:
         sig = inspect.signature(renderer.draw_face_fill_overlays)
         assert "polygons" in sig.parameters
         assert "color" in sig.parameters
+
+
+def test_snap_marker_vertices_shape_per_kind():
+    import numpy as np
+    from pluton.viewport.scene_renderer import _snap_marker_vertices
+    from pluton.viewport.snap_engine import SnapKind
+
+    p = np.array([1.0, 2.0, 3.0], dtype=np.float32)
+    # GL_LINES vertex counts: square=8, triangle=6, diamond=8, X=4.
+    assert _snap_marker_vertices(int(SnapKind.ENDPOINT), p).shape == (8, 3)
+    assert _snap_marker_vertices(int(SnapKind.ON_FACE), p).shape == (8, 3)
+    assert _snap_marker_vertices(int(SnapKind.MIDPOINT), p).shape == (6, 3)
+    assert _snap_marker_vertices(int(SnapKind.ON_EDGE), p).shape == (8, 3)
+    assert _snap_marker_vertices(int(SnapKind.INTERSECTION), p).shape == (4, 3)
+    for kind in (SnapKind.ENDPOINT, SnapKind.MIDPOINT, SnapKind.ON_EDGE, SnapKind.INTERSECTION):
+        v = _snap_marker_vertices(int(kind), p)
+        assert np.allclose(v[:, 2], 3.0)
