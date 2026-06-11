@@ -1,9 +1,8 @@
-"""Unit tests for the snap & inference engine."""
+"""Unit tests for the snap & inference engine (3D, screen-space)."""
 
 from __future__ import annotations
 
 import numpy as np
-import pytest
 
 
 def _camera_at_default():
@@ -14,143 +13,85 @@ def _camera_at_default():
     return cam
 
 
-def test_grid_snap_to_nearest_integer_meter():
+def _screen_of(cam, world):
+    """Pixel coords that project onto `world` in a 1280x800 viewport."""
+    sx, sy, _ = cam.world_to_screen(np.asarray(world, dtype=np.float32), 1280, 800)
+    return (sx, sy)
+
+
+def test_endpoint_snap_in_3d_off_the_ground():
+    from pluton.scene import Scene
+    from pluton.viewport.snap_engine import SnapEngine, SnapKind
+
+    eng = SnapEngine()
+    scene = Scene()
+    vid = scene.add_vertex(np.array([1.0, 2.0, 3.0], dtype=np.float32))  # off-ground
+    cam = _camera_at_default()
+    cursor = _screen_of(cam, [1.0, 2.0, 3.0])
+    res = eng.snap(cursor, (1280, 800), cam, scene)
+    assert res.kind == SnapKind.ENDPOINT
+    assert res.vertex_id == vid
+    np.testing.assert_allclose(res.world_position, scene.vertex(vid).position, atol=1e-4)
+
+
+def test_midpoint_snap_in_3d():
+    from pluton.scene import Scene
+    from pluton.viewport.snap_engine import SnapEngine, SnapKind
+
+    eng = SnapEngine()
+    scene = Scene()
+    v0 = scene.add_vertex(np.array([0.0, 0.0, 2.0], dtype=np.float32))
+    v1 = scene.add_vertex(np.array([0.0, 4.0, 2.0], dtype=np.float32))
+    e = scene.add_edge(v0, v1)
+    cam = _camera_at_default()
+    cursor = _screen_of(cam, [0.0, 2.0, 2.0])  # the midpoint
+    res = eng.snap(cursor, (1280, 800), cam, scene)
+    assert res.kind == SnapKind.MIDPOINT
+    assert res.edge_id == e
+    assert abs(res.edge_t - 0.5) < 1e-3
+    np.testing.assert_allclose(res.world_position, [0.0, 2.0, 2.0], atol=1e-3)
+
+
+def test_grid_fallback_on_empty_ground():
     from pluton.scene import Scene
     from pluton.viewport.snap_engine import SnapEngine, SnapKind
 
     eng = SnapEngine()
     scene = Scene()
     cam = _camera_at_default()
-    cursor_world = np.array([2.3, -1.4, 0.0], dtype=np.float32)
-    result = eng.snap(cursor_world, (0.0, 0.0), cam, scene)
-    assert result.kind == SnapKind.GRID
-    np.testing.assert_allclose(result.world_position, [2.0, -1.0, 0.0], atol=1e-5)
+    cursor = _screen_of(cam, [2.3, -1.4, 0.0])
+    res = eng.snap(cursor, (1280, 800), cam, scene)
+    assert res.kind == SnapKind.GRID
+    np.testing.assert_allclose(res.world_position, [2.0, -1.0, 0.0], atol=1e-3)
 
 
-def test_endpoint_snap_when_cursor_near_existing_vertex():
-    from pluton.scene import Scene
-    from pluton.viewport.snap_engine import SnapEngine, SnapKind
-
-    eng = SnapEngine()
-    scene = Scene()
-    vid = scene.add_vertex(np.array([3.0, 4.0, 0.0], dtype=np.float32))
-    cam = _camera_at_default()
-    # Cursor a tenth of a metre off the vertex — well within endpoint tolerance.
-    cursor_world = np.array([3.05, 4.02, 0.0], dtype=np.float32)
-    result = eng.snap(cursor_world, (640.0, 400.0), cam, scene)
-    assert result.kind == SnapKind.ENDPOINT
-    assert result.vertex_id == vid
-    np.testing.assert_array_equal(result.world_position, scene.vertex(vid).position)
-
-
-def test_midpoint_snap_when_cursor_near_edge_midpoint():
-    from pluton.scene import Scene
-    from pluton.viewport.snap_engine import SnapEngine, SnapKind
-
-    eng = SnapEngine()
-    scene = Scene()
-    v0 = scene.add_vertex(np.array([0.0, 0.0, 0.0], dtype=np.float32))
-    v1 = scene.add_vertex(np.array([4.0, 0.0, 0.0], dtype=np.float32))
-    scene.add_edge(v0, v1)
-    cam = _camera_at_default()
-    # Midpoint of (0,0)-(4,0) is (2,0). Cursor very close.
-    cursor_world = np.array([2.05, 0.05, 0.0], dtype=np.float32)
-    result = eng.snap(cursor_world, (640.0, 400.0), cam, scene)
-    assert result.kind == SnapKind.MIDPOINT
-    np.testing.assert_allclose(result.world_position, [2.0, 0.0, 0.0], atol=1e-5)
-    assert result.vertex_id is None
-
-
-def test_axis_lock_when_drawing_near_x_axis_direction():
-    from pluton.scene import Scene
-    from pluton.viewport.snap_engine import SnapEngine, SnapKind
-
-    eng = SnapEngine()
-    scene = Scene()
-    cam = _camera_at_default()
-    # Anchor at origin; cursor near the +X axis (slight Y offset)
-    anchor = np.array([0.0, 0.0, 0.0], dtype=np.float32)
-    cursor_world = np.array([5.0, 0.05, 0.0], dtype=np.float32)
-    result = eng.snap(cursor_world, (640.0, 400.0), cam, scene, anchor=anchor)
-    assert result.kind == SnapKind.AXIS_LOCK
-    assert result.axis == 0  # X axis
-    # Snapped point projected onto X axis is (5, 0, 0)
-    np.testing.assert_allclose(result.world_position, [5.0, 0.0, 0.0], atol=1e-5)
-
-
-def test_returns_none_when_cursor_world_is_none():
-    from pluton.scene import Scene
-    from pluton.viewport.snap_engine import SnapEngine, SnapKind
-
-    eng = SnapEngine()
-    scene = Scene()
-    cam = _camera_at_default()
-    result = eng.snap(None, (640.0, 400.0), cam, scene)
-    assert result.kind == SnapKind.NONE
-    assert result.axis is None
-    assert result.vertex_id is None
-    assert result.label == "—"
-
-
-def test_endpoint_beats_midpoint():
-    from pluton.scene import Scene
-    from pluton.viewport.snap_engine import SnapEngine, SnapKind
-
-    eng = SnapEngine()
-    scene = Scene()
-    # An edge where the midpoint and one endpoint are both within tolerance
-    v0 = scene.add_vertex(np.array([2.0, 0.0, 0.0], dtype=np.float32))
-    v1 = scene.add_vertex(np.array([2.4, 0.0, 0.0], dtype=np.float32))
-    scene.add_edge(v0, v1)
-    cam = _camera_at_default()
-    # Midpoint is (2.2, 0). Cursor close to v0 — within tolerance of both.
-    cursor_world = np.array([2.05, 0.0, 0.0], dtype=np.float32)
-    result = eng.snap(cursor_world, (640.0, 400.0), cam, scene)
-    assert result.kind == SnapKind.ENDPOINT
-    assert result.vertex_id == v0
-
-
-def test_midpoint_beats_axis_lock():
-    from pluton.scene import Scene
-    from pluton.viewport.snap_engine import SnapEngine, SnapKind
-
-    eng = SnapEngine()
-    scene = Scene()
-    v0 = scene.add_vertex(np.array([0.0, 0.0, 0.0], dtype=np.float32))
-    v1 = scene.add_vertex(np.array([4.0, 0.0, 0.0], dtype=np.float32))
-    scene.add_edge(v0, v1)
-    cam = _camera_at_default()
-    anchor = np.array([0.0, 0.0, 0.0], dtype=np.float32)
-    # Cursor near midpoint (2,0) AND axis-locked-to-X-from-origin.
-    cursor_world = np.array([2.05, 0.02, 0.0], dtype=np.float32)
-    result = eng.snap(cursor_world, (640.0, 400.0), cam, scene, anchor=anchor)
-    assert result.kind == SnapKind.MIDPOINT
-
-
-def test_axis_lock_beats_grid():
-    from pluton.scene import Scene
-    from pluton.viewport.snap_engine import SnapEngine, SnapKind
-
-    eng = SnapEngine()
-    scene = Scene()
-    cam = _camera_at_default()
-    anchor = np.array([0.0, 0.0, 0.0], dtype=np.float32)
-    # (3.0, 0.02) is on the +X axis-lock direction; grid snap would be (3,0).
-    # Both produce the same point in this case — but axis-lock label / kind wins.
-    cursor_world = np.array([3.0, 0.02, 0.0], dtype=np.float32)
-    result = eng.snap(cursor_world, (640.0, 400.0), cam, scene, anchor=anchor)
-    assert result.kind == SnapKind.AXIS_LOCK
-
-
-def test_returns_none_when_scene_is_none():
-    """Snap with scene=None must not crash — returns NONE like the no-cursor case."""
+def test_none_when_scene_is_none():
     from pluton.viewport.snap_engine import SnapEngine, SnapKind
 
     eng = SnapEngine()
     cam = _camera_at_default()
-    cursor_world = np.array([1.0, 1.0, 0.0], dtype=np.float32)
-    result = eng.snap(cursor_world, (640.0, 400.0), cam, None)  # type: ignore[arg-type]
-    assert result.kind == SnapKind.NONE
+    res = eng.snap((640.0, 400.0), (1280, 800), cam, None)  # type: ignore[arg-type]
+    assert res.kind == SnapKind.NONE
+
+
+def test_selection_prefers_precedence_then_depth():
+    from pluton.viewport.snap_engine import SnapEngine, SnapKind, _Candidate
+
+    eng = SnapEngine()
+    near = np.zeros(3, dtype=np.float32)
+    cands = [
+        _Candidate(SnapKind.ON_FACE, near, screen_dist=1.0, depth=5.0, label="f"),
+        _Candidate(SnapKind.ENDPOINT, near, screen_dist=3.0, depth=9.0, label="e"),
+        _Candidate(SnapKind.MIDPOINT, near, screen_dist=2.0, depth=1.0, label="m"),
+    ]
+    chosen = eng._select(cands)
+    assert chosen.kind == SnapKind.ENDPOINT  # precedence beats smaller screen_dist
+
+    two = [
+        _Candidate(SnapKind.ENDPOINT, near, screen_dist=2.0, depth=9.0, label="far"),
+        _Candidate(SnapKind.ENDPOINT, near, screen_dist=2.0, depth=2.0, label="near"),
+    ]
+    assert eng._select(two).label == "near"
 
 
 def test_closest_points_two_lines_perpendicular_crossing():
