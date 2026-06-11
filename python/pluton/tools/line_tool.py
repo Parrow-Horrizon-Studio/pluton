@@ -204,7 +204,19 @@ class LineTool(Tool):
             split.do(scene)
             if split.new_vertex_id is not None:
                 return split.new_vertex_id, split
-            # split was a no-op (degenerate t) → fall through to a plain vertex.
+            # Split was a no-op (degenerate/coincident edge_t). Reuse the host
+            # edge's nearest endpoint rather than dropping a free vertex on the
+            # edge interior (which would be a T-junction).
+            edge = scene.edge(snap.edge_id)
+            pos = np.asarray(snap.world_position, dtype=np.float32)
+            v1p = scene.vertex(edge.v1_id).position
+            v2p = scene.vertex(edge.v2_id).position
+            nearest = (
+                edge.v1_id
+                if float(np.linalg.norm(pos - v1p)) <= float(np.linalg.norm(pos - v2p))
+                else edge.v2_id
+            )
+            return nearest, None
         cmd = AddVertexCommand(snap.world_position)
         cmd.do(scene)
         return cmd._vertex_id, cmd  # type: ignore[attr-defined]
