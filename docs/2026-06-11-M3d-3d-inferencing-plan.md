@@ -300,7 +300,7 @@ std::vector<std::uint32_t> loop_with_inserted(
 Then add the method definition just **after** `dissolve_edge` (after line 532). It composes the same primitives `dissolve_edge` uses (`remove_face`, `remove_edge`, `add_halfedge_pair`, `add_face_from_loop`):
 
 ```cpp
-std::optional<pluton::HalfEdgeMesh::SplitEdgeResult>
+std::optional<pluton::SplitEdgeResult>
 pluton::HalfEdgeMesh::split_edge(std::uint32_t e_id, float t) {
     if (!edge_is_live(e_id)) return std::nullopt;
     if (!(t > 0.0f && t < 1.0f)) return std::nullopt;
@@ -356,7 +356,7 @@ pluton::HalfEdgeMesh::split_edge(std::uint32_t e_id, float t) {
 }
 ```
 
-> Note the qualified return type `pluton::HalfEdgeMesh::SplitEdgeResult` — the struct is nested-adjacent in the header's `pluton` namespace, matching how `dissolve_edge` is defined as `pluton::HalfEdgeMesh::...` in this file.
+> Note: `SplitEdgeResult` is a **top-level** struct in namespace `pluton` (declared above the class in the header), so the out-of-line return type is `std::optional<pluton::SplitEdgeResult>`. The method itself is `pluton::HalfEdgeMesh::split_edge`, matching how `dissolve_edge` is defined in this file. Inside the class body the unqualified `std::optional<SplitEdgeResult>` resolves fine (enclosing namespace).
 
 - [ ] **Step 5: Build and run the test**
 
