@@ -2,6 +2,7 @@
 
 #include <array>
 #include <cstdint>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <unordered_map>
@@ -9,6 +10,16 @@
 #include <vector>
 
 namespace pluton {
+
+/// Result of HalfEdgeMesh::split_edge — the ids of the entities it created.
+/// face_a / face_b are INVALID_ID for a boundary edge's empty side.
+struct SplitEdgeResult {
+    std::uint32_t vertex;   // the new vertex w inserted on the edge
+    std::uint32_t edge_a;   // new edge (v_min — w)
+    std::uint32_t edge_b;   // new edge (w — v_max)
+    std::uint32_t face_a;   // rebuilt face on he(2e) side, or INVALID_ID
+    std::uint32_t face_b;   // rebuilt face on he(2e+1) side, or INVALID_ID
+};
 
 /// Half-edge mesh — the topology source of truth for Pluton's M3+ kernel.
 ///
@@ -71,6 +82,14 @@ public:
     /// one edge (would create a degenerate result).
     /// The dissolved edge id is tombstoned (never reused).
     std::uint32_t dissolve_edge(std::uint32_t e_id);
+
+    /// Split an edge at parameter t ∈ (0,1), inserting a new vertex w at
+    /// p(v_min) + t*(p(v_max) - p(v_min)) where (v_min, v_max) = edge_vertices(e_id).
+    /// The edge is replaced by two collinear edges and w is inserted into the
+    /// boundary loop of each incident face (which is re-triangulated). Manifold
+    /// structure is preserved. Returns the created ids, or std::nullopt if e_id
+    /// is dead, t ∉ (0,1), or w coincides with an existing endpoint.
+    std::optional<SplitEdgeResult> split_edge(std::uint32_t e_id, float t);
 
     std::uint32_t halfedge_origin(std::uint32_t he_id) const noexcept;
     std::uint32_t halfedge_next(std::uint32_t he_id) const noexcept;

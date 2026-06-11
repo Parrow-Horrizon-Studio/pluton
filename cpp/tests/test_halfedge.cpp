@@ -691,3 +691,58 @@ TEST(HalfEdgeMeshTest, DissolveEdge_RejectsMultiSharedEdges) {
               << "constructing a valid degenerate half-edge input requires a "
               << "test helper not yet built. Filed as known carry-over.";
 }
+
+// ---- split_edge -------------------------------------------------------------
+
+namespace {
+// Build two quads sharing edge (v1,v2): f1=[v0,v1,v2,v3], f2=[v1,v4,v5,v2].
+pluton::HalfEdgeMesh make_two_quads(std::uint32_t& shared_edge_out) {
+    using pluton::HalfEdgeMesh;
+    HalfEdgeMesh m;
+    auto v0 = m.add_vertex(0, 0, 0);
+    auto v1 = m.add_vertex(1, 0, 0);
+    auto v2 = m.add_vertex(1, 1, 0);
+    auto v3 = m.add_vertex(0, 1, 0);
+    auto v4 = m.add_vertex(2, 0, 0);
+    auto v5 = m.add_vertex(2, 1, 0);
+    m.add_halfedge_pair(v0, v1);
+    shared_edge_out = m.add_halfedge_pair(v1, v2);
+    m.add_halfedge_pair(v2, v3);
+    m.add_halfedge_pair(v3, v0);
+    m.add_halfedge_pair(v1, v4);
+    m.add_halfedge_pair(v4, v5);
+    m.add_halfedge_pair(v5, v2);
+    m.add_face_from_loop({v0, v1, v2, v3}, {(int)v0,(int)v1,(int)v2, (int)v0,(int)v2,(int)v3});
+    m.add_face_from_loop({v1, v4, v5, v2}, {(int)v1,(int)v4,(int)v5, (int)v1,(int)v5,(int)v2});
+    return m;
+}
+}  // namespace
+
+TEST(SplitEdge, InteriorEdgeInsertsVertexAndRebuildsBothFaces) {
+    std::uint32_t e_shared = 0;
+    auto m = make_two_quads(e_shared);
+
+    auto res = m.split_edge(e_shared, 0.5f);
+    ASSERT_TRUE(res.has_value());
+
+    auto wp = m.vertex_position(res->vertex);
+    EXPECT_FLOAT_EQ(wp[0], 1.0f);
+    EXPECT_FLOAT_EQ(wp[1], 0.5f);
+    EXPECT_FLOAT_EQ(wp[2], 0.0f);
+
+    EXPECT_FALSE(m.edge_is_live(e_shared));
+    EXPECT_TRUE(m.edge_is_live(res->edge_a));
+    EXPECT_TRUE(m.edge_is_live(res->edge_b));
+
+    EXPECT_NE(res->face_a, pluton::HalfEdgeMesh::INVALID_ID);
+    EXPECT_NE(res->face_b, pluton::HalfEdgeMesh::INVALID_ID);
+    EXPECT_TRUE(m.face_is_live(res->face_a));
+    EXPECT_TRUE(m.face_is_live(res->face_b));
+    EXPECT_EQ(m.face_loop_vertices(res->face_a).size(), 5u);
+    EXPECT_EQ(m.face_loop_vertices(res->face_b).size(), 5u);
+
+    std::uint32_t live = 0;
+    for (auto f = m.next_live_face(0); f != pluton::HalfEdgeMesh::INVALID_ID; f = m.next_live_face(f + 1))
+        ++live;
+    EXPECT_EQ(live, 2u);
+}

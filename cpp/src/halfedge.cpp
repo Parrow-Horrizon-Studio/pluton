@@ -395,6 +395,25 @@ std::array<float, 3> compute_face_normal_geometric(
     return { n[0]/L, n[1]/L, n[2]/L };
 }
 
+// Insert vertex w into `loop` between the adjacent pair (va, vb) (either order),
+// returning the new loop. Caller guarantees va,vb are consecutive in loop.
+std::vector<std::uint32_t> loop_with_inserted(
+        const std::vector<std::uint32_t>& loop,
+        std::uint32_t va, std::uint32_t vb, std::uint32_t w) {
+    const std::size_t n = loop.size();
+    std::vector<std::uint32_t> out;
+    out.reserve(n + 1);
+    for (std::size_t i = 0; i < n; ++i) {
+        out.push_back(loop[i]);
+        const std::uint32_t cur = loop[i];
+        const std::uint32_t nxt = loop[(i + 1) % n];
+        if ((cur == va && nxt == vb) || (cur == vb && nxt == va)) {
+            out.push_back(w);
+        }
+    }
+    return out;
+}
+
 }  // namespace
 
 bool pluton::HalfEdgeMesh::faces_are_coplanar(std::uint32_t f1_id,
@@ -529,6 +548,56 @@ std::uint32_t pluton::HalfEdgeMesh::dissolve_edge(std::uint32_t e_id) {
 
     dirty_ = true;
     return new_face;
+}
+
+std::optional<pluton::SplitEdgeResult>
+pluton::HalfEdgeMesh::split_edge(std::uint32_t e_id, float t) {
+    if (!edge_is_live(e_id)) return std::nullopt;
+    if (!(t > 0.0f && t < 1.0f)) return std::nullopt;
+
+    const std::uint32_t he_a = 2u * e_id;
+    const std::uint32_t he_b = 2u * e_id + 1u;
+    const std::uint32_t va = halfedges_[he_a].origin;  // v_min
+    const std::uint32_t vb = halfedges_[he_b].origin;  // v_max
+
+    const auto pa = vertices_[va].pos;
+    const auto pb = vertices_[vb].pos;
+    const float wx = pa[0] + t * (pb[0] - pa[0]);
+    const float wy = pa[1] + t * (pb[1] - pa[1]);
+    const float wz = pa[2] + t * (pb[2] - pa[2]);
+    const std::uint32_t w = add_vertex(wx, wy, wz);
+    if (w == va || w == vb) return std::nullopt;  // coincident with an endpoint
+
+    const std::uint32_t fa = halfedges_[he_a].face;
+    const std::uint32_t fb = halfedges_[he_b].face;
+    std::vector<std::uint32_t> loopA, loopB;
+    if (fa != INVALID_ID) loopA = faces_[fa].loop;
+    if (fb != INVALID_ID) loopB = faces_[fb].loop;
+
+    if (fa != INVALID_ID) remove_face(fa);
+    if (fb != INVALID_ID) remove_face(fb);
+    remove_edge(e_id);
+
+    const std::uint32_t edge_a = add_halfedge_pair(va, w);
+    const std::uint32_t edge_b = add_halfedge_pair(w, vb);
+
+    auto rebuild = [&](const std::vector<std::uint32_t>& loop) -> std::uint32_t {
+        if (loop.empty()) return INVALID_ID;
+        std::vector<std::uint32_t> nl = loop_with_inserted(loop, va, vb, w);
+        std::vector<std::int32_t> tris;
+        tris.reserve((nl.size() - 2) * 3);
+        for (std::size_t i = 1; i + 1 < nl.size(); ++i) {
+            tris.push_back((std::int32_t)nl[0]);
+            tris.push_back((std::int32_t)nl[i]);
+            tris.push_back((std::int32_t)nl[i + 1]);
+        }
+        return add_face_from_loop(nl, tris);
+    };
+    const std::uint32_t new_fa = rebuild(loopA);
+    const std::uint32_t new_fb = rebuild(loopB);
+
+    dirty_ = true;
+    return SplitEdgeResult{w, edge_a, edge_b, new_fa, new_fb};
 }
 
 std::uint32_t HalfEdgeMesh::halfedge_origin(std::uint32_t he_id) const noexcept {
