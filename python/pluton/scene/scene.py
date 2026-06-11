@@ -13,6 +13,7 @@ re-uploading buffers.
 
 from __future__ import annotations
 
+from collections import namedtuple
 from collections.abc import Iterable, Sequence
 from typing import TYPE_CHECKING
 
@@ -26,6 +27,8 @@ if TYPE_CHECKING:
 from pluton.scene.edge import Edge
 from pluton.scene.face import Face
 from pluton.scene.vertex import Vertex
+
+SplitResult = namedtuple("SplitResult", "vertex edge_a edge_b face_a face_b")
 
 
 def _project_loop_to_2d_for_earcut(positions_3d: np.ndarray) -> np.ndarray:
@@ -294,6 +297,45 @@ class Scene:
         """True iff the edge has fewer than two incident faces."""
         f_a, f_b = self.edge_faces(e_id)
         return f_a is None or f_b is None
+
+    # ---- M3d additions ----
+
+    def point_on_edge(self, e_id: int, t: float) -> np.ndarray:
+        """World point at parameter t along edge e (t measured v1→v2 of edge())."""
+        e = self.edge(e_id)
+        pa = self.vertex(e.v1_id).position
+        pb = self.vertex(e.v2_id).position
+        return (pa + float(t) * (pb - pa)).astype(np.float32)
+
+    def closest_point_on_edge(
+        self, e_id: int, world_point: np.ndarray
+    ) -> tuple[np.ndarray, float]:
+        """Closest point on edge segment to `world_point`, plus its clamped t∈[0,1]."""
+        e = self.edge(e_id)
+        pa = self.vertex(e.v1_id).position
+        pb = self.vertex(e.v2_id).position
+        ab = pb - pa
+        denom = float(np.dot(ab, ab))
+        if denom < 1e-18:
+            return pa.astype(np.float32), 0.0
+        t = float(np.dot(np.asarray(world_point, dtype=np.float32) - pa, ab) / denom)
+        t = max(0.0, min(1.0, t))
+        return (pa + t * ab).astype(np.float32), t
+
+    def split_edge(self, e_id: int, t: float) -> "SplitResult | None":
+        """Split edge e at parameter t. Returns a SplitResult (face_* None for a
+        boundary edge's empty side), or None if the split is invalid."""
+        res = self._mesh.split_edge(int(e_id), float(t))
+        if res is None:
+            return None
+        invalid = self._mesh.INVALID_ID
+        return SplitResult(
+            vertex=int(res.vertex),
+            edge_a=int(res.edge_a),
+            edge_b=int(res.edge_b),
+            face_a=None if res.face_a == invalid else int(res.face_a),
+            face_b=None if res.face_b == invalid else int(res.face_b),
+        )
 
     # --- Queries ----------------------------------------------------------
 
