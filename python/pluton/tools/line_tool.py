@@ -21,8 +21,10 @@ from pluton.commands.scene_commands import (
     AddEdgeCommand,
     AddFaceCommand,
     AddVertexCommand,
+    SplitEdgeCommand,
 )
 from pluton.tools.tool import Tool, ToolContext, ToolOverlay
+from pluton.viewport.snap_engine import MARKER_COLOR_BY_KIND
 
 
 class _State(Enum):
@@ -35,14 +37,6 @@ _AXIS_COLORS = {
     0: (0.95, 0.30, 0.30),  # X — red
     1: (0.30, 0.85, 0.30),  # Y — green
     2: (0.30, 0.40, 0.95),  # Z — blue
-}
-_MARKER_COLOR_BY_KIND = {
-    1: (0.7, 0.7, 0.7),     # GRID
-    3: (0.2, 0.85, 0.95),   # MIDPOINT
-    4: (0.25, 0.78, 0.26),  # ENDPOINT
-    # AXIS_LOCK (2) intentionally absent — falls back to _NEUTRAL_COLOR
-    # because the rubber-band itself shows the axis color, so the marker
-    # doesn't need to duplicate that signal.
 }
 
 
@@ -83,7 +77,7 @@ class LineTool(Tool):
             self._snap_marker_kind = 0
             return
         self._snap_marker_pos = snap.world_position.copy()
-        self._snap_marker_color = _MARKER_COLOR_BY_KIND.get(int(snap.kind), _NEUTRAL_COLOR)
+        self._snap_marker_color = MARKER_COLOR_BY_KIND.get(snap.kind, _NEUTRAL_COLOR)
         self._snap_marker_kind = int(snap.kind)
         if self._state == _State.DRAWING:
             self._preview_tip = snap.world_position.copy()
@@ -97,34 +91,28 @@ class LineTool(Tool):
 
         if snap.kind == SnapKind.NONE:
             return
-
         s = self._scene  # type: ignore[assignment]
+
         if self._state == _State.IDLE:
-            # First click — seed the gesture.
             self._composite = CompositeCommand(name="Draw Line")
-            if snap.kind == SnapKind.ENDPOINT and snap.vertex_id is not None:
-                vid = snap.vertex_id  # reuse existing vertex; no command added
-            else:
-                cmd = AddVertexCommand(snap.world_position)
-                cmd.do(s)
+            vid, cmd = self._vertex_for_snap(snap, s)
+            if cmd is not None:
                 self._composite.children.append(cmd)
-                vid = cmd._vertex_id  # type: ignore[attr-defined]
             self._gesture_vertex_ids = [vid]
             self._state = _State.DRAWING
             self._preview_tip = snap.world_position.copy()
             return
 
-        # DRAWING — branch 1, 2, or 3
         assert self._composite is not None
         tip_vid = self._gesture_vertex_ids[-1]
         first_vid = self._gesture_vertex_ids[0]
 
+        # Branch 1 — loop closure (snap back onto the first vertex with ≥3 points).
         if (
             snap.kind == SnapKind.ENDPOINT
             and snap.vertex_id == first_vid
             and len(self._gesture_vertex_ids) >= 3
         ):
-            # Branch 1 — loop closure
             e_cmd = AddEdgeCommand(tip_vid, first_vid)
             e_cmd.do(s)
             self._composite.children.append(e_cmd)
@@ -136,28 +124,18 @@ class LineTool(Tool):
             self._reset_gesture()
             return
 
-        if snap.kind == SnapKind.ENDPOINT and snap.vertex_id is not None:
-            if snap.vertex_id == tip_vid:
-                return
-            e_cmd = AddEdgeCommand(tip_vid, snap.vertex_id)
-            e_cmd.do(s)
-            self._composite.children.append(e_cmd)
-            self._gesture_vertex_ids.append(snap.vertex_id)
+        # Branches 2/3 — extend to a resolved vertex (reuse / split / new).
+        vid, cmd = self._vertex_for_snap(snap, s)
+        if vid == tip_vid:
+            if cmd is not None:
+                cmd.undo(s)  # degenerate: clicked the current tip
             return
-
-        # Branch 3 — new vertex
-        v_cmd = AddVertexCommand(snap.world_position)
-        v_cmd.do(s)
-        new_vid = v_cmd._vertex_id  # type: ignore[attr-defined]
-        if new_vid == tip_vid:
-            # degenerate: drop the just-added vertex by undoing
-            v_cmd.undo(s)
-            return
-        self._composite.children.append(v_cmd)
-        e_cmd = AddEdgeCommand(tip_vid, new_vid)
+        if cmd is not None:
+            self._composite.children.append(cmd)
+        e_cmd = AddEdgeCommand(tip_vid, vid)
         e_cmd.do(s)
         self._composite.children.append(e_cmd)
-        self._gesture_vertex_ids.append(new_vid)
+        self._gesture_vertex_ids.append(vid)
 
     def on_key_press(self, event: QKeyEvent) -> None:
         if event.key() != Qt.Key.Key_Escape:
@@ -212,6 +190,25 @@ class LineTool(Tool):
         return s.vertex(self._gesture_vertex_ids[-1]).position.copy()
 
     # ---- internal -------------------------------------------------------
+    def _vertex_for_snap(self, snap, scene):  # noqa: ANN001
+        """Resolve a snap to a vertex id. Splits the host edge for interior
+        snaps. Returns (vertex_id, command_or_None); caller appends the command."""
+        from pluton.viewport.snap_engine import SnapKind
+
+        if snap.kind == SnapKind.ENDPOINT and snap.vertex_id is not None:
+            return snap.vertex_id, None
+        if snap.edge_id is not None and snap.edge_t is not None and snap.kind in (
+            SnapKind.MIDPOINT, SnapKind.ON_EDGE, SnapKind.INTERSECTION
+        ):
+            split = SplitEdgeCommand(snap.edge_id, snap.edge_t)
+            split.do(scene)
+            if split.new_vertex_id is not None:
+                return split.new_vertex_id, split
+            # split was a no-op (degenerate t) → fall through to a plain vertex.
+        cmd = AddVertexCommand(snap.world_position)
+        cmd.do(scene)
+        return cmd._vertex_id, cmd  # type: ignore[attr-defined]
+
     def _reset_gesture(self) -> None:
         self._state = _State.IDLE
         self._gesture_vertex_ids = []

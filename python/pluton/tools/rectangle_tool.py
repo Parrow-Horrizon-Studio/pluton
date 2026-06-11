@@ -19,6 +19,7 @@ from pluton.commands.scene_commands import (
     AddVertexCommand,
 )
 from pluton.tools.tool import Tool, ToolContext, ToolOverlay
+from pluton.viewport.snap_engine import MARKER_COLOR_BY_KIND
 
 
 class _State(Enum):
@@ -27,12 +28,6 @@ class _State(Enum):
 
 
 _NEUTRAL_COLOR = (0.85, 0.85, 0.85)
-_MARKER_COLOR_BY_KIND = {
-    1: (0.7, 0.7, 0.7),     # GRID
-    2: None,                # AXIS_LOCK (Rectangle doesn't axis-lock; never set)
-    3: (0.2, 0.85, 0.95),   # MIDPOINT
-    4: (0.25, 0.78, 0.26),  # ENDPOINT
-}
 
 
 class RectangleTool(Tool):
@@ -71,7 +66,7 @@ class RectangleTool(Tool):
             self._snap_marker_kind = 0
             return
         self._snap_marker_pos = snap.world_position.copy()
-        self._snap_marker_color = _MARKER_COLOR_BY_KIND.get(int(snap.kind), _NEUTRAL_COLOR)
+        self._snap_marker_color = MARKER_COLOR_BY_KIND.get(snap.kind, _NEUTRAL_COLOR)
         self._snap_marker_kind = int(snap.kind)
         if self._state == _State.DRAGGING:
             self._preview_corner = snap.world_position.copy()
