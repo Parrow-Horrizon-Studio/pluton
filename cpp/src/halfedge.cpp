@@ -565,8 +565,15 @@ pluton::HalfEdgeMesh::split_edge(std::uint32_t e_id, float t) {
     const float wx = pa[0] + t * (pb[0] - pa[0]);
     const float wy = pa[1] + t * (pb[1] - pa[1]);
     const float wz = pa[2] + t * (pb[2] - pa[2]);
+    const std::size_t n_before = vertices_.size();
     const std::uint32_t w = add_vertex(wx, wy, wz);
-    if (w == va || w == vb) return std::nullopt;  // coincident with an endpoint
+    if (vertices_.size() == n_before) {
+        // add_vertex is position-idempotent: an unchanged slab size means w
+        // coincides with an EXISTING vertex (an endpoint or any other vertex).
+        // Splitting onto an existing vertex would create degenerate/broken
+        // topology, so reject. (This subsumes the old w == va || w == vb check.)
+        return std::nullopt;
+    }
 
     const std::uint32_t fa = halfedges_[he_a].face;
     const std::uint32_t fb = halfedges_[he_b].face;

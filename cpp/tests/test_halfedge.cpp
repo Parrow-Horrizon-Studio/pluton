@@ -800,3 +800,20 @@ TEST(SplitEdge, PreservesManifoldTwinsOnNewEdges) {
         EXPECT_NE(m.halfedge_face(hb), HalfEdgeMesh::INVALID_ID);
     }
 }
+
+TEST(SplitEdge, RejectsSplitLandingOnExistingVertex) {
+    std::uint32_t e = 0;
+    auto m = make_two_quads(e);
+    // The shared edge is (1,0,0)-(1,1,0); its midpoint is (1,0.5,0). Pre-create
+    // a vertex exactly there — splitting at t=0.5 would land on it, which would
+    // create degenerate topology, so split_edge must reject (return nullopt) and
+    // leave the mesh unchanged.
+    m.add_vertex(1.0f, 0.5f, 0.0f);
+    const std::size_t faces_before = 0u +
+        [&]{ std::uint32_t c=0; for (auto f=m.next_live_face(0); f!=pluton::HalfEdgeMesh::INVALID_ID; f=m.next_live_face(f+1)) ++c; return c; }();
+    EXPECT_FALSE(m.split_edge(e, 0.5f).has_value());
+    // Mesh unchanged: still the two original faces.
+    std::uint32_t faces_after = 0;
+    for (auto f=m.next_live_face(0); f!=pluton::HalfEdgeMesh::INVALID_ID; f=m.next_live_face(f+1)) ++faces_after;
+    EXPECT_EQ(faces_after, faces_before);
+}
