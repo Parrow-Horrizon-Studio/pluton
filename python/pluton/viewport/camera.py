@@ -185,6 +185,32 @@ class Camera:
         origin = self.position.astype(np.float32)
         return origin, direction
 
+    def world_to_screen(
+        self, world_xyz: np.ndarray, width: int, height: int
+    ) -> tuple[float, float, float] | None:
+        """Project a world point to screen pixels. Inverse of ray_from_screen.
+
+        Returns `(sx, sy, depth)` where (sx, sy) are pixel coordinates (screen-y
+        top-down) and `depth` is the positive camera-space distance in front of
+        the camera (larger = farther), suitable for depth tie-breaking. Returns
+        `None` if the point is at or behind the camera plane.
+        """
+        w = max(int(width), 1)
+        h = max(int(height), 1)
+        p = np.array(
+            [float(world_xyz[0]), float(world_xyz[1]), float(world_xyz[2]), 1.0],
+            dtype=np.float32,
+        )
+        clip = self.projection_matrix() @ (self.view_matrix() @ p)
+        clip_w = float(clip[3])
+        if clip_w <= 1e-7:
+            return None  # at or behind the camera
+        ndc_x = float(clip[0]) / clip_w
+        ndc_y = float(clip[1]) / clip_w
+        sx = (ndc_x + 1.0) * 0.5 * w
+        sy = (1.0 - ndc_y) * 0.5 * h
+        return (sx, sy, clip_w)  # clip_w == -z_cam, positive in front
+
     def ray_intersect_ground(
         self, x_pixels: float, y_pixels: float, width: int, height: int
     ) -> np.ndarray | None:

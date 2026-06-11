@@ -205,3 +205,46 @@ def test_ray_intersect_ground_returns_none_when_ray_parallel_or_above():
     cam.aspect = 1.0
     hit = cam.ray_intersect_ground(640.0, 400.0, 1280, 800)
     assert hit is None
+
+
+# --- world_to_screen -------------------------------------------------------
+
+
+def test_world_to_screen_roundtrips_with_ray_from_screen():
+    """A world point projected to screen, then turned back into a ray, yields a
+    ray that passes through the original point."""
+    from pluton.viewport.camera import Camera
+
+    cam = Camera()
+    cam.aspect = 1280.0 / 800.0
+    world = np.array([1.0, 2.0, 0.5], dtype=np.float32)
+
+    sx, sy, depth = cam.world_to_screen(world, 1280, 800)
+    assert depth > 0.0  # in front of the camera
+
+    origin, direction = cam.ray_from_screen(sx, sy, 1280, 800)
+    # The world point lies on the ray: world == origin + s*direction for some s>0.
+    to_point = world - origin
+    s = float(np.dot(to_point, direction))
+    closest = origin + s * direction
+    np.testing.assert_allclose(closest, world, atol=1e-3)
+
+
+def test_world_to_screen_center_of_target_is_screen_center():
+    from pluton.viewport.camera import Camera
+
+    cam = Camera()
+    cam.aspect = 1.0
+    sx, sy, _ = cam.world_to_screen(cam.target, 1000, 1000)
+    np.testing.assert_allclose([sx, sy], [500.0, 500.0], atol=1.0)
+
+
+def test_world_to_screen_behind_camera_returns_none():
+    from pluton.viewport.camera import Camera
+
+    cam = Camera()
+    cam.position = np.array([0.0, 0.0, 5.0], dtype=np.float32)
+    cam.target = np.array([0.0, 0.0, 0.0], dtype=np.float32)  # looking down -Z
+    cam.aspect = 1.0
+    behind = np.array([0.0, 0.0, 10.0], dtype=np.float32)  # above/behind the camera
+    assert cam.world_to_screen(behind, 1280, 800) is None
