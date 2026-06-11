@@ -746,3 +746,57 @@ TEST(SplitEdge, InteriorEdgeInsertsVertexAndRebuildsBothFaces) {
         ++live;
     EXPECT_EQ(live, 2u);
 }
+
+TEST(SplitEdge, BoundaryEdgeSplitsTheSingleIncidentFace) {
+    using pluton::HalfEdgeMesh;
+    HalfEdgeMesh m;
+    auto v0 = m.add_vertex(0, 0, 0);
+    auto v1 = m.add_vertex(2, 0, 0);
+    auto v2 = m.add_vertex(0, 2, 0);
+    m.add_halfedge_pair(v0, v1);
+    auto e01 = (m.add_halfedge_pair(v0, v1));  // idempotent → same edge id
+    m.add_halfedge_pair(v1, v2);
+    m.add_halfedge_pair(v2, v0);
+    m.add_face_from_loop({v0, v1, v2}, {(int)v0,(int)v1,(int)v2});
+
+    auto res = m.split_edge(e01, 0.5f);
+    ASSERT_TRUE(res.has_value());
+    const bool one_face =
+        (res->face_a != HalfEdgeMesh::INVALID_ID) != (res->face_b != HalfEdgeMesh::INVALID_ID);
+    EXPECT_TRUE(one_face);
+    const std::uint32_t live_face =
+        res->face_a != HalfEdgeMesh::INVALID_ID ? res->face_a : res->face_b;
+    EXPECT_EQ(m.face_loop_vertices(live_face).size(), 4u);
+}
+
+TEST(SplitEdge, RejectsParameterOutOfRange) {
+    std::uint32_t e = 0;
+    auto m = make_two_quads(e);
+    EXPECT_FALSE(m.split_edge(e, 0.0f).has_value());
+    EXPECT_FALSE(m.split_edge(e, 1.0f).has_value());
+    EXPECT_FALSE(m.split_edge(e, -0.2f).has_value());
+    EXPECT_FALSE(m.split_edge(e, 1.5f).has_value());
+}
+
+TEST(SplitEdge, RejectsDeadEdge) {
+    std::uint32_t e = 0;
+    auto m = make_two_quads(e);
+    auto first = m.split_edge(e, 0.5f);
+    ASSERT_TRUE(first.has_value());
+    EXPECT_FALSE(m.split_edge(e, 0.5f).has_value());  // e is now dead
+}
+
+TEST(SplitEdge, PreservesManifoldTwinsOnNewEdges) {
+    using pluton::HalfEdgeMesh;
+    std::uint32_t e = 0;
+    auto m = make_two_quads(e);
+    auto res = m.split_edge(e, 0.5f);
+    ASSERT_TRUE(res.has_value());
+    for (std::uint32_t ne : {res->edge_a, res->edge_b}) {
+        std::uint32_t ha = 2u * ne, hb = 2u * ne + 1u;
+        EXPECT_EQ(m.halfedge_twin(ha), hb);
+        EXPECT_EQ(m.halfedge_twin(hb), ha);
+        EXPECT_NE(m.halfedge_face(ha), HalfEdgeMesh::INVALID_ID);
+        EXPECT_NE(m.halfedge_face(hb), HalfEdgeMesh::INVALID_ID);
+    }
+}
