@@ -122,3 +122,60 @@ def test_precedence_rank_orders_endpoint_above_on_face():
     assert _PRECEDENCE_RANK[SnapKind.ON_EDGE] < _PRECEDENCE_RANK[SnapKind.ON_FACE]
     assert _PRECEDENCE_RANK[SnapKind.ON_FACE] < _PRECEDENCE_RANK[SnapKind.GRID]
     assert _PRECEDENCE_RANK[SnapKind.INTERSECTION] < _PRECEDENCE_RANK[SnapKind.MIDPOINT]
+
+
+def test_on_edge_snap_to_interior_point():
+    from pluton.scene import Scene
+    from pluton.viewport.snap_engine import SnapEngine, SnapKind
+
+    eng = SnapEngine()
+    scene = Scene()
+    v0 = scene.add_vertex(np.array([0.0, 0.0, 2.0], dtype=np.float32))
+    v1 = scene.add_vertex(np.array([4.0, 0.0, 2.0], dtype=np.float32))
+    e = scene.add_edge(v0, v1)
+    cam = _camera_at_default()
+    cursor = _screen_of(cam, [1.0, 0.0, 2.0])  # quarter point, far from midpoint(2,0,2)
+    res = eng.snap(cursor, (1280, 800), cam, scene)
+    assert res.kind == SnapKind.ON_EDGE
+    assert res.edge_id == e
+    assert abs(res.edge_t - 0.25) < 5e-2
+    np.testing.assert_allclose(res.world_position, [1.0, 0.0, 2.0], atol=5e-2)
+
+
+def test_on_face_snap_over_a_face():
+    from pluton.scene import Scene
+    from pluton.viewport.snap_engine import SnapEngine, SnapKind
+
+    eng = SnapEngine()
+    scene = Scene()
+    v0 = scene.add_vertex(np.array([-1.0, -1.0, 1.0], dtype=np.float32))
+    v1 = scene.add_vertex(np.array([1.0, -1.0, 1.0], dtype=np.float32))
+    v2 = scene.add_vertex(np.array([1.0, 1.0, 1.0], dtype=np.float32))
+    v3 = scene.add_vertex(np.array([-1.0, 1.0, 1.0], dtype=np.float32))
+    for a, b in [(v0, v1), (v1, v2), (v2, v3), (v3, v0)]:
+        scene.add_edge(a, b)
+    f = scene.add_face_from_loop([v0, v1, v2, v3])
+    cam = _camera_at_default()
+    cursor = _screen_of(cam, [0.0, 0.0, 1.0])  # face center
+    res = eng.snap(cursor, (1280, 800), cam, scene)
+    assert res.kind == SnapKind.ON_FACE
+    assert res.face_id == f
+    np.testing.assert_allclose(res.world_position[2], 1.0, atol=1e-3)
+
+
+def test_endpoint_beats_midpoint_full_pipeline():
+    """Full-pipeline precedence (not just _select): a vertex under the cursor
+    wins over the edge's midpoint/on-edge candidates."""
+    from pluton.scene import Scene
+    from pluton.viewport.snap_engine import SnapEngine, SnapKind
+
+    eng = SnapEngine()
+    scene = Scene()
+    v0 = scene.add_vertex(np.array([0.0, 0.0, 2.0], dtype=np.float32))
+    v1 = scene.add_vertex(np.array([0.0, 0.3, 2.0], dtype=np.float32))  # short edge
+    scene.add_edge(v0, v1)
+    cam = _camera_at_default()
+    cursor = _screen_of(cam, [0.0, 0.0, 2.0])  # exactly on v0
+    res = eng.snap(cursor, (1280, 800), cam, scene)
+    assert res.kind == SnapKind.ENDPOINT
+    assert res.vertex_id == v0

@@ -113,7 +113,10 @@ class SnapEngine:
         cands += self._edge_point_candidates(
             px, py, width, height, camera, scene, ray_origin, ray_dir
         )
-        # On-Edge / On-Face plug in here (Task 9); Axis / Intersection (Task 10).
+        face_cand = self._face_candidate(ray_origin, ray_dir, scene)
+        if face_cand is not None:
+            cands.append(face_cand)
+        # Axis / Intersection (Task 10).
 
         within = [c for c in cands if c.screen_dist <= self.PIXEL_TOLERANCE]
         if within:
@@ -171,7 +174,13 @@ class SnapEngine:
         return out
 
     def _edge_point_candidates(self, px, py, width, height, camera, scene, ray_origin, ray_dir):
-        """Midpoint candidates (On-Edge is added in Task 9 into this method)."""
+        """Midpoint AND On-Edge candidates for each live edge.
+
+        The Midpoint block projects the geometric midpoint of each edge.
+        The On-Edge block uses `ray_origin`/`ray_dir` (the cursor ray) to find
+        the closest point on the 3D segment to the ray, producing an ON_EDGE
+        candidate whenever that projected point is within pixel tolerance.
+        """
         out: list[_Candidate] = []
         for e in scene.edges_iter():
             p1 = scene.vertex(e.v1_id).position
@@ -187,7 +196,31 @@ class SnapEngine:
                         screen_dist=d, depth=depth, label="Midpoint",
                         edge_id=e.id, edge_t=0.5,
                     ))
+            # On-Edge: closest point on the 3D segment to the cursor ray.
+            on_pt, t = _closest_point_on_segment_to_ray(ray_origin, ray_dir, p1, p2)
+            proj_e = camera.world_to_screen(on_pt, width, height)
+            if proj_e is not None:
+                sx, sy, depth = proj_e
+                d = math.hypot(sx - px, sy - py)
+                if d <= self.PIXEL_TOLERANCE:
+                    out.append(_Candidate(
+                        kind=SnapKind.ON_EDGE, world_position=on_pt,
+                        screen_dist=d, depth=depth, label="On Edge",
+                        edge_id=e.id, edge_t=t,
+                    ))
         return out
+
+    def _face_candidate(self, ray_origin, ray_dir, scene):
+        """On-Face via the C++ ray-mesh pick. Screen distance is 0 (under cursor)."""
+        hit = scene.ray_pick_face(ray_origin, ray_dir)
+        if hit is None:
+            return None
+        point = np.array([hit.point[0], hit.point[1], hit.point[2]], dtype=np.float32)
+        return _Candidate(
+            kind=SnapKind.ON_FACE, world_position=point,
+            screen_dist=0.0, depth=float(hit.t), label="On Face",
+            face_id=int(hit.face_id),
+        )
 
 
 def _closest_points_two_lines(p1, d1, p2, d2):
