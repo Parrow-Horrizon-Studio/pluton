@@ -179,3 +179,38 @@ def test_endpoint_beats_midpoint_full_pipeline():
     res = eng.snap(cursor, (1280, 800), cam, scene)
     assert res.kind == SnapKind.ENDPOINT
     assert res.vertex_id == v0
+
+
+def test_axis_lock_vertical_z_in_3d():
+    """Z-axis lock — impossible in M2's ground-only world."""
+    from pluton.scene import Scene
+    from pluton.viewport.snap_engine import SnapEngine, SnapKind
+
+    eng = SnapEngine()
+    scene = Scene()
+    cam = _camera_at_default()
+    anchor = np.array([0.0, 0.0, 0.0], dtype=np.float32)
+    cursor = _screen_of(cam, [0.0, 0.0, 3.0])  # straight up the blue axis
+    res = eng.snap(cursor, (1280, 800), cam, scene, anchor=anchor)
+    assert res.kind == SnapKind.AXIS_LOCK
+    assert res.axis == 2  # Z / blue
+    np.testing.assert_allclose(res.world_position, [0.0, 0.0, 3.0], atol=5e-2)
+
+
+def test_intersection_of_axis_line_and_edge():
+    from pluton.scene import Scene
+    from pluton.viewport.snap_engine import SnapEngine, SnapKind
+
+    eng = SnapEngine()
+    scene = Scene()
+    # Edge crosses the X axis at (3,0,0) at parameter t=0.25 (NOT its midpoint).
+    v0 = scene.add_vertex(np.array([3.0, -1.0, 0.0], dtype=np.float32))
+    v1 = scene.add_vertex(np.array([3.0, 3.0, 0.0], dtype=np.float32))
+    e = scene.add_edge(v0, v1)
+    cam = _camera_at_default()
+    anchor = np.array([0.0, 0.0, 0.0], dtype=np.float32)  # draw along +X from origin
+    cursor = _screen_of(cam, [3.0, 0.0, 0.0])
+    res = eng.snap(cursor, (1280, 800), cam, scene, anchor=anchor)
+    assert res.kind == SnapKind.INTERSECTION
+    assert res.edge_id == e
+    np.testing.assert_allclose(res.world_position, [3.0, 0.0, 0.0], atol=5e-2)

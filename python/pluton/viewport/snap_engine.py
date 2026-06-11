@@ -46,6 +46,13 @@ class SnapResult:
 
 _AXIS_NAMES = {0: "Red", 1: "Green", 2: "Blue"}
 
+_INTERSECTION_EPS = 1e-3  # world-space closest-approach below this = a real crossing
+_AXIS_DIRS = {
+    0: np.array([1.0, 0.0, 0.0], dtype=np.float32),
+    1: np.array([0.0, 1.0, 0.0], dtype=np.float32),
+    2: np.array([0.0, 0.0, 1.0], dtype=np.float32),
+}
+
 # Snap-marker colors, keyed by kind. Shared by tools (overlay color); the
 # renderer is shape-only. AXIS_LOCK has no marker color (the rubber-band shows
 # the axis color instead).
@@ -116,7 +123,10 @@ class SnapEngine:
         face_cand = self._face_candidate(ray_origin, ray_dir, scene)
         if face_cand is not None:
             cands.append(face_cand)
-        # Axis / Intersection (Task 10).
+        if anchor is not None:
+            a = np.asarray(anchor, dtype=np.float32)
+            cands += self._axis_candidates(px, py, width, height, camera, a, ray_origin, ray_dir)
+            cands += self._intersection_candidates(px, py, width, height, camera, scene, a)
 
         within = [c for c in cands if c.screen_dist <= self.PIXEL_TOLERANCE]
         if within:
@@ -207,6 +217,49 @@ class SnapEngine:
                         kind=SnapKind.ON_EDGE, world_position=on_pt,
                         screen_dist=d, depth=depth, label="On Edge",
                         edge_id=e.id, edge_t=t,
+                    ))
+        return out
+
+    def _axis_candidates(self, px, py, width, height, camera, anchor, ray_origin, ray_dir):
+        out: list[_Candidate] = []
+        for axis_idx, axis_dir in _AXIS_DIRS.items():
+            # Point on the infinite axis line (through anchor) nearest the cursor ray.
+            _, _, _c_ray, c_axis = _closest_points_two_lines(ray_origin, ray_dir, anchor, axis_dir)
+            proj = camera.world_to_screen(c_axis, width, height)
+            if proj is None:
+                continue
+            sx, sy, depth = proj
+            d = math.hypot(sx - px, sy - py)
+            if d <= self.PIXEL_TOLERANCE:
+                out.append(_Candidate(
+                    kind=SnapKind.AXIS_LOCK, world_position=c_axis,
+                    screen_dist=d, depth=depth,
+                    label=f"on {_AXIS_NAMES[axis_idx]} Axis", axis=axis_idx,
+                ))
+        return out
+
+    def _intersection_candidates(self, px, py, width, height, camera, scene, anchor):
+        out: list[_Candidate] = []
+        for axis_idx, axis_dir in _AXIS_DIRS.items():
+            for e in scene.edges_iter():
+                a = scene.vertex(e.v1_id).position
+                b = scene.vertex(e.v2_id).position
+                seg_dir = b - a
+                _, t, c_axis, c_edge = _closest_points_two_lines(anchor, axis_dir, a, seg_dir)
+                if t < 0.0 or t > 1.0:
+                    continue  # crossing lies outside the edge segment
+                if float(np.linalg.norm(c_axis - c_edge)) > _INTERSECTION_EPS:
+                    continue  # skew — no genuine 3D crossing
+                proj = camera.world_to_screen(c_edge, width, height)
+                if proj is None:
+                    continue
+                sx, sy, depth = proj
+                d = math.hypot(sx - px, sy - py)
+                if d <= self.PIXEL_TOLERANCE:
+                    out.append(_Candidate(
+                        kind=SnapKind.INTERSECTION, world_position=c_edge,
+                        screen_dist=d, depth=depth, label="Intersection",
+                        edge_id=e.id, edge_t=float(t),
                     ))
         return out
 
