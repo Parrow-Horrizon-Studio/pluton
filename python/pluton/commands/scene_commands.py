@@ -278,3 +278,104 @@ class DissolveEdgeCommand(Command):
         scene.restore_edge(self._edge_id, self._shared_verts[0], self._shared_verts[1])
         scene.restore_face(self._f1_id, self._captured_f1)
         scene.restore_face(self._f2_id, self._captured_f2)
+
+
+class SplitEdgeCommand(Command):
+    """Split an edge at parameter t, inserting a vertex. Reversible.
+
+    do(): first call performs the split via scene.split_edge and captures BOTH
+          the originals (edge endpoints, incident face ids+loops) and the created
+          ids (vertex w, two edges, up to two faces) plus the rebuilt loops.
+          Redo restores every created entity to its FIRST-RUN id (id-preserving),
+          so a sibling command in the same gesture composite that cached the new
+          vertex id stays valid across undo/redo (the M3c atomic-undo concern).
+    undo(): removes the created faces/edges/vertex, then restores the original
+            edge and faces to their ORIGINAL ids (restore_edge before restore_face).
+    Invalid/degenerate splits make the command a clean no-op.
+    """
+
+    name = "Split Edge"
+
+    def __init__(self, edge_id: int, t: float) -> None:
+        self._edge_id = edge_id
+        self._t = float(t)
+        self._was_noop = False
+        self._done_once = False
+        # originals
+        self._orig_verts: tuple[int, int] | None = None  # (va, vb) = edge endpoints
+        self._orig_faces: list[tuple[int, tuple[int, ...]]] = []  # (id, loop) captured
+        self._w_pos: np.ndarray | None = None
+        # created (first-run ids, reused on redo)
+        self.new_vertex_id: int | None = None
+        self._e1: int | None = None
+        self._e2: int | None = None
+        self._new_faces: list[tuple[int, tuple[int, ...]]] = []  # (id, loop-with-w)
+
+    def do(self, scene) -> None:  # noqa: ANN001
+        if not self._done_once:
+            self._first_do(scene)
+        else:
+            self._redo(scene)
+
+    def _first_do(self, scene) -> None:  # noqa: ANN001
+        try:
+            e = scene.edge(self._edge_id)
+        except KeyError:
+            self._was_noop = True
+            self._done_once = True
+            return
+        va, vb = e.v1_id, e.v2_id
+        fa, fb = scene.edge_faces(self._edge_id)
+        captured_faces: list[tuple[int, tuple[int, ...]]] = []
+        for fid in (fa, fb):
+            if fid is not None:
+                captured_faces.append((fid, tuple(scene.face(fid).loop_vertex_ids)))
+
+        res = scene.split_edge(self._edge_id, self._t)
+        if res is None:
+            self._was_noop = True
+            self._done_once = True
+            return
+
+        self._orig_verts = (va, vb)
+        self._orig_faces = captured_faces
+        self._w_pos = scene.vertex(res.vertex).position.copy()
+        self.new_vertex_id = res.vertex
+        self._e1, self._e2 = res.edge_a, res.edge_b
+        self._new_faces = []
+        for fid in (res.face_a, res.face_b):
+            if fid is not None:
+                self._new_faces.append((fid, tuple(scene.face(fid).loop_vertex_ids)))
+        self._done_once = True
+        self._was_noop = False
+
+    def _redo(self, scene) -> None:  # noqa: ANN001
+        if self._was_noop:
+            return
+        assert self._orig_verts is not None and self._w_pos is not None
+        assert self.new_vertex_id is not None and self._e1 is not None and self._e2 is not None
+        va, vb = self._orig_verts
+        w = self.new_vertex_id
+        scene.restore_vertex(w, self._w_pos)
+        for fid, _loop in self._orig_faces:
+            scene.remove_face(fid)
+        scene.remove_edge(self._edge_id)
+        scene.restore_edge(self._e1, va, w)
+        scene.restore_edge(self._e2, w, vb)
+        for fid, loop in self._new_faces:
+            scene.restore_face(fid, loop)
+
+    def undo(self, scene) -> None:  # noqa: ANN001
+        if self._was_noop:
+            return
+        assert self._orig_verts is not None
+        assert self.new_vertex_id is not None and self._e1 is not None and self._e2 is not None
+        for fid, _loop in self._new_faces:
+            scene.remove_face(fid)
+        scene.remove_edge(self._e1)
+        scene.remove_edge(self._e2)
+        scene.remove_vertex(self.new_vertex_id)
+        va, vb = self._orig_verts
+        scene.restore_edge(self._edge_id, va, vb)
+        for fid, loop in self._orig_faces:
+            scene.restore_face(fid, loop)
