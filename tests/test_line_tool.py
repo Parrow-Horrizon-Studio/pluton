@@ -217,3 +217,78 @@ def test_line_tool_esc_mid_gesture_rolls_back_committed_geometry():
     assert len(list(scene.edges_iter())) == 0
     # Nothing pushed to undo stack (the composite was discarded, not committed).
     assert not stack.can_undo
+
+
+# ---------------------------------------------------------------------------
+# Enter / Return — finish open polyline (M3d Task 12b)
+# ---------------------------------------------------------------------------
+
+
+def test_line_tool_enter_finishes_and_commits_open_polyline():
+    """Test A — Enter commits an open 2-segment polyline as one undoable unit."""
+    from PySide6.QtCore import Qt
+    from PySide6.QtGui import QKeyEvent
+
+    from pluton.commands import CommandStack
+    from pluton.scene import Scene
+    from pluton.tools import ToolContext
+    from pluton.tools.line_tool import LineTool
+
+    scene = Scene()
+    stack = CommandStack()
+    tool = LineTool()
+    tool.activate(ToolContext(scene=scene, command_stack=stack))
+
+    # 3 clicks → 3 vertices, 2 edges, NO loop closure.
+    tool.on_mouse_press(None, _grid_snap((0.0, 0.0, 0.0)))  # type: ignore[arg-type]
+    tool.on_mouse_press(None, _grid_snap((2.0, 0.0, 0.0)))  # type: ignore[arg-type]
+    tool.on_mouse_press(None, _grid_snap((2.0, 2.0, 0.0)))  # type: ignore[arg-type]
+
+    assert tool.has_active_gesture is True
+    assert len(list(scene.vertices_iter())) == 3
+    assert len(list(scene.edges_iter())) == 2
+
+    # Press Enter — should finish the gesture.
+    ev = QKeyEvent(QKeyEvent.Type.KeyPress, Qt.Key.Key_Return, Qt.KeyboardModifier.NoModifier)
+    tool.on_key_press(ev)
+
+    # Tool returns to idle.
+    assert tool.has_active_gesture is False
+
+    # The polyline was registered as one undoable unit.
+    assert stack.can_undo
+
+    # A single undo removes ALL the polyline geometry.
+    stack.undo(scene)
+    assert len(list(scene.vertices_iter())) == 0
+    assert len(list(scene.edges_iter())) == 0
+
+
+def test_line_tool_enter_with_only_seed_discards():
+    """Test B — Enter with only the start point placed discards it (nothing to commit)."""
+    from PySide6.QtCore import Qt
+    from PySide6.QtGui import QKeyEvent
+
+    from pluton.commands import CommandStack
+    from pluton.scene import Scene
+    from pluton.tools import ToolContext
+    from pluton.tools.line_tool import LineTool
+
+    scene = Scene()
+    stack = CommandStack()
+    tool = LineTool()
+    tool.activate(ToolContext(scene=scene, command_stack=stack))
+
+    # Only the seed vertex placed — no edges yet.
+    tool.on_mouse_press(None, _grid_snap((0.0, 0.0, 0.0)))  # type: ignore[arg-type]
+    assert tool.has_active_gesture is True
+
+    ev = QKeyEvent(QKeyEvent.Type.KeyPress, Qt.Key.Key_Return, Qt.KeyboardModifier.NoModifier)
+    tool.on_key_press(ev)
+
+    # Tool returns to idle.
+    assert tool.has_active_gesture is False
+    # Seed vertex was discarded.
+    assert len(list(scene.vertices_iter())) == 0
+    # Nothing pushed to undo stack.
+    assert stack.can_undo is False

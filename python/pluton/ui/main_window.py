@@ -61,6 +61,8 @@ class MainWindow(QMainWindow):
         QShortcut(QKeySequence("R"), self, activated=lambda: self._activate("R"))
         QShortcut(QKeySequence("P"), self, activated=lambda: self._activate("P"))
         QShortcut(QKeySequence("Esc"), self, activated=self._on_escape)
+        QShortcut(QKeySequence(Qt.Key.Key_Return), self, activated=self._on_finish_gesture)
+        QShortcut(QKeySequence(Qt.Key.Key_Enter), self, activated=self._on_finish_gesture)
         QShortcut(QKeySequence("Ctrl+N"), self, activated=self._on_clear_scene)
         QShortcut(QKeySequence("Ctrl+Z"), self, activated=self._on_undo)
         QShortcut(QKeySequence("Ctrl+Y"), self, activated=self._on_redo)
@@ -96,6 +98,17 @@ class MainWindow(QMainWindow):
             self._tool_manager.deactivate_current()
             self._status_bar.set_tool("")
             self._status_bar.set_snap("")
+        self._refresh_status_text()
+        self._viewport.update()
+
+    def _on_finish_gesture(self) -> None:
+        active = self._tool_manager.active
+        if active is None or not active.has_active_gesture:
+            return
+        from PySide6.QtGui import QKeyEvent
+
+        ev = QKeyEvent(QKeyEvent.Type.KeyPress, Qt.Key.Key_Return, Qt.KeyboardModifier.NoModifier)
+        active.on_key_press(ev)
         self._refresh_status_text()
         self._viewport.update()
 

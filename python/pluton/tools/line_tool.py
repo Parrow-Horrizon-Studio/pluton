@@ -138,11 +138,27 @@ class LineTool(Tool):
         self._gesture_vertex_ids.append(vid)
 
     def on_key_press(self, event: QKeyEvent) -> None:
-        if event.key() != Qt.Key.Key_Escape:
+        key = event.key()
+        s = self._scene  # type: ignore[assignment]
+
+        if key in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
+            # Finish the open polyline: register it as one undoable unit and end
+            # the gesture (ready to start a new line). Matches SketchUp/CAD Enter.
+            if self._state == _State.DRAWING and self._composite is not None:
+                if len(self._gesture_vertex_ids) >= 2 and self._composite.children:
+                    if self._command_stack is not None:
+                        self._command_stack.push_executed(self._composite)
+                else:
+                    # Only the start point was placed — nothing to commit; discard.
+                    self._composite.undo(s)
+                self._composite = None
+            self._reset_gesture()
+            return
+
+        if key != Qt.Key.Key_Escape:
             return
         # ESC mid-gesture: roll back the in-progress composite.
         if self._composite is not None:
-            s = self._scene  # type: ignore[assignment]
             self._composite.undo(s)
             self._composite = None
         self._reset_gesture()
