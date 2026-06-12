@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.27)
 
 # Project metadata
 project(pluton
-    VERSION 0.0.6
+    VERSION 0.0.7
     DESCRIPTION "Polygonal 3D modeler for architecture"
     LANGUAGES CXX
 )
