@@ -79,3 +79,21 @@ def test_semicircle_snap_pulls_near_semicircle_exact():
     assert np.allclose(snapped, [0.0, 1.0], atol=1e-9)
     far = semicircle_snap(start, end, np.array([0.0, 0.4]))
     assert np.allclose(far, [0.0, 0.4])
+
+
+def test_arc_semicircle_negative_sagitta_bows_below_chord():
+    from pluton.geometry import arc_2pt
+
+    pts = arc_2pt(np.array([-1.0, 0.0]), np.array([1.0, 0.0]), np.array([0.0, -1.0]), segments=12)
+    assert pts.shape == (13, 2)
+    assert np.allclose(np.linalg.norm(pts, axis=1), 1.0, atol=1e-9)
+    assert np.any(np.all(np.isclose(pts, [0.0, -1.0], atol=1e-9), axis=1))
+    assert np.all(pts[:, 1] <= 1e-9)  # arc bows below the chord
+
+
+def test_semicircle_snap_negative_sagitta_snaps_below():
+    from pluton.geometry import semicircle_snap
+
+    start, end = np.array([-1.0, 0.0]), np.array([1.0, 0.0])
+    snapped = semicircle_snap(start, end, np.array([0.0, -0.97]))
+    assert np.allclose(snapped, [0.0, -1.0], atol=1e-9)

@@ -84,8 +84,10 @@ def semicircle_snap(
     bulge_uv: np.ndarray,
     rel_tol: float = 0.08,
 ) -> np.ndarray:
-    """Snap `bulge_uv` to an exact semicircle (sagitta == half-chord) when it is
-    within `rel_tol` of one; otherwise return `bulge_uv` unchanged."""
+    """Snap `bulge_uv` to an exact semicircle (|sagitta| == half-chord) when it is
+    within `rel_tol` of one; preserves the sign so the snapped point stays on the
+    same side of the chord as the original bulge. Returns `bulge_uv` unchanged if
+    outside tolerance."""
     start = np.asarray(start_uv, dtype=np.float64).reshape(2)
     end = np.asarray(end_uv, dtype=np.float64).reshape(2)
     bulge = np.asarray(bulge_uv, dtype=np.float64).reshape(2)
