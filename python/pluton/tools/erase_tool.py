@@ -50,6 +50,10 @@ class EraserTool(Tool):
         self._erased = set()
 
     def deactivate(self) -> None:
+        # Roll back any in-progress (un-committed) erase stroke so a mid-drag
+        # tool switch never leaves un-undoable scene mutations.
+        if self._stroke is not None and self._stroke.children and self._scene is not None:
+            self._stroke.undo(self._scene)
         self._hovered_edge = None
         self._stroke = None
         self._erased = set()

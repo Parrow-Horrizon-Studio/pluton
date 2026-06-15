@@ -99,3 +99,44 @@ def test_drag_erase_two_edges_is_one_undo(qtbot):
     assert len(list(scene.edges_iter())) <= e0 - 2
     stack.undo(scene)
     assert len(list(scene.edges_iter())) == e0
+
+
+def test_miss_click_pushes_nothing(qtbot):
+    from pluton.commands import CommandStack
+    scene, fid = _quad_scene()
+    stack = CommandStack()
+    tool, cam = _make(scene, stack)
+    f0 = len(list(scene.faces_iter()))
+    # A far corner pixel that hits no edge.
+    tool.on_mouse_press(_press(2.0, 2.0), None)
+    tool.on_mouse_release(_release(2.0, 2.0), None)
+    assert not stack.can_undo
+    assert len(list(scene.faces_iter())) == f0
+
+
+def test_erase_interior_edge_removes_both_faces(qtbot):
+    from pluton.commands import CommandStack
+    from pluton.scene import Scene
+
+    # Two coplanar quads sharing the edge (1,0)-(1,1).
+    s = Scene()
+    v00 = s.add_vertex(np.array([0.0, 0.0, 0.0], dtype=np.float32))
+    v10 = s.add_vertex(np.array([1.0, 0.0, 0.0], dtype=np.float32))
+    v11 = s.add_vertex(np.array([1.0, 1.0, 0.0], dtype=np.float32))
+    v01 = s.add_vertex(np.array([0.0, 1.0, 0.0], dtype=np.float32))
+    v20 = s.add_vertex(np.array([2.0, 0.0, 0.0], dtype=np.float32))
+    v21 = s.add_vertex(np.array([2.0, 1.0, 0.0], dtype=np.float32))
+    s.add_face_from_loop((v00, v10, v11, v01))
+    s.add_face_from_loop((v10, v20, v21, v11))
+    assert len(list(s.faces_iter())) == 2
+
+    stack = CommandStack()
+    tool, cam = _make(s, stack)
+    f0 = len(list(s.faces_iter()))
+    # Erase the shared edge at its midpoint (1, 0.5, 0).
+    sx, sy, _ = cam.world_to_screen(np.array([1.0, 0.5, 0.0], dtype=np.float32), 800, 600)
+    tool.on_mouse_press(_press(sx, sy), None)
+    tool.on_mouse_release(_release(sx, sy), None)
+    assert len(list(s.faces_iter())) == f0 - 2   # both faces cascaded
+    stack.undo(s)
+    assert len(list(s.faces_iter())) == f0        # both restored
