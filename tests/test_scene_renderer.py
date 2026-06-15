@@ -110,3 +110,15 @@ class TestSelectionHighlightHelpers:
 
         sig = inspect.signature(SceneRenderer.render)
         assert "selection" in sig.parameters
+
+
+def test_box_rect_ndc_segments_maps_corners():
+    import numpy as np
+    from pluton.viewport.scene_renderer import _box_rect_ndc_segments
+
+    # 800x600 viewport; rect from (0,0) to (800,600) -> full NDC [-1,1] square.
+    segs = _box_rect_ndc_segments((0.0, 0.0, 800.0, 600.0), 800, 600)
+    assert segs.shape == (8, 3)          # 4 sides x 2 endpoints
+    assert np.allclose(np.abs(segs[:, 0]), 1.0)
+    assert np.allclose(np.abs(segs[:, 1]), 1.0)
+    assert np.allclose(segs[:, 2], 0.0)

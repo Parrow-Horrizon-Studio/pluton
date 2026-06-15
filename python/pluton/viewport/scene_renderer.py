@@ -195,6 +195,26 @@ def _selection_edge_segments(scene, selection) -> np.ndarray:  # noqa: ANN001
     return np.array(out, dtype=np.float32)
 
 
+def _box_rect_ndc_segments(box_rect, viewport_w, viewport_h) -> np.ndarray:
+    """Convert a pixel-space rect (x0,y0,x1,y1) to (8,3) NDC GL_LINES segments
+    (z=0) tracing its outline. y is flipped (screen y-down -> NDC y-up)."""
+    x0, y0, x1, y1 = box_rect
+    w = max(int(viewport_w), 1)
+    h = max(int(viewport_h), 1)
+
+    def ndc(px, py):
+        return ((2.0 * px / w) - 1.0, 1.0 - (2.0 * py / h))
+
+    corners = [ndc(x0, y0), ndc(x1, y0), ndc(x1, y1), ndc(x0, y1)]
+    out: list[list[float]] = []
+    for i in range(4):
+        ax, ay = corners[i]
+        bx, by = corners[(i + 1) % 4]
+        out.append([ax, ay, 0.0])
+        out.append([bx, by, 0.0])
+    return np.array(out, dtype=np.float32)
+
+
 class SceneRenderer:
     """Owns GL resources for the grid + axes + user geometry + tool overlay."""
 
@@ -238,6 +258,10 @@ class SceneRenderer:
         self._current_view_matrix: np.ndarray | None = None
         self._current_projection_matrix: np.ndarray | None = None
 
+        # Viewport pixel size — updated in resize(); used by _draw_box_rect.
+        self._viewport_w: int = 1
+        self._viewport_h: int = 1
+
     # --- Lifecycle --------------------------------------------------------
 
     def initialize_gl(self) -> None:
@@ -278,9 +302,8 @@ class SceneRenderer:
         self._initialized = True
 
     def resize(self, w: int, h: int) -> None:
-        # Skip the GL call if initialize_gl hasn't run yet (e.g., tests that
-        # call resizeGL on an unshown widget). glViewport without a current
-        # GL context would raise GL_INVALID_OPERATION.
+        self._viewport_w = int(w)
+        self._viewport_h = int(h)
         if not self._initialized:
             return
         GL.glViewport(0, 0, w, h)
@@ -328,6 +351,10 @@ class SceneRenderer:
                 polygons=tool_overlay.face_fill_polygons,
                 color=tool_overlay.face_fill_color,
             )
+
+        # 7. Box-select rectangle (M4b) — screen space, on top.
+        if tool_overlay is not None and tool_overlay.box_rect is not None:
+            self._draw_box_rect(tool_overlay.box_rect, tool_overlay.box_rect_color)
 
     # --- Init helpers -----------------------------------------------------
 
@@ -588,6 +615,29 @@ class SceneRenderer:
             GL.glLineWidth(width)
             GL.glDrawArrays(GL.GL_LINES, 0, n)
             GL.glLineWidth(1.0)
+            GL.glBindVertexArray(0)
+        finally:
+            GL.glEnable(GL.GL_DEPTH_TEST)
+        GL.glUseProgram(0)
+
+    def _draw_box_rect(self, box_rect, color) -> None:  # noqa: ANN001
+        """Draw the screen-space box-select outline using identity view/projection
+        (NDC positions render directly); depth test off."""
+        segs = _box_rect_ndc_segments(box_rect, self._viewport_w, self._viewport_h)
+        identity = np.eye(4, dtype=np.float32)
+        n = int(segs.shape[0])
+        colors = np.tile(np.array(color, dtype=np.float32), (n, 1))
+        data = np.ascontiguousarray(np.concatenate([segs, colors], axis=1))
+        GL.glUseProgram(self._line_program)
+        _set_mat4(self._line_locs["u_view"], identity)
+        _set_mat4(self._line_locs["u_projection"], identity)
+        GL.glDisable(GL.GL_DEPTH_TEST)
+        try:
+            GL.glBindBuffer(GL.GL_ARRAY_BUFFER, self._overlay_line_vbo)
+            GL.glBufferData(GL.GL_ARRAY_BUFFER, data.nbytes, data, GL.GL_DYNAMIC_DRAW)
+            GL.glBindVertexArray(self._overlay_line_vao)
+            GL.glLineWidth(1.5)
+            GL.glDrawArrays(GL.GL_LINES, 0, n)
             GL.glBindVertexArray(0)
         finally:
             GL.glEnable(GL.GL_DEPTH_TEST)
