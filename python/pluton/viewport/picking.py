@@ -50,3 +50,88 @@ def pick_selectable(cursor_screen, viewport_size, camera, scene):  # noqa: ANN00
     if hit is not None:
         return ("face", int(hit.face_id))
     return None
+
+
+def _point_in_rect(px, py, rect) -> bool:
+    x0, y0, x1, y1 = rect
+    return x0 <= px <= x1 and y0 <= py <= y1
+
+
+def _ccw(ax, ay, bx, by, cx, cy) -> float:
+    return (bx - ax) * (cy - ay) - (by - ay) * (cx - ax)
+
+
+def _segments_cross(ax, ay, bx, by, cx, cy, dx, dy) -> bool:
+    """True if segment AB properly straddles segment CD (and vice-versa)."""
+    d1 = _ccw(cx, cy, dx, dy, ax, ay)
+    d2 = _ccw(cx, cy, dx, dy, bx, by)
+    d3 = _ccw(ax, ay, bx, by, cx, cy)
+    d4 = _ccw(ax, ay, bx, by, dx, dy)
+    return ((d1 > 0) != (d2 > 0)) and ((d3 > 0) != (d4 > 0))
+
+
+def _segment_intersects_rect(ax, ay, bx, by, rect) -> bool:
+    if _point_in_rect(ax, ay, rect) or _point_in_rect(bx, by, rect):
+        return True
+    x0, y0, x1, y1 = rect
+    sides = (
+        (x0, y0, x1, y0), (x1, y0, x1, y1),
+        (x1, y1, x0, y1), (x0, y1, x0, y0),
+    )
+    for cx, cy, dx, dy in sides:
+        if _segments_cross(ax, ay, bx, by, cx, cy, dx, dy):
+            return True
+    return False
+
+
+def _normalize_rect(rect):
+    x0, y0, x1, y1 = rect
+    return (min(x0, x1), min(y0, y1), max(x0, x1), max(y0, y1))
+
+
+def entities_in_box(rect_px, mode, viewport_size, camera, scene):  # noqa: ANN001
+    """Return (edge_ids: set, face_ids: set) inside rect_px under the given mode.
+    mode="window": only fully-enclosed; mode="crossing": anything touched."""
+    rect = _normalize_rect(rect_px)
+    w, h = int(viewport_size[0]), int(viewport_size[1])
+    edges: set[int] = set()
+    faces: set[int] = set()
+
+    def proj(world):
+        return camera.world_to_screen(world, w, h)
+
+    for e in scene.edges_iter():
+        s1 = proj(scene.vertex(e.v1_id).position)
+        s2 = proj(scene.vertex(e.v2_id).position)
+        if mode == "window":
+            if s1 is not None and s2 is not None and \
+               _point_in_rect(s1[0], s1[1], rect) and _point_in_rect(s2[0], s2[1], rect):
+                edges.add(e.id)
+        else:  # crossing
+            if s1 is None or s2 is None:
+                if (s1 is not None and _point_in_rect(s1[0], s1[1], rect)) or \
+                   (s2 is not None and _point_in_rect(s2[0], s2[1], rect)):
+                    edges.add(e.id)
+            elif _segment_intersects_rect(s1[0], s1[1], s2[0], s2[1], rect):
+                edges.add(e.id)
+
+    for f in scene.faces_iter():
+        loop = scene.face_loop(f.id)
+        pts = [proj(scene.vertex(v).position) for v in loop]
+        if mode == "window":
+            if all(p is not None and _point_in_rect(p[0], p[1], rect) for p in pts):
+                faces.add(f.id)
+        else:  # crossing
+            touched = any(p is not None and _point_in_rect(p[0], p[1], rect) for p in pts)
+            if not touched:
+                n = len(pts)
+                for i in range(n):
+                    p, q = pts[i], pts[(i + 1) % n]
+                    if p is not None and q is not None and \
+                       _segment_intersects_rect(p[0], p[1], q[0], q[1], rect):
+                        touched = True
+                        break
+            if touched:
+                faces.add(f.id)
+
+    return edges, faces
