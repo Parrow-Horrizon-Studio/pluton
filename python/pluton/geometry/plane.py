@@ -3,6 +3,7 @@
 A plane carries an `origin` (a world point on the plane), a unit `normal`, and
 an in-plane orthonormal basis `u`, `v` with `u x v == normal`. Tools generate
 shape vertices in 2D plane coords and lift them to world via `to_world`.
+All internal state and outputs are float64; callers feeding scene.add_vertex must cast to float32.
 """
 
 from __future__ import annotations
@@ -47,7 +48,9 @@ class DrawingPlane:
         n = n / ln
         ref = np.array([0.0, 0.0, 1.0]) if abs(n[2]) <= 0.9 else np.array([1.0, 0.0, 0.0])
         u = np.cross(ref, n)
-        u = u / float(np.linalg.norm(u))
+        u_norm = float(np.linalg.norm(u))
+        assert u_norm > _DEGENERATE, "BUG: ref/threshold logic produced a degenerate cross product"
+        u = u / u_norm
         v = np.cross(n, u)
         return cls(origin, u, v, n)
 

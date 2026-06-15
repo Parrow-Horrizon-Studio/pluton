@@ -32,6 +32,7 @@ def test_to_world_project_round_trip():
     assert np.allclose(world[:, 2], 4.0)
     back = p.project(world)
     assert np.allclose(back, uv, atol=1e-9)
+    assert np.allclose(p.project(p.to_world(np.array([2.0, 3.0]))), [2.0, 3.0])
 
 
 def test_from_normal_builds_orthonormal_basis():
@@ -41,6 +42,9 @@ def test_from_normal_builds_orthonormal_basis():
     q = DrawingPlane.from_normal(np.array([0.0, 0.0, 0.0]), np.array([0.0, 1.0, 0.0]))
     _orthonormal(q)
     assert np.allclose(q.normal, [0.0, 1.0, 0.0])
+    r = DrawingPlane.from_normal(np.zeros(3), np.array([1.0, 0.0, 0.0]))
+    _orthonormal(r)
+    assert np.allclose(r.normal, [1.0, 0.0, 0.0])
 
 
 def test_from_normal_rejects_degenerate():
