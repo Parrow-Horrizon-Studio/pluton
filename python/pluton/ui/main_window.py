@@ -9,7 +9,16 @@ from PySide6.QtWidgets import QMainWindow, QVBoxLayout, QWidget
 from pluton.commands import CommandStack
 from pluton.commands.scene_commands import ClearSceneCommand
 from pluton.scene import Scene
-from pluton.tools import LineTool, PushPullTool, RectangleTool, ToolContext, ToolManager
+from pluton.tools import (
+    ArcTool,
+    CircleTool,
+    LineTool,
+    PolygonTool,
+    PushPullTool,
+    RectangleTool,
+    ToolContext,
+    ToolManager,
+)
 from pluton.ui.status_bar import StatusBar
 from pluton.viewport.viewport_widget import ViewportWidget
 
@@ -29,6 +38,9 @@ class MainWindow(QMainWindow):
         self._tool_manager.register(LineTool())
         self._tool_manager.register(RectangleTool())
         self._tool_manager.register(PushPullTool())
+        self._tool_manager.register(CircleTool())
+        self._tool_manager.register(PolygonTool())
+        self._tool_manager.register(ArcTool())
 
         # Viewport + status bar (created BEFORE setting ToolContext so we can
         # wire the camera + widget_size_provider into the context).
@@ -60,6 +72,11 @@ class MainWindow(QMainWindow):
         QShortcut(QKeySequence("L"), self, activated=lambda: self._activate("L"))
         QShortcut(QKeySequence("R"), self, activated=lambda: self._activate("R"))
         QShortcut(QKeySequence("P"), self, activated=lambda: self._activate("P"))
+        QShortcut(QKeySequence("C"), self, activated=lambda: self._activate("C"))
+        QShortcut(QKeySequence("G"), self, activated=lambda: self._activate("G"))
+        QShortcut(QKeySequence("A"), self, activated=lambda: self._activate("A"))
+        QShortcut(QKeySequence(Qt.Key.Key_Up), self, activated=lambda: self._on_tool_key(Qt.Key.Key_Up))
+        QShortcut(QKeySequence(Qt.Key.Key_Down), self, activated=lambda: self._on_tool_key(Qt.Key.Key_Down))
         QShortcut(QKeySequence("Esc"), self, activated=self._on_escape)
         QShortcut(QKeySequence(Qt.Key.Key_Return), self, activated=self._on_finish_gesture)
         QShortcut(QKeySequence(Qt.Key.Key_Enter), self, activated=self._on_finish_gesture)
@@ -108,6 +125,19 @@ class MainWindow(QMainWindow):
         from PySide6.QtGui import QKeyEvent
 
         ev = QKeyEvent(QKeyEvent.Type.KeyPress, Qt.Key.Key_Return, Qt.KeyboardModifier.NoModifier)
+        active.on_key_press(ev)
+        self._refresh_status_text()
+        self._viewport.update()
+
+    def _on_tool_key(self, qt_key) -> None:  # noqa: ANN001
+        """Forward a non-text key (e.g. Up/Down for polygon sides) to the active
+        tool, but only while it has a live gesture (so arrows are inert otherwise)."""
+        active = self._tool_manager.active
+        if active is None or not active.has_active_gesture:
+            return
+        from PySide6.QtGui import QKeyEvent
+
+        ev = QKeyEvent(QKeyEvent.Type.KeyPress, qt_key, Qt.KeyboardModifier.NoModifier)
         active.on_key_press(ev)
         self._refresh_status_text()
         self._viewport.update()
