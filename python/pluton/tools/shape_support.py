@@ -16,8 +16,11 @@ from pluton.commands.scene_commands import AddEdgeCommand, AddFaceCommand, AddVe
 from pluton.geometry import DrawingPlane
 
 # Reuse an existing vertex when a generated point lands within this distance of
-# it (world units / meters). Tight enough not to merge genuinely-distinct CAD
-# vertices; loose enough to absorb float round-trip error from a snapped point.
+# it (world units / meters; ~10 µm at meter scale). Loose enough to absorb
+# float round-trip error from a snapped point; tight enough not to merge
+# genuinely-distinct CAD vertices — but intentionally-close vertices below this
+# threshold WILL be merged (acceptable at architectural/product scale; revisit
+# if sub-mm precision is ever required).
 _COINCIDENT_EPS = 1e-5
 
 
@@ -37,6 +40,8 @@ def resolve_drawing_plane(snap, scene) -> DrawingPlane:  # noqa: ANN001
 
 def _resolve_vertex(scene, composite: CompositeCommand, point: np.ndarray) -> int:  # noqa: ANN001
     """Reuse an existing coincident vertex, else add one (recorded in composite)."""
+    # Cast to float32 so the coincidence query uses the same precision the scene
+    # stores vertices in.
     p = np.asarray(point, dtype=np.float32).reshape(3)
     existing = scene.find_vertex_near(p, _COINCIDENT_EPS)
     if existing is not None:
@@ -69,10 +74,19 @@ def build_closed_face(scene, world_points, name: str = "Draw Shape"):  # noqa: A
         composite.undo(scene)
         return None
     n = len(vids)
+    seen_edges: set[tuple[int, int]] = set()
     for i in range(n):
-        e = AddEdgeCommand(vids[i], vids[(i + 1) % n])
+        a, b = vids[i], vids[(i + 1) % n]
+        key = (a, b) if a < b else (b, a)
+        if key in seen_edges:
+            continue
+        seen_edges.add(key)
+        e = AddEdgeCommand(a, b)
         e.do(scene)
         composite.children.append(e)
+    # Face is the LAST child: undo reverses children, so the face is removed
+    # before its edges (which are removed before their vertices) — the only
+    # order remove_face/remove_edge accept.
     f = AddFaceCommand(tuple(vids))
     f.do(scene)
     composite.children.append(f)
@@ -88,8 +102,14 @@ def build_open_polyline(scene, world_points, name: str = "Draw Curve"):  # noqa:
     if len(vids) < 2:
         composite.undo(scene)
         return None
+    seen_edges: set[tuple[int, int]] = set()
     for i in range(len(vids) - 1):
-        e = AddEdgeCommand(vids[i], vids[i + 1])
+        a, b = vids[i], vids[i + 1]
+        key = (a, b) if a < b else (b, a)
+        if key in seen_edges:
+            continue
+        seen_edges.add(key)
+        e = AddEdgeCommand(a, b)
         e.do(scene)
         composite.children.append(e)
     return composite
