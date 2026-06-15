@@ -59,3 +59,54 @@ def test_snap_marker_vertices_shape_per_kind():
     for kind in (SnapKind.ENDPOINT, SnapKind.MIDPOINT, SnapKind.ON_EDGE, SnapKind.INTERSECTION):
         v = _snap_marker_vertices(int(kind), p)
         assert np.allclose(v[:, 2], 3.0)
+
+
+class TestSelectionHighlightHelpers:
+    def test_selection_face_polygons_returns_live_selected_loops(self):
+        import numpy as np
+        from pluton.scene import Scene
+        from pluton.selection import Selection
+        from pluton.viewport.scene_renderer import _selection_face_polygons
+
+        scene = Scene()
+        a = scene.add_vertex(np.array([0, 0, 0], dtype=np.float32))
+        b = scene.add_vertex(np.array([1, 0, 0], dtype=np.float32))
+        c = scene.add_vertex(np.array([1, 1, 0], dtype=np.float32))
+        d = scene.add_vertex(np.array([0, 1, 0], dtype=np.float32))
+        fid = scene.add_face_from_loop((a, b, c, d))
+        sel = Selection()
+        sel.replace(faces=[fid])
+        polys = _selection_face_polygons(scene, sel)
+        assert len(polys) == 1
+        assert polys[0].shape == (4, 3)
+
+    def test_selection_face_polygons_skips_dead_ids(self):
+        from pluton.scene import Scene
+        from pluton.selection import Selection
+        from pluton.viewport.scene_renderer import _selection_face_polygons
+
+        sel = Selection()
+        sel.replace(faces=[999])  # not live
+        assert _selection_face_polygons(Scene(), sel) == []
+
+    def test_selection_edge_segments_returns_2E_by_3(self):
+        import numpy as np
+        from pluton.scene import Scene
+        from pluton.selection import Selection
+        from pluton.viewport.scene_renderer import _selection_edge_segments
+
+        scene = Scene()
+        a = scene.add_vertex(np.array([0, 0, 0], dtype=np.float32))
+        b = scene.add_vertex(np.array([2, 0, 0], dtype=np.float32))
+        e = scene.add_edge(a, b)
+        sel = Selection()
+        sel.replace(edges=[e])
+        segs = _selection_edge_segments(scene, sel)
+        assert segs.shape == (2, 3)
+
+    def test_render_accepts_selection_param(self):
+        import inspect
+        from pluton.viewport.scene_renderer import SceneRenderer
+
+        sig = inspect.signature(SceneRenderer.render)
+        assert "selection" in sig.parameters

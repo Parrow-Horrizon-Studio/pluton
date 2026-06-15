@@ -43,6 +43,8 @@ _BG_COLOR = (0.15, 0.15, 0.18, 1.0)
 
 # Edge / overlay colors (per-vertex, packed into the VBO alongside positions).
 _USER_EDGE_COLOR = (0.85, 0.85, 0.85)
+_SELECTION_FILL_COLOR = (0.20, 0.50, 0.95, 0.25)   # selected faces (blue, 25% alpha)
+_SELECTION_EDGE_COLOR = (0.20, 0.55, 1.00)         # selected edges (bright blue)
 # Uniform names looked up once per program in initialize_gl().
 _PHONG_UNIFORMS = (
     "u_view", "u_projection", "u_model", "u_camera_pos",
@@ -165,6 +167,34 @@ def _snap_marker_vertices(kind: int, p) -> np.ndarray:
     )
 
 
+def _selection_face_polygons(scene, selection) -> list[np.ndarray]:  # noqa: ANN001
+    """World-space loops (N,3 float32) for each LIVE selected face."""
+    polys: list[np.ndarray] = []
+    for f_id in selection.faces:
+        try:
+            loop = scene.face_loop(f_id)
+        except KeyError:
+            continue  # dead/stale id
+        pts = np.array([scene.vertex(v).position for v in loop], dtype=np.float32)
+        polys.append(pts)
+    return polys
+
+
+def _selection_edge_segments(scene, selection) -> np.ndarray:  # noqa: ANN001
+    """(2E,3) float32 endpoint pairs for each LIVE selected edge."""
+    out: list[np.ndarray] = []
+    for e_id in selection.edges:
+        try:
+            e = scene.edge(e_id)
+        except KeyError:
+            continue
+        out.append(np.asarray(scene.vertex(e.v1_id).position, dtype=np.float32))
+        out.append(np.asarray(scene.vertex(e.v2_id).position, dtype=np.float32))
+    if not out:
+        return np.zeros((0, 3), dtype=np.float32)
+    return np.array(out, dtype=np.float32)
+
+
 class SceneRenderer:
     """Owns GL resources for the grid + axes + user geometry + tool overlay."""
 
@@ -255,7 +285,7 @@ class SceneRenderer:
             return
         GL.glViewport(0, 0, w, h)
 
-    def render(self, camera: Camera, scene=None, tool_overlay=None) -> None:  # noqa: ANN001
+    def render(self, camera: Camera, scene=None, tool_overlay=None, selection=None) -> None:  # noqa: ANN001
         """Draw the full scene: grid + axes + user faces + user edges + tool overlay."""
         if not self._initialized:
             return
@@ -283,6 +313,10 @@ class SceneRenderer:
                 self._draw_user_faces(view, projection, camera.position)
             if self._user_edge_count > 0:
                 self._draw_user_edges(view, projection)
+
+            # 4.5 Selection highlight (persistent, drawn on top of geometry).
+            if selection is not None:
+                self._draw_selection(scene, selection, view, projection)
 
         # 5. Tool overlay (NEW) — drawn on top with depth-test disabled
         if tool_overlay is not None:
@@ -533,6 +567,40 @@ class SceneRenderer:
         finally:
             GL.glEnable(GL.GL_DEPTH_TEST)
         GL.glUseProgram(0)
+
+    def _draw_world_segments(self, segs, color, width, view, projection) -> None:  # noqa: ANN001
+        """Draw (2N,3) world-space GL_LINES in a flat color, on top (depth off).
+        Reuses the overlay line VBO."""
+        if segs.shape[0] == 0:
+            return
+        GL.glUseProgram(self._line_program)
+        locs = self._line_locs
+        _set_mat4(locs["u_view"], view)
+        _set_mat4(locs["u_projection"], projection)
+        n = int(segs.shape[0])
+        colors = np.tile(np.array(color, dtype=np.float32), (n, 1))
+        data = np.ascontiguousarray(np.concatenate([segs.astype(np.float32), colors], axis=1))
+        GL.glDisable(GL.GL_DEPTH_TEST)
+        try:
+            GL.glBindBuffer(GL.GL_ARRAY_BUFFER, self._overlay_line_vbo)
+            GL.glBufferData(GL.GL_ARRAY_BUFFER, data.nbytes, data, GL.GL_DYNAMIC_DRAW)
+            GL.glBindVertexArray(self._overlay_line_vao)
+            GL.glLineWidth(width)
+            GL.glDrawArrays(GL.GL_LINES, 0, n)
+            GL.glLineWidth(1.0)
+            GL.glBindVertexArray(0)
+        finally:
+            GL.glEnable(GL.GL_DEPTH_TEST)
+        GL.glUseProgram(0)
+
+    def _draw_selection(self, scene, selection, view, projection) -> None:  # noqa: ANN001
+        if selection is None:
+            return
+        polys = _selection_face_polygons(scene, selection)
+        if polys:
+            self.draw_face_fill_overlays(polygons=polys, color=_SELECTION_FILL_COLOR)
+        segs = _selection_edge_segments(scene, selection)
+        self._draw_world_segments(segs, _SELECTION_EDGE_COLOR, 3.0, view, projection)
 
     def _init_ghost_fill_buffers(self) -> None:
         """Create the (empty) VAO/VBO for the ghost-fill overlay pass.
