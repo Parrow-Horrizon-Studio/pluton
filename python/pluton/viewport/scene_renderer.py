@@ -3,7 +3,7 @@
 Lifecycle is driven by QOpenGLWidget:
   initialize_gl() -> first paintGL() call sets up VBOs and shader programs.
   resize(w, h)    -> called from resizeGL.
-  render(camera, scene, tool_overlay) -> called from paintGL each frame.
+  render(camera, scene, tool_overlay, selection) -> called from paintGL each frame.
 """
 
 from __future__ import annotations
@@ -638,6 +638,7 @@ class SceneRenderer:
             GL.glBindVertexArray(self._overlay_line_vao)
             GL.glLineWidth(1.5)
             GL.glDrawArrays(GL.GL_LINES, 0, n)
+            GL.glLineWidth(1.0)
             GL.glBindVertexArray(0)
         finally:
             GL.glEnable(GL.GL_DEPTH_TEST)
