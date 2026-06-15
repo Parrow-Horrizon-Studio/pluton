@@ -127,3 +127,113 @@ def test_redo_on_empty_returns_false():
 
     s = CommandStack()
     assert s.redo(scene=None) is False
+
+
+# ---------------------------------------------------------------------------
+# Listener API (M4b) — add_undo_listener / add_redo_listener
+# ---------------------------------------------------------------------------
+
+
+def test_undo_listener_fires_once_after_successful_undo():
+    from pluton.commands import CommandStack, CompositeCommand
+
+    log: list[str] = []
+    cmd = CompositeCommand(name="C", children=[_RecordingCommand("x", log)])
+    s = CommandStack()
+
+    undo_fired: list[int] = []
+    redo_fired: list[int] = []
+    s.add_undo_listener(lambda: undo_fired.append(1))
+    s.add_redo_listener(lambda: redo_fired.append(1))
+
+    s.execute(cmd, scene=None)
+    assert s.undo(scene=None) is True
+
+    assert undo_fired == [1], "undo listener must fire exactly once after a successful undo"
+    assert redo_fired == [], "redo listener must NOT fire when undo is called"
+
+
+def test_redo_listener_fires_once_after_successful_redo():
+    from pluton.commands import CommandStack, CompositeCommand
+
+    log: list[str] = []
+    cmd = CompositeCommand(name="C", children=[_RecordingCommand("x", log)])
+    s = CommandStack()
+
+    undo_fired: list[int] = []
+    redo_fired: list[int] = []
+    s.add_undo_listener(lambda: undo_fired.append(1))
+    s.add_redo_listener(lambda: redo_fired.append(1))
+
+    s.execute(cmd, scene=None)
+    s.undo(scene=None)
+    undo_fired.clear()  # reset to isolate the redo assertion
+
+    assert s.redo(scene=None) is True
+
+    assert redo_fired == [1], "redo listener must fire exactly once after a successful redo"
+    assert undo_fired == [], "undo listener must NOT fire when redo is called"
+
+
+def test_undo_listener_does_not_fire_on_empty_stack():
+    from pluton.commands import CommandStack
+
+    s = CommandStack()
+
+    undo_fired: list[int] = []
+    s.add_undo_listener(lambda: undo_fired.append(1))
+
+    result = s.undo(scene=None)
+
+    assert result is False
+    assert undo_fired == [], "undo listener must not fire when undo stack is empty"
+
+
+def test_redo_listener_does_not_fire_on_empty_stack():
+    from pluton.commands import CommandStack
+
+    s = CommandStack()
+
+    redo_fired: list[int] = []
+    s.add_redo_listener(lambda: redo_fired.append(1))
+
+    result = s.redo(scene=None)
+
+    assert result is False
+    assert redo_fired == [], "redo listener must not fire when redo stack is empty"
+
+
+def test_listener_fire_counts_across_full_undo_redo_cycle():
+    """Execute one command, undo (listener fires), redo (listener fires),
+    then undo back to empty and call undo again — no additional undo-listener fire."""
+    from pluton.commands import CommandStack, CompositeCommand
+
+    log: list[str] = []
+    cmd = CompositeCommand(name="C", children=[_RecordingCommand("x", log)])
+    s = CommandStack()
+
+    undo_fired: list[int] = []
+    redo_fired: list[int] = []
+    s.add_undo_listener(lambda: undo_fired.append(1))
+    s.add_redo_listener(lambda: redo_fired.append(1))
+
+    s.execute(cmd, scene=None)
+
+    # First undo — listener should fire once
+    assert s.undo(scene=None) is True
+    assert undo_fired == [1]
+    assert redo_fired == []
+
+    # Redo — redo listener fires, undo listener stays silent
+    assert s.redo(scene=None) is True
+    assert redo_fired == [1]
+    assert undo_fired == [1]  # unchanged since redo
+
+    # Second undo — undo listener fires again (total 2)
+    assert s.undo(scene=None) is True
+    assert undo_fired == [1, 1]
+
+    # Stack is now empty — third undo returns False, no additional fire
+    assert s.undo(scene=None) is False
+    assert undo_fired == [1, 1], "listener must not fire a third time on an empty stack"
+    assert redo_fired == [1], "redo listener must still be at exactly 1"
