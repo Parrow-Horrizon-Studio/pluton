@@ -120,3 +120,28 @@ def test_crossing_selects_straddling_edge_window_does_not():
     cross_edges, _ = entities_in_box(rect, "crossing", (w, h), cam, scene)
     assert e not in win_edges
     assert e in cross_edges
+
+
+def test_crossing_face_when_rect_is_inside_the_face():
+    from pluton.scene import Scene
+    from pluton.viewport.picking import entities_in_box
+
+    w, h = 800, 600
+    cam = _camera(w, h)
+    scene = Scene()
+    # A large face; corners project far apart on screen.
+    a = scene.add_vertex(np.array([-4.0, -4.0, 0.0], dtype=np.float32))
+    b = scene.add_vertex(np.array([4.0, -4.0, 0.0], dtype=np.float32))
+    c = scene.add_vertex(np.array([4.0, 4.0, 0.0], dtype=np.float32))
+    d = scene.add_vertex(np.array([-4.0, 4.0, 0.0], dtype=np.float32))
+    fid = scene.add_face_from_loop((a, b, c, d))
+
+    # A tiny rect at the face center — inside the face, touching no vertex/edge.
+    cx, cy, _ = cam.world_to_screen(np.array([0.0, 0.0, 0.0], dtype=np.float32), w, h)
+    rect = (cx - 8.0, cy - 8.0, cx + 8.0, cy + 8.0)
+
+    _, cross_faces = entities_in_box(rect, "crossing", (w, h), cam, scene)
+    assert fid in cross_faces
+    # Window mode must NOT select it (its corners are far outside the tiny rect).
+    _, win_faces = entities_in_box(rect, "window", (w, h), cam, scene)
+    assert fid not in win_faces

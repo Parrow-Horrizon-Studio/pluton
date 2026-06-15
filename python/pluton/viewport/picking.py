@@ -70,6 +70,20 @@ def _segments_cross(ax, ay, bx, by, cx, cy, dx, dy) -> bool:
     return ((d1 > 0) != (d2 > 0)) and ((d3 > 0) != (d4 > 0))
 
 
+def _point_in_polygon(px, py, pts) -> bool:
+    """Ray-casting point-in-polygon for a list of (x, y) screen points."""
+    n = len(pts)
+    inside = False
+    j = n - 1
+    for i in range(n):
+        xi, yi = pts[i]
+        xj, yj = pts[j]
+        if ((yi > py) != (yj > py)) and (px < (xj - xi) * (py - yi) / (yj - yi) + xi):
+            inside = not inside
+        j = i
+    return inside
+
+
 def _segment_intersects_rect(ax, ay, bx, by, rect) -> bool:
     if _point_in_rect(ax, ay, rect) or _point_in_rect(bx, by, rect):
         return True
@@ -131,6 +145,10 @@ def entities_in_box(rect_px, mode, viewport_size, camera, scene):  # noqa: ANN00
                        _segment_intersects_rect(p[0], p[1], q[0], q[1], rect):
                         touched = True
                         break
+            if not touched:
+                valid = [(p[0], p[1]) for p in pts if p is not None]
+                if len(valid) >= 3 and _point_in_polygon(rect[0], rect[1], valid):
+                    touched = True
             if touched:
                 faces.add(f.id)
 
