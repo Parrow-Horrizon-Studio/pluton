@@ -54,9 +54,7 @@ class SelectTool(Tool):
 
     def deactivate(self) -> None:
         self._hovered = None
-        self._press_px = None
-        self._is_box = False
-        self._box_rect = None
+        self._reset_press()
 
     def _viewport_size(self) -> tuple[int, int]:
         if self._size_provider is None:
@@ -117,6 +115,7 @@ class SelectTool(Tool):
         self._press_px = None
         self._is_box = False
         self._box_rect = None
+        self._box_window = True
 
     def on_key_press(self, event: QKeyEvent) -> None:
         if event.key() == Qt.Key.Key_Escape and self._selection is not None:

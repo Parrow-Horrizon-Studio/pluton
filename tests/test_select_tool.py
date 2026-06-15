@@ -123,12 +123,12 @@ def _move(x, y):
                        Qt.KeyboardModifier.NoModifier)
 
 
-def _box_drag(tool, cam, p_start, p_end, w=800, h=600):
+def _box_drag(tool, cam, p_start, p_end, w=800, h=600, mods=Qt.KeyboardModifier.NoModifier):
     sx0, sy0, _ = cam.world_to_screen(np.asarray(p_start, dtype=np.float32), w, h)
     sx1, sy1, _ = cam.world_to_screen(np.asarray(p_end, dtype=np.float32), w, h)
-    tool.on_mouse_press(_press(sx0, sy0), None)
+    tool.on_mouse_press(_press(sx0, sy0, mods), None)
     tool.on_mouse_move(_move(sx1, sy1), None)
-    tool.on_mouse_release(_release(sx1, sy1), None)
+    tool.on_mouse_release(_release(sx1, sy1, mods), None)
     return (sx0, sy0), (sx1, sy1)
 
 
@@ -165,3 +165,15 @@ def test_box_overlay_sets_box_rect_during_drag(qtbot):
     assert ov.box_rect is not None
     tool.on_mouse_release(_release(sx1, sy1), None)
     assert tool.overlay().box_rect is None
+
+
+def test_shift_box_adds_to_existing_selection(qtbot):
+    from pluton.selection import Selection
+    scene, fid, e_ab = _scene_with_quad()
+    sel = Selection()
+    sel.replace(faces=[fid])  # pre-existing selection
+    tool, cam = _make_tool(scene, sel)
+    # Shift + a window box that encloses the quad → ADD (face stays selected).
+    _box_drag(tool, cam, [-3.0, 0.0, 0.0], [4.0, -2.0, 0.0],
+              mods=Qt.KeyboardModifier.ShiftModifier)
+    assert fid in sel.faces
