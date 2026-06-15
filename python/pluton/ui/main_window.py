@@ -9,13 +9,16 @@ from PySide6.QtWidgets import QMainWindow, QVBoxLayout, QWidget
 from pluton.commands import CommandStack
 from pluton.commands.scene_commands import ClearSceneCommand
 from pluton.scene import Scene
+from pluton.selection import Selection
 from pluton.tools import (
     ArcTool,
     CircleTool,
+    EraserTool,
     LineTool,
     PolygonTool,
     PushPullTool,
     RectangleTool,
+    SelectTool,
     ToolContext,
     ToolManager,
 )
@@ -33,6 +36,7 @@ class MainWindow(QMainWindow):
 
         # Scene + tool manager + command stack
         self._scene = Scene()
+        self._selection = Selection()
         self._command_stack = CommandStack()
         self._tool_manager = ToolManager()
         self._tool_manager.register(LineTool())
@@ -41,10 +45,13 @@ class MainWindow(QMainWindow):
         self._tool_manager.register(CircleTool())
         self._tool_manager.register(PolygonTool())
         self._tool_manager.register(ArcTool())
+        self._tool_manager.register(SelectTool())
+        self._tool_manager.register(EraserTool())
 
         # Viewport + status bar (created BEFORE setting ToolContext so we can
         # wire the camera + widget_size_provider into the context).
         self._viewport = ViewportWidget(self._scene, self._tool_manager, self)
+        self._viewport.selection = self._selection
         self._status_bar = StatusBar()
 
         # NOW we can build the ToolContext that includes the viewport refs.
@@ -54,6 +61,7 @@ class MainWindow(QMainWindow):
                 command_stack=self._command_stack,
                 camera=self._viewport.camera,
                 widget_size_provider=lambda: (self._viewport.width(), self._viewport.height()),
+                selection=self._selection,
             )
         )
 
@@ -68,6 +76,10 @@ class MainWindow(QMainWindow):
         self._viewport.set_status_bar(self._status_bar)
         self._viewport.set_event_finished_callback(self._refresh_status_text)
 
+        # Clear selection after any undo or redo.
+        self._command_stack.add_undo_listener(self._on_after_undo_redo)
+        self._command_stack.add_redo_listener(self._on_after_undo_redo)
+
         # Keyboard shortcuts
         QShortcut(QKeySequence("L"), self, activated=lambda: self._activate("L"))
         QShortcut(QKeySequence("R"), self, activated=lambda: self._activate("R"))
@@ -75,6 +87,10 @@ class MainWindow(QMainWindow):
         QShortcut(QKeySequence("C"), self, activated=lambda: self._activate("C"))
         QShortcut(QKeySequence("G"), self, activated=lambda: self._activate("G"))
         QShortcut(QKeySequence("A"), self, activated=lambda: self._activate("A"))
+        QShortcut(QKeySequence(Qt.Key.Key_Space), self, activated=lambda: self._activate("Space"))
+        QShortcut(QKeySequence("E"), self, activated=lambda: self._activate("E"))
+        QShortcut(QKeySequence(Qt.Key.Key_Delete), self, activated=self._on_delete_selection)
+        QShortcut(QKeySequence(Qt.Key.Key_Backspace), self, activated=self._on_delete_selection)
         QShortcut(QKeySequence(Qt.Key.Key_Up), self, activated=lambda: self._on_tool_key(Qt.Key.Key_Up))
         QShortcut(QKeySequence(Qt.Key.Key_Down), self, activated=lambda: self._on_tool_key(Qt.Key.Key_Down))
         QShortcut(QKeySequence("Esc"), self, activated=self._on_escape)
@@ -91,8 +107,9 @@ class MainWindow(QMainWindow):
         active = self._tool_manager.active
         if active is None:
             self._status_bar.set_status("")
-            return
-        self._status_bar.set_status(active.status_text or "")
+        else:
+            self._status_bar.set_status(active.status_text or "")
+        self._refresh_selection_status()
 
     def _activate(self, shortcut: str) -> None:
         if self._tool_manager.activate_by_shortcut(shortcut):
@@ -146,6 +163,64 @@ class MainWindow(QMainWindow):
         self._command_stack.execute(ClearSceneCommand(), self._scene)
         self._refresh_status_text()
         self._viewport.update()
+
+    def _on_delete_selection(self) -> None:
+        from pluton.commands import CompositeCommand
+        from pluton.commands.scene_commands import RemoveEdgeCommand, RemoveFaceCommand
+
+        sel = self._selection
+        if sel.is_empty():
+            return
+        composite = CompositeCommand(name="Delete Selection")
+        removed_faces: set[int] = set()
+        for e_id in list(sel.edges):
+            try:
+                self._scene.edge(e_id)
+            except KeyError:
+                continue
+            for f_id in self._scene.edge_faces(e_id):
+                if f_id is None or f_id in removed_faces:
+                    continue
+                fc = RemoveFaceCommand(f_id)
+                fc.do(self._scene)
+                composite.children.append(fc)
+                removed_faces.add(f_id)
+            ec = RemoveEdgeCommand(e_id)
+            ec.do(self._scene)
+            composite.children.append(ec)
+        for f_id in list(sel.faces):
+            if f_id in removed_faces:
+                continue
+            try:
+                self._scene.face_loop(f_id)
+            except KeyError:
+                continue
+            fc = RemoveFaceCommand(f_id)
+            fc.do(self._scene)
+            composite.children.append(fc)
+            removed_faces.add(f_id)
+        if composite.children:
+            self._command_stack.push_executed(composite)
+        sel.clear()
+        self._refresh_selection_status()
+        self._viewport.update()
+
+    def _refresh_selection_status(self) -> None:
+        ne, nf = self._selection.counts()
+        if ne == 0 and nf == 0:
+            self._status_bar.set_selection("")
+            return
+        parts = []
+        if ne:
+            parts.append(f"{ne} edge" + ("s" if ne != 1 else ""))
+        if nf:
+            parts.append(f"{nf} face" + ("s" if nf != 1 else ""))
+        self._status_bar.set_selection(", ".join(parts) + " selected")
+
+    def _on_after_undo_redo(self) -> None:
+        """Called by CommandStack listeners after every successful undo or redo."""
+        self._selection.clear()
+        self._refresh_selection_status()
 
     def _on_undo(self) -> None:
         if self._command_stack.undo(self._scene):

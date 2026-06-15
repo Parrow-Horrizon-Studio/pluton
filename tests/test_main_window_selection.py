@@ -1,0 +1,74 @@
+"""MainWindow wiring for selection: registration, shared selection, Delete,
+clear-on-undo, status count."""
+
+from __future__ import annotations
+
+import numpy as np
+import pytest
+
+
+@pytest.fixture
+def win(qtbot):
+    from pluton.ui.main_window import MainWindow
+    w = MainWindow()
+    qtbot.addWidget(w)
+    return w
+
+
+def test_select_and_eraser_registered(win):
+    mgr = win._tool_manager
+    assert mgr.activate_by_shortcut("Space")
+    assert mgr.active.name == "Select"
+    assert mgr.activate_by_shortcut("E")
+    assert mgr.active.name == "Eraser"
+
+
+def test_selection_is_shared_with_viewport(win):
+    assert win._viewport.selection is win._selection
+
+
+def _quad(win):
+    s = win._scene
+    a = s.add_vertex(np.array([-1, -1, 0], dtype=np.float32))
+    b = s.add_vertex(np.array([1, -1, 0], dtype=np.float32))
+    c = s.add_vertex(np.array([1, 1, 0], dtype=np.float32))
+    d = s.add_vertex(np.array([-1, 1, 0], dtype=np.float32))
+    fid = s.add_face_from_loop((a, b, c, d))
+    return s, fid
+
+
+def test_delete_selection_removes_face_and_is_undoable(win):
+    scene, fid = _quad(win)
+    f0 = len(list(scene.faces_iter()))
+    win._selection.replace(faces=[fid])
+    win._on_delete_selection()
+    assert len(list(scene.faces_iter())) == f0 - 1
+    assert win._selection.is_empty()
+    win._command_stack.undo(scene)
+    assert len(list(scene.faces_iter())) == f0
+
+
+def test_delete_selected_edge_cascades_face(win):
+    scene, fid = _quad(win)
+    e = next(iter(scene.edges_iter())).id
+    f0 = len(list(scene.faces_iter()))
+    win._selection.replace(edges=[e])
+    win._on_delete_selection()
+    assert len(list(scene.faces_iter())) == f0 - 1
+
+
+def test_undo_clears_selection(win):
+    scene, fid = _quad(win)
+    win._selection.replace(faces=[fid])
+    win._on_delete_selection()
+    win._selection.replace(faces=[fid])
+    win._command_stack.undo(scene)
+    assert win._selection.is_empty()
+
+
+def test_empty_selection_delete_is_noop(win):
+    scene, fid = _quad(win)
+    f0 = len(list(scene.faces_iter()))
+    win._on_delete_selection()
+    assert len(list(scene.faces_iter())) == f0
+    assert not win._command_stack.can_undo

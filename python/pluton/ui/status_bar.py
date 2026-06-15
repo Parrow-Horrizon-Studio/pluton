@@ -19,6 +19,7 @@ class StatusBar(QLabel):
         self._tool: str = ""
         self._snap: str = ""
         self._status: str = ""
+        self._selection: str = ""
         self.setText("")
         self.setMinimumHeight(22)
         self.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
@@ -39,12 +40,19 @@ class StatusBar(QLabel):
         self._status = text or ""
         self._refresh()
 
+    def set_selection(self, text: str) -> None:
+        self._selection = text or ""
+        self._refresh()
+
     def _refresh(self) -> None:
         if not self._tool:
-            self.setText("")
+            # No active tool — show only the selection count if present.
+            self.setText(self._selection)
             return
         snap = self._snap if self._snap else "—"
+        parts = [f"{self._tool} · {snap}"]
         if self._status:
-            self.setText(f"{self._tool} · {snap} · {self._status}")
-        else:
-            self.setText(f"{self._tool} · {snap}")
+            parts.append(self._status)
+        if self._selection:
+            parts.append(self._selection)
+        self.setText(" · ".join(parts))
