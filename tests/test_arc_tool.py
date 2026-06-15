@@ -93,3 +93,40 @@ def test_arc_degenerate_end_ignored():
     tool.on_mouse_press(None, _snap((0.0, 0.0, 0.0)))  # end == start → ignored
     assert len(list(scene.vertices_iter())) == 0
     assert tool.has_active_gesture is True
+
+
+def test_arc_overlay_shows_chord_in_placing_end():
+    from pluton.scene import Scene
+
+    scene = Scene()
+    tool = _make_tool(scene)
+    tool.on_mouse_press(None, _snap((-1.0, 0.0, 0.0)))     # start → PLACING_END
+    tool.on_mouse_move(None, _snap((1.0, 0.0, 0.0)))       # hover the end
+    seg = tool.overlay().rubber_band_segments
+    assert seg.shape == (2, 3)  # one chord segment
+
+
+def test_arc_esc_after_one_click_cancels():
+    from pluton.scene import Scene
+
+    scene = Scene()
+    tool = _make_tool(scene)
+    tool.on_mouse_press(None, _snap((-1.0, 0.0, 0.0)))
+    assert tool.has_active_gesture is True
+    ev = QKeyEvent(QKeyEvent.Type.KeyPress, Qt.Key.Key_Escape, Qt.KeyboardModifier.NoModifier)
+    tool.on_key_press(ev)
+    assert tool.has_active_gesture is False
+    assert len(list(scene.vertices_iter())) == 0
+
+
+def test_arc_flat_bulge_commits_straight_two_vertex_segment():
+    from pluton.scene import Scene
+
+    scene = Scene()
+    tool = _make_tool(scene)
+    tool.on_mouse_press(None, _snap((-1.0, 0.0, 0.0)))   # start
+    tool.on_mouse_press(None, _snap((1.0, 0.0, 0.0)))    # end
+    tool.on_mouse_press(None, _snap((0.0, 0.0, 0.0)))    # bulge on the chord → straight
+    assert len(list(scene.vertices_iter())) == 2
+    assert len(list(scene.edges_iter())) == 1
+    assert len(list(scene.faces_iter())) == 0

@@ -25,7 +25,11 @@ from pluton.viewport.snap_engine import MARKER_COLOR_BY_KIND
 _NEUTRAL_COLOR = (0.85, 0.85, 0.85)
 _MIN_CHORD = 1e-4
 _SEGMENTS = 12
+# Shared read-only constant: the arc start is always the plane origin (0, 0).
+# Frozen writeable=False so any accidental in-place write by a callee fails loudly
+# instead of silently corrupting this module-global.
 _ORIGIN_UV = np.zeros(2)
+_ORIGIN_UV.flags.writeable = False
 
 
 class _State(Enum):
@@ -104,7 +108,9 @@ class ArcTool(Tool):
             return
 
         # PLACING_BULGE → commit
-        assert self._end_uv is not None
+        if self._end_uv is None:
+            self._reset_gesture()
+            return
         bulge_uv = semicircle_snap(_ORIGIN_UV, self._end_uv, self._plane.project(snap.world_position))
         pts_uv = arc_2pt(_ORIGIN_UV, self._end_uv, bulge_uv, _SEGMENTS)
         if len(pts_uv) < 2:
