@@ -32,3 +32,50 @@ def test_ring_winding_is_ccw():
     x, y = pts[:, 0], pts[:, 1]
     area2 = float(np.sum(x * np.roll(y, -1) - np.roll(x, -1) * y))
     assert area2 > 0.0
+
+
+def test_arc_semicircle_lies_on_circle():
+    from pluton.geometry import arc_2pt
+
+    pts = arc_2pt(np.array([-1.0, 0.0]), np.array([1.0, 0.0]), np.array([0.0, 1.0]), segments=12)
+    assert pts.shape == (13, 2)
+    assert np.allclose(pts[0], [-1.0, 0.0], atol=1e-9)
+    assert np.allclose(pts[-1], [1.0, 0.0], atol=1e-9)
+    assert np.allclose(np.linalg.norm(pts, axis=1), 1.0, atol=1e-9)
+    assert np.any(np.all(np.isclose(pts, [0.0, 1.0], atol=1e-9), axis=1))
+
+
+def test_arc_general_samples_on_common_circle():
+    from pluton.geometry import arc_2pt
+
+    start, end, bulge = np.array([0.0, 0.0]), np.array([2.0, 0.0]), np.array([1.0, 0.5])
+    pts = arc_2pt(start, end, bulge, segments=16)
+    center = np.array([1.0, -0.75])
+    assert np.allclose(np.linalg.norm(pts - center, axis=1), 1.25, atol=1e-9)
+    assert np.allclose(pts[0], start, atol=1e-9)
+    assert np.allclose(pts[-1], end, atol=1e-9)
+
+
+def test_arc_flat_bulge_returns_straight_chord():
+    from pluton.geometry import arc_2pt
+
+    pts = arc_2pt(np.array([0.0, 0.0]), np.array([2.0, 0.0]), np.array([1.0, 0.0]))
+    assert pts.shape == (2, 2)
+    assert np.allclose(pts, [[0.0, 0.0], [2.0, 0.0]])
+
+
+def test_arc_degenerate_chord_returns_single_point():
+    from pluton.geometry import arc_2pt
+
+    pts = arc_2pt(np.array([1.0, 1.0]), np.array([1.0, 1.0]), np.array([2.0, 2.0]))
+    assert pts.shape == (1, 2)
+
+
+def test_semicircle_snap_pulls_near_semicircle_exact():
+    from pluton.geometry import semicircle_snap
+
+    start, end = np.array([-1.0, 0.0]), np.array([1.0, 0.0])
+    snapped = semicircle_snap(start, end, np.array([0.0, 0.97]))
+    assert np.allclose(snapped, [0.0, 1.0], atol=1e-9)
+    far = semicircle_snap(start, end, np.array([0.0, 0.4]))
+    assert np.allclose(far, [0.0, 0.4])
