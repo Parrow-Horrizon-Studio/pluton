@@ -8,9 +8,10 @@ from __future__ import annotations
 
 from pluton.tools.circle_tool import CircleTool
 from pluton.tools.line_tool import LineTool
+from pluton.tools.polygon_tool import PolygonTool
 from pluton.tools.push_pull_tool import PushPullTool
 from pluton.tools.rectangle_tool import RectangleTool
 from pluton.tools.tool import Tool, ToolContext, ToolOverlay
 from pluton.tools.tool_manager import ToolManager
 
-__all__ = ["CircleTool", "LineTool", "PushPullTool", "RectangleTool", "Tool", "ToolContext", "ToolManager", "ToolOverlay"]
+__all__ = ["CircleTool", "LineTool", "PolygonTool", "PushPullTool", "RectangleTool", "Tool", "ToolContext", "ToolManager", "ToolOverlay"]
