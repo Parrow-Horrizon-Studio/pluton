@@ -17,6 +17,9 @@ from pluton.viewport.picking import pick_selectable
 _HOVER_EDGE_COLOR = (0.45, 0.70, 1.00)
 _HOVER_FILL_COLOR = (0.40, 0.70, 1.00, 0.18)
 _NEUTRAL_COLOR = (0.85, 0.85, 0.85)
+_BOX_WINDOW_COLOR = (0.25, 0.50, 0.95)   # left->right, enclose-only
+_BOX_CROSSING_COLOR = (0.15, 0.65, 0.30)  # right->left, touch
+_DRAG_THRESHOLD_PX = 4.0
 
 
 class SelectTool(Tool):
@@ -35,6 +38,9 @@ class SelectTool(Tool):
         self._selection = None
         self._hovered: tuple[str, int] | None = None
         self._press_px: tuple[float, float] | None = None
+        self._is_box = False
+        self._box_rect: tuple[float, float, float, float] | None = None
+        self._box_window = True  # True = L->R window, False = R->L crossing
 
     def activate(self, ctx: ToolContext) -> None:
         self._scene = ctx.scene
@@ -43,10 +49,14 @@ class SelectTool(Tool):
         self._selection = ctx.selection
         self._hovered = None
         self._press_px = None
+        self._is_box = False
+        self._box_rect = None
 
     def deactivate(self) -> None:
         self._hovered = None
         self._press_px = None
+        self._is_box = False
+        self._box_rect = None
 
     def _viewport_size(self) -> tuple[int, int]:
         if self._size_provider is None:
@@ -58,46 +68,66 @@ class SelectTool(Tool):
         return (float(pos.x()), float(pos.y()))
 
     def on_mouse_move(self, event: QMouseEvent, snap) -> None:  # noqa: ANN001
-        if event.buttons() & Qt.MouseButton.LeftButton:
-            return  # press/drag handled in press/release (box-select: Task 8)
+        if event.buttons() & Qt.MouseButton.LeftButton and self._press_px is not None:
+            cx, cy = self._cursor(event)
+            px, py = self._press_px
+            if self._is_box or abs(cx - px) >= _DRAG_THRESHOLD_PX or abs(cy - py) >= _DRAG_THRESHOLD_PX:
+                self._is_box = True
+                self._box_rect = (px, py, cx, cy)
+                self._box_window = (cx - px) >= 0.0
+            return
         self._hovered = pick_selectable(
             self._cursor(event), self._viewport_size(), self._camera, self._scene
         )
 
     def on_mouse_press(self, event: QMouseEvent, snap) -> None:  # noqa: ANN001
         self._press_px = self._cursor(event)
+        self._is_box = False
+        self._box_rect = None
 
     def on_mouse_release(self, event: QMouseEvent, snap) -> None:  # noqa: ANN001
         if self._selection is None:
-            self._press_px = None
+            self._reset_press()
             return
-        hit = pick_selectable(
-            self._cursor(event), self._viewport_size(), self._camera, self._scene
-        )
         shift = bool(event.modifiers() & Qt.KeyboardModifier.ShiftModifier)
-        if hit is None:
-            if not shift:
-                self._selection.clear()
-        elif hit[0] == "edge":
+        if self._is_box and self._box_rect is not None:
+            from pluton.viewport.picking import entities_in_box
+            mode = "window" if self._box_window else "crossing"
+            edges, faces = entities_in_box(
+                self._box_rect, mode, self._viewport_size(), self._camera, self._scene
+            )
             if shift:
-                self._selection.toggle_edge(hit[1])
+                self._selection.add(edges=edges, faces=faces)
             else:
-                self._selection.replace(edges=[hit[1]])
-        else:  # face
-            if shift:
-                self._selection.toggle_face(hit[1])
+                self._selection.replace(edges=edges, faces=faces)
+        else:
+            hit = pick_selectable(
+                self._cursor(event), self._viewport_size(), self._camera, self._scene
+            )
+            if hit is None:
+                if not shift:
+                    self._selection.clear()
+            elif hit[0] == "edge":
+                self._selection.toggle_edge(hit[1]) if shift else self._selection.replace(edges=[hit[1]])
             else:
-                self._selection.replace(faces=[hit[1]])
+                self._selection.toggle_face(hit[1]) if shift else self._selection.replace(faces=[hit[1]])
+        self._reset_press()
+
+    def _reset_press(self) -> None:
         self._press_px = None
+        self._is_box = False
+        self._box_rect = None
 
     def on_key_press(self, event: QKeyEvent) -> None:
         if event.key() == Qt.Key.Key_Escape and self._selection is not None:
             self._selection.clear()
 
     def overlay(self) -> ToolOverlay:
+        box_rect = self._box_rect if self._is_box else None
+        box_color = _BOX_WINDOW_COLOR if self._box_window else _BOX_CROSSING_COLOR
         segs = np.zeros((0, 3), dtype=np.float32)
         fills: list[np.ndarray] = []
-        if self._hovered is not None and self._scene is not None:
+        if not self._is_box and self._hovered is not None and self._scene is not None:
             kind, ent_id = self._hovered
             if kind == "edge":
                 try:
@@ -123,12 +153,14 @@ class SelectTool(Tool):
             snap_marker_kind=0,
             face_fill_polygons=fills,
             face_fill_color=_HOVER_FILL_COLOR,
+            box_rect=box_rect,
+            box_rect_color=box_color,
         )
 
     @property
     def has_active_gesture(self) -> bool:
-        # True when there's a selection to clear (so Esc reaches on_key_press
-        # rather than deactivating the tool).
+        if self._is_box:
+            return True
         return self._selection is not None and not self._selection.is_empty()
 
     @property

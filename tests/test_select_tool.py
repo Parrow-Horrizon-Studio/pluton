@@ -115,3 +115,53 @@ def test_esc_clears_selection(qtbot):
     ev = QKeyEvent(QKeyEvent.Type.KeyPress, Qt.Key.Key_Escape, Qt.KeyboardModifier.NoModifier)
     tool.on_key_press(ev)
     assert sel.is_empty()
+
+
+def _move(x, y):
+    return QMouseEvent(QEvent.Type.MouseMove, QPointF(x, y),
+                       Qt.MouseButton.NoButton, Qt.MouseButton.LeftButton,
+                       Qt.KeyboardModifier.NoModifier)
+
+
+def _box_drag(tool, cam, p_start, p_end, w=800, h=600):
+    sx0, sy0, _ = cam.world_to_screen(np.asarray(p_start, dtype=np.float32), w, h)
+    sx1, sy1, _ = cam.world_to_screen(np.asarray(p_end, dtype=np.float32), w, h)
+    tool.on_mouse_press(_press(sx0, sy0), None)
+    tool.on_mouse_move(_move(sx1, sy1), None)
+    tool.on_mouse_release(_release(sx1, sy1), None)
+    return (sx0, sy0), (sx1, sy1)
+
+
+def test_box_left_to_right_is_window_encloses_only(qtbot):
+    from pluton.selection import Selection
+    scene, fid, e_ab = _scene_with_quad()
+    sel = Selection()
+    tool, cam = _make_tool(scene, sel)
+    # [-3,0,0] projects to upper-left of quad; [4,-2,0] to lower-right,
+    # giving a left->right (window) box that fully encloses the quad.
+    _box_drag(tool, cam, [-3.0, 0.0, 0.0], [4.0, -2.0, 0.0])
+    assert fid in sel.faces
+
+
+def test_box_right_to_left_is_crossing(qtbot):
+    from pluton.selection import Selection
+    scene, fid, e_ab = _scene_with_quad()
+    sel = Selection()
+    tool, cam = _make_tool(scene, sel)
+    _box_drag(tool, cam, [0.0, 0.0, 0.0], [-3.0, 0.5, 0.0])
+    assert len(sel.edges) >= 1
+
+
+def test_box_overlay_sets_box_rect_during_drag(qtbot):
+    from pluton.selection import Selection
+    scene, fid, e_ab = _scene_with_quad()
+    sel = Selection()
+    tool, cam = _make_tool(scene, sel)
+    sx0, sy0, _ = cam.world_to_screen(np.array([-2, -2, 0], dtype=np.float32), 800, 600)
+    sx1, sy1, _ = cam.world_to_screen(np.array([2, 2, 0], dtype=np.float32), 800, 600)
+    tool.on_mouse_press(_press(sx0, sy0), None)
+    tool.on_mouse_move(_move(sx1, sy1), None)
+    ov = tool.overlay()
+    assert ov.box_rect is not None
+    tool.on_mouse_release(_release(sx1, sy1), None)
+    assert tool.overlay().box_rect is None
