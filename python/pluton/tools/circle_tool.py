@@ -50,7 +50,7 @@ class CircleTool(Tool):
         self._radius = 0.0
         self._start_angle = 0.0
         self._snap_marker_pos: np.ndarray | None = None
-        self._snap_marker_color = _NEUTRAL_COLOR
+        self._snap_marker_color: tuple[float, float, float] = _NEUTRAL_COLOR
         self._snap_marker_kind = 0
 
     def activate(self, ctx: ToolContext) -> None:
@@ -151,3 +151,4 @@ class CircleTool(Tool):
         self._start_angle = 0.0
         self._snap_marker_pos = None
         self._snap_marker_kind = 0
+        self._snap_marker_color = _NEUTRAL_COLOR

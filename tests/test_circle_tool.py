@@ -105,3 +105,19 @@ def test_circle_draws_on_a_vertical_face():
     assert len(new) == 24
     for v in new:
         assert abs(float(v.position[0])) < 1e-4
+
+
+def test_circle_esc_mid_gesture_resets():
+    from pluton.scene import Scene
+    from PySide6.QtCore import Qt
+    from PySide6.QtGui import QKeyEvent
+
+    scene = Scene()
+    tool = _make_tool(scene)
+    tool.on_mouse_press(None, _snap((0.0, 0.0, 0.0)))
+    assert tool.has_active_gesture
+    ev = QKeyEvent(QKeyEvent.Type.KeyPress, Qt.Key.Key_Escape, Qt.KeyboardModifier.NoModifier)
+    tool.on_key_press(ev)
+    assert not tool.has_active_gesture
+    assert tool.overlay().rubber_band_segments.shape == (0, 3)
+    assert len(list(scene.vertices_iter())) == 0
