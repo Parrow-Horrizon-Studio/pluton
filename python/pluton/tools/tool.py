@@ -23,6 +23,7 @@ class ToolContext:
     command_stack: object = None  # M3a-introduced — pluton.commands.CommandStack
     camera: object = None  # M3b-introduced — pluton.viewport.camera.Camera
     widget_size_provider: object = None  # M3b-introduced — callable () -> tuple[int, int] returning (width, height)
+    selection: object = None  # M4b — pluton.selection.Selection (shared)
 
 
 @dataclass(frozen=True, slots=True)
@@ -41,6 +42,10 @@ class ToolOverlay:
 
     face_fill_color: tuple[float, float, float, float] = (0.4, 0.7, 1.0, 0.15)
     # RGBA. Default is M3b's "ghost prism" color (light blue, 15% alpha).
+
+    # M4b: screen-space box-select rectangle (pixels: x0,y0,x1,y1) or None.
+    box_rect: tuple[float, float, float, float] | None = None
+    box_rect_color: tuple[float, float, float] = (0.30, 0.55, 0.95)
 
 
 class Tool(ABC):
@@ -75,6 +80,10 @@ class Tool(ABC):
 
     def on_mouse_press(self, event: QMouseEvent, snap) -> None:  # noqa: ANN001
         """Default: do nothing."""
+
+    def on_mouse_release(self, event: QMouseEvent, snap) -> None:  # noqa: ANN001
+        """Default: do nothing. Tools that need drag-release (e.g. box-select)
+        override this."""
 
     def on_key_press(self, event: QKeyEvent) -> None:
         """Default: do nothing."""

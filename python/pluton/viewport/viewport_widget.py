@@ -29,6 +29,7 @@ class ViewportWidget(QOpenGLWidget):
         self.scene_renderer = SceneRenderer()
         self.scene = scene
         self.tool_manager = tool_manager
+        self.selection = None  # M4b — set by MainWindow (pluton.selection.Selection)
         self.snap_engine = SnapEngine()
         self._status_bar = None
         self._on_event_finished = None
@@ -122,6 +123,16 @@ class ViewportWidget(QOpenGLWidget):
             self._last_mouse_pos = None
             event.accept()
             return
+        if event.button() == Qt.MouseButton.LeftButton:
+            active = self.tool_manager.active if self.tool_manager is not None else None
+            if active is not None:
+                snap = self._snap_for_event(event)
+                active.on_mouse_release(event, snap)
+                if self._on_event_finished is not None:
+                    self._on_event_finished()
+                self.update()
+                event.accept()
+                return
         super().mouseReleaseEvent(event)
 
     def wheelEvent(self, event: QWheelEvent) -> None:
