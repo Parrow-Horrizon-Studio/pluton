@@ -34,7 +34,7 @@ def selection_vertices(scene, selection) -> list[int]:
             continue
         for vid in loop:
             seen.setdefault(int(vid), None)
-    return list(seen)
+    return sorted(seen)
 
 
 def selection_aabb(scene, vertex_ids):
