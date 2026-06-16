@@ -215,6 +215,26 @@ def _box_rect_ndc_segments(box_rect, viewport_w, viewport_h) -> np.ndarray:
     return np.array(out, dtype=np.float32)
 
 
+def _screen_marker_ndc_quad(
+    sx: float, sy: float, size_px: float, width: int, height: int
+) -> np.ndarray:
+    """4 corner NDC points of a `size_px` square centred at pixel (sx, sy)."""
+    w = max(int(width), 1)
+    h = max(int(height), 1)
+    half = size_px * 0.5
+    corners_px = [
+        (sx - half, sy - half),
+        (sx + half, sy - half),
+        (sx + half, sy + half),
+        (sx - half, sy + half),
+    ]
+    out = np.empty((4, 2), dtype=np.float32)
+    for i, (px, py) in enumerate(corners_px):
+        out[i, 0] = (2.0 * px / w) - 1.0
+        out[i, 1] = 1.0 - (2.0 * py / h)
+    return out
+
+
 class SceneRenderer:
     """Owns GL resources for the grid + axes + user geometry + tool overlay."""
 
@@ -355,6 +375,14 @@ class SceneRenderer:
         # 7. Box-select rectangle (M4b) — screen space, on top.
         if tool_overlay is not None and tool_overlay.box_rect is not None:
             self._draw_box_rect(tool_overlay.box_rect, tool_overlay.box_rect_color)
+
+        # 8. Generic gizmo primitives (M4c) — world polylines + screen markers.
+        if tool_overlay is not None:
+            if getattr(tool_overlay, "world_polylines", None):
+                self._draw_world_polylines(tool_overlay.world_polylines, view, projection)
+            if getattr(tool_overlay, "screen_markers", None):
+                self._draw_screen_markers(camera, tool_overlay.screen_markers,
+                                          self._viewport_w, self._viewport_h)
 
     # --- Init helpers -----------------------------------------------------
 
@@ -620,14 +648,18 @@ class SceneRenderer:
             GL.glEnable(GL.GL_DEPTH_TEST)
         GL.glUseProgram(0)
 
-    def _draw_box_rect(self, box_rect, color) -> None:  # noqa: ANN001
-        """Draw the screen-space box-select outline using identity view/projection
-        (NDC positions render directly); depth test off."""
-        segs = _box_rect_ndc_segments(box_rect, self._viewport_w, self._viewport_h)
-        identity = np.eye(4, dtype=np.float32)
+    def _draw_screen_space_lines(self, segs, color, width) -> None:  # noqa: ANN001
+        """Draw (2N,3) NDC GL_LINES with identity view/projection (NDC positions
+        render directly); depth test off, line width restored to 1.0 afterward.
+
+        Shared by _draw_box_rect and _draw_screen_markers so both go through one
+        VBO-upload-and-draw path on the line shader."""
         n = int(segs.shape[0])
+        if n == 0:
+            return
+        identity = np.eye(4, dtype=np.float32)
         colors = np.tile(np.array(color, dtype=np.float32), (n, 1))
-        data = np.ascontiguousarray(np.concatenate([segs, colors], axis=1))
+        data = np.ascontiguousarray(np.concatenate([segs, colors], axis=1).astype(np.float32))
         GL.glUseProgram(self._line_program)
         _set_mat4(self._line_locs["u_view"], identity)
         _set_mat4(self._line_locs["u_projection"], identity)
@@ -636,13 +668,44 @@ class SceneRenderer:
             GL.glBindBuffer(GL.GL_ARRAY_BUFFER, self._overlay_line_vbo)
             GL.glBufferData(GL.GL_ARRAY_BUFFER, data.nbytes, data, GL.GL_DYNAMIC_DRAW)
             GL.glBindVertexArray(self._overlay_line_vao)
-            GL.glLineWidth(1.5)
+            GL.glLineWidth(width)
             GL.glDrawArrays(GL.GL_LINES, 0, n)
             GL.glLineWidth(1.0)
             GL.glBindVertexArray(0)
         finally:
             GL.glEnable(GL.GL_DEPTH_TEST)
         GL.glUseProgram(0)
+
+    def _draw_box_rect(self, box_rect, color) -> None:  # noqa: ANN001
+        """Draw the screen-space box-select outline using identity view/projection
+        (NDC positions render directly); depth test off."""
+        segs = _box_rect_ndc_segments(box_rect, self._viewport_w, self._viewport_h)
+        self._draw_screen_space_lines(segs, color, 1.5)
+
+    def _draw_world_polylines(self, polylines, view, projection) -> None:  # noqa: ANN001
+        """Draw each (segments, color, width) as world-space line segments."""
+        for segs, color, width in polylines:
+            arr = np.asarray(segs, dtype=np.float32).reshape(-1, 3)
+            if arr.shape[0] >= 2:
+                self._draw_world_segments(arr, color, float(width), view, projection)
+
+    def _draw_screen_markers(self, camera, markers, width, height) -> None:  # noqa: ANN001
+        """Project each (world_pos, size_px, color) and draw an outlined square
+        in screen space (identity matrices), like the box-select rectangle."""
+        if not markers:
+            return
+        for world_pos, size_px, color in markers:
+            proj = camera.world_to_screen(world_pos, width, height)
+            if proj is None:
+                continue
+            sx, sy, _depth = proj
+            quad = _screen_marker_ndc_quad(sx, sy, size_px, width, height)
+            # 4 edges as (2*N,3) GL_LINES at z=0.
+            loop = np.zeros((8, 3), dtype=np.float32)
+            for i in range(4):
+                loop[2 * i, 0:2] = quad[i]
+                loop[2 * i + 1, 0:2] = quad[(i + 1) % 4]
+            self._draw_screen_space_lines(loop, color, 1.5)
 
     def _draw_selection(self, scene, selection, view, projection) -> None:  # noqa: ANN001
         if selection is None:

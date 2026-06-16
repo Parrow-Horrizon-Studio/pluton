@@ -47,6 +47,13 @@ class ToolOverlay:
     box_rect: tuple[float, float, float, float] | None = None
     box_rect_color: tuple[float, float, float] = (0.30, 0.55, 0.95)
 
+    # M4c: generic gizmo primitives (transform tools).
+    # world_polylines: list of (segments (2*N, 3) float32, rgb, width) drawn in
+    # world space via the line shader. screen_markers: list of (world_pos (3,),
+    # size_px, rgb) drawn as screen-space outlined squares (scale grips).
+    world_polylines: list = field(default_factory=list)
+    screen_markers: list = field(default_factory=list)
+
 
 class Tool(ABC):
     """Base class for all M2+ tools."""
