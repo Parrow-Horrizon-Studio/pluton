@@ -195,3 +195,23 @@ def test_split_edge_binding_smoke():
     assert len(m.face_loop_vertices(live)) == 5
     # Out-of-range t → None.
     assert m.split_edge(res.edge_a, 1.0) is None
+
+
+def test_set_vertex_position_binding():
+    from pluton._core import HalfEdgeMesh
+    m = HalfEdgeMesh()
+    a = m.add_vertex(0.0, 0.0, 0.0)
+    m.set_vertex_position(a, 2.0, 3.0, 4.0)
+    assert tuple(m.vertex_position(a)) == (2.0, 3.0, 4.0)
+
+
+def test_scene_set_vertex_position():
+    import numpy as np
+    import pytest
+    from pluton.scene.scene import Scene
+    s = Scene()
+    v = s.add_vertex(np.array([0.0, 0.0, 0.0], dtype=np.float32))
+    s.set_vertex_position(v, np.array([1.0, 1.0, 1.0], dtype=np.float32))
+    assert np.allclose(s.vertex(v).position, [1.0, 1.0, 1.0])
+    with pytest.raises(KeyError):
+        s.set_vertex_position(999, np.array([0.0, 0.0, 0.0], dtype=np.float32))

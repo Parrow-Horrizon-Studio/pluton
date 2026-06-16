@@ -170,6 +170,20 @@ class Scene:
         triangles = [int(loop[i]) for tri in local_indices for i in tri]
         self._mesh.restore_face(f_id, list(loop), triangles)
 
+    def set_vertex_position(self, v_id: int, position: np.ndarray) -> None:
+        """Move an existing live vertex to `position` (float32 (3,)) in place.
+
+        Recomputes cached normals on incident faces (delegated to C++).
+        Raises KeyError if the vertex is not live.
+        """
+        position = np.asarray(position, dtype=np.float32).reshape(3)
+        try:
+            self._mesh.set_vertex_position(
+                v_id, float(position[0]), float(position[1]), float(position[2])
+            )
+        except IndexError as e:
+            raise KeyError(str(e)) from None
+
     def clear(self) -> None:
         """Reset the scene to empty. Renderer will re-upload empty buffers."""
         self._mesh.clear()

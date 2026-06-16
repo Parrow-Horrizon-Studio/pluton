@@ -88,6 +88,7 @@ NB_MODULE(_core, m) {
         .def("restore_vertex", &HalfEdgeMesh::restore_vertex)
         .def("restore_edge", &HalfEdgeMesh::restore_edge)
         .def("restore_face", &HalfEdgeMesh::restore_face)
+        .def("set_vertex_position", &HalfEdgeMesh::set_vertex_position)
         .def("clear", &HalfEdgeMesh::clear)
 
         // Queries
