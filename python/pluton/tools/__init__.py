@@ -10,11 +10,14 @@ from pluton.tools.arc_tool import ArcTool
 from pluton.tools.circle_tool import CircleTool
 from pluton.tools.erase_tool import EraserTool
 from pluton.tools.line_tool import LineTool
+from pluton.tools.move_tool import MoveTool
 from pluton.tools.polygon_tool import PolygonTool
 from pluton.tools.push_pull_tool import PushPullTool
 from pluton.tools.rectangle_tool import RectangleTool
+from pluton.tools.rotate_tool import RotateTool
+from pluton.tools.scale_tool import ScaleTool
 from pluton.tools.select_tool import SelectTool
 from pluton.tools.tool import Tool, ToolContext, ToolOverlay
 from pluton.tools.tool_manager import ToolManager
 
-__all__ = ["ArcTool", "CircleTool", "EraserTool", "LineTool", "PolygonTool", "PushPullTool", "RectangleTool", "SelectTool", "Tool", "ToolContext", "ToolManager", "ToolOverlay"]
+__all__ = ["ArcTool", "CircleTool", "EraserTool", "LineTool", "MoveTool", "PolygonTool", "PushPullTool", "RectangleTool", "RotateTool", "ScaleTool", "SelectTool", "Tool", "ToolContext", "ToolManager", "ToolOverlay"]

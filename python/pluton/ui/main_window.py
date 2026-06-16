@@ -15,9 +15,12 @@ from pluton.tools import (
     CircleTool,
     EraserTool,
     LineTool,
+    MoveTool,
     PolygonTool,
     PushPullTool,
     RectangleTool,
+    RotateTool,
+    ScaleTool,
     SelectTool,
     ToolContext,
     ToolManager,
@@ -47,6 +50,9 @@ class MainWindow(QMainWindow):
         self._tool_manager.register(ArcTool())
         self._tool_manager.register(SelectTool())
         self._tool_manager.register(EraserTool())
+        self._tool_manager.register(MoveTool())
+        self._tool_manager.register(RotateTool())
+        self._tool_manager.register(ScaleTool())
 
         # Viewport + status bar (created BEFORE setting ToolContext so we can
         # wire the camera + widget_size_provider into the context).
@@ -89,6 +95,9 @@ class MainWindow(QMainWindow):
         QShortcut(QKeySequence("A"), self, activated=lambda: self._activate("A"))
         QShortcut(QKeySequence(Qt.Key.Key_Space), self, activated=lambda: self._activate("Space"))
         QShortcut(QKeySequence("E"), self, activated=lambda: self._activate("E"))
+        QShortcut(QKeySequence("M"), self, activated=lambda: self._activate("M"))
+        QShortcut(QKeySequence("Q"), self, activated=lambda: self._activate("Q"))
+        QShortcut(QKeySequence("S"), self, activated=lambda: self._activate("S"))
         QShortcut(QKeySequence(Qt.Key.Key_Delete), self, activated=self._on_delete_selection)
         QShortcut(QKeySequence(Qt.Key.Key_Backspace), self, activated=self._on_delete_selection)
         QShortcut(QKeySequence(Qt.Key.Key_Up), self, activated=lambda: self._on_tool_key(Qt.Key.Key_Up))
