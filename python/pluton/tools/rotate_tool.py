@@ -1,0 +1,252 @@
+"""The Rotate tool (Q) - auto-tilt protractor.
+
+Three clicks: center -> start direction -> angle. The protractor plane is the
+plane of the face under the cursor when the center is placed (else the ground
+plane). Up/Down arrows cycle a forced axis (X/Y/Z/auto) overriding the inferred
+normal. The swept angle snaps to 15 degrees. One TransformVerticesCommand on commit.
+"""
+
+from __future__ import annotations
+
+import math
+from enum import Enum
+
+import numpy as np
+from PySide6.QtCore import Qt
+from PySide6.QtGui import QKeyEvent, QMouseEvent
+
+from pluton.commands.scene_commands import TransformVerticesCommand
+from pluton.geometry.transforms import rotate
+from pluton.tools.tool import Tool, ToolContext, ToolOverlay
+from pluton.tools.transform_support import selection_vertices
+
+_ANGLE_SNAP_RAD = math.radians(15.0)
+_DISK_COLOR_RGBA = (0.30, 0.55, 0.95, 0.18)
+_DISK_OUTLINE = (0.30, 0.55, 0.95)
+_RAY_COLOR = (0.95, 0.80, 0.20)
+_AXES = (np.array([1, 0, 0], np.float32),
+         np.array([0, 1, 0], np.float32),
+         np.array([0, 0, 1], np.float32))
+
+
+class _Stage(Enum):
+    IDLE = 0
+    HAVE_CENTER = 1
+    HAVE_START = 2
+
+
+class RotateTool(Tool):
+    @property
+    def name(self) -> str:
+        return "Rotate"
+
+    @property
+    def shortcut(self) -> str:
+        return "Q"
+
+    def __init__(self) -> None:
+        self._scene = None
+        self._stack = None
+        self._selection = None
+        self._camera = None
+        self._size_provider = None
+        self._stage = _Stage.IDLE
+        self._center = np.zeros(3, np.float32)
+        self._normal = np.array([0, 0, 1], np.float32)
+        self._start_dir = np.array([1, 0, 0], np.float32)
+        self._cur_dir = np.array([1, 0, 0], np.float32)
+        self._forced_axis: int | None = None
+        self._vertex_ids: list[int] = []
+        self._orig: dict[int, np.ndarray] = {}
+
+    def activate(self, ctx: ToolContext) -> None:
+        self._scene = ctx.scene
+        self._stack = ctx.command_stack
+        self._selection = ctx.selection
+        self._camera = ctx.camera
+        self._size_provider = ctx.widget_size_provider
+        self._reset()
+
+    def deactivate(self) -> None:
+        self._reset()
+
+    def on_mouse_press(self, event: QMouseEvent, snap) -> None:  # noqa: ANN001
+        from pluton.viewport.snap_engine import SnapKind
+        if event.button() != Qt.MouseButton.LeftButton:
+            return
+        if self._selection is None or self._selection.is_empty() or snap.kind == SnapKind.NONE:
+            return
+        p = np.asarray(snap.world_position, np.float32)
+
+        if self._stage == _Stage.IDLE:
+            self._vertex_ids = selection_vertices(self._scene, self._selection)
+            if not self._vertex_ids:
+                return
+            self._orig = {v: self._scene.vertex(v).position.copy() for v in self._vertex_ids}
+            self._center = p.copy()
+            self._normal = self._effective_normal(self._pick_plane_normal(event))
+            self._stage = _Stage.HAVE_CENTER
+            return
+
+        if self._stage == _Stage.HAVE_CENTER:
+            d = self._project_to_plane(p - self._center)
+            if float(np.linalg.norm(d)) < 1e-6:
+                return
+            self._start_dir = d / np.linalg.norm(d)
+            self._cur_dir = self._start_dir.copy()
+            self._stage = _Stage.HAVE_START
+            return
+
+        angle = self._swept_angle(p)
+        moves = self._compute_moves(angle)
+        cmd = TransformVerticesCommand(moves)
+        if not cmd.is_empty() and self._stack is not None:
+            self._stack.execute(cmd, self._scene)
+        self._reset()
+
+    def on_mouse_move(self, event: QMouseEvent, snap) -> None:  # noqa: ANN001
+        from pluton.viewport.snap_engine import SnapKind
+        if self._stage != _Stage.HAVE_START or snap.kind == SnapKind.NONE:
+            return
+        d = self._project_to_plane(np.asarray(snap.world_position, np.float32) - self._center)
+        if float(np.linalg.norm(d)) >= 1e-6:
+            self._cur_dir = d / np.linalg.norm(d)
+
+    def on_key_press(self, event: QKeyEvent) -> None:
+        key = event.key()
+        if key == Qt.Key.Key_Escape:
+            self._reset()
+            return
+        if key in (Qt.Key.Key_Up, Qt.Key.Key_Down):
+            order = [None, 0, 1, 2]
+            cur = order.index(self._forced_axis)
+            self._forced_axis = order[(cur + 1) % len(order)]
+            if self._stage != _Stage.IDLE:
+                self._normal = self._effective_normal(self._normal)
+
+    def overlay(self) -> ToolOverlay:
+        fills: list = []
+        polylines: list = []
+        if self._stage in (_Stage.HAVE_CENTER, _Stage.HAVE_START):
+            r = self._disk_radius()
+            disk = self._disk_loop(radius=r)
+            fills.append(disk)
+            polylines.append((self._loop_to_segments(disk), _DISK_OUTLINE, 1.5))
+            if self._stage == _Stage.HAVE_START:
+                start_seg = np.array([self._center, self._center + self._start_dir * r], np.float32)
+                cur_seg = np.array([self._center, self._center + self._cur_dir * r], np.float32)
+                polylines.append((start_seg, _DISK_OUTLINE, 1.5))
+                polylines.append((cur_seg, _RAY_COLOR, 2.0))
+        return ToolOverlay(
+            rubber_band_segments=np.zeros((0, 3), np.float32),
+            rubber_band_color=(1, 1, 1),
+            snap_marker_position=None,
+            snap_marker_color=(1, 1, 1),
+            face_fill_polygons=fills,
+            face_fill_color=_DISK_COLOR_RGBA,
+            world_polylines=polylines,
+        )
+
+    @property
+    def has_active_gesture(self) -> bool:
+        return self._stage != _Stage.IDLE
+
+    @property
+    def anchor_or_none(self) -> np.ndarray | None:
+        return self._center.copy() if self._stage != _Stage.IDLE else None
+
+    @property
+    def status_text(self) -> str | None:
+        if self._selection is None or self._selection.is_empty():
+            return "Select geometry first"
+        if self._stage == _Stage.IDLE:
+            return "Rotate: click the center"
+        if self._stage == _Stage.HAVE_CENTER:
+            return "Rotate: click the start direction"
+        return f"Rotate: {math.degrees(self._swept_angle_from_cur()):.0f} deg (15 deg snap)"
+
+    # ---- internal ----
+    def _pick_plane_normal(self, event) -> np.ndarray:  # noqa: ANN001
+        """Normal of the face under the cursor, or +Z (ground) if none/no camera."""
+        if self._camera is None or self._size_provider is None or self._scene is None:
+            return np.array([0, 0, 1], np.float32)
+        w, h = self._size_provider()
+        pos = event.position()
+        origin, direction = self._camera.ray_from_screen(pos.x(), pos.y(), w, h)
+        hit = self._scene.ray_pick_face(origin, direction)
+        if hit is None:
+            return np.array([0, 0, 1], np.float32)
+        try:
+            return np.asarray(self._scene.face_normal(hit.face_id), np.float32)
+        except (KeyError, ValueError):
+            return np.array([0, 0, 1], np.float32)
+
+    def _effective_normal(self, inferred: np.ndarray) -> np.ndarray:
+        if self._forced_axis is not None:
+            return _AXES[self._forced_axis].copy()
+        n = np.asarray(inferred, np.float32)
+        ln = float(np.linalg.norm(n))
+        return (n / ln).astype(np.float32) if ln > 1e-9 else np.array([0, 0, 1], np.float32)
+
+    def _project_to_plane(self, v: np.ndarray) -> np.ndarray:
+        n = self._normal
+        return (v - n * float(np.dot(v, n))).astype(np.float32)
+
+    def _swept_angle(self, world_point: np.ndarray) -> float:
+        d = self._project_to_plane(np.asarray(world_point, np.float32) - self._center)
+        if float(np.linalg.norm(d)) < 1e-9:
+            return 0.0
+        self._cur_dir = d / np.linalg.norm(d)
+        return self._swept_angle_from_cur()
+
+    def _swept_angle_from_cur(self) -> float:
+        s, c, n = self._start_dir, self._cur_dir, self._normal
+        ang = math.atan2(float(np.dot(np.cross(s, c), n)), float(np.dot(s, c)))
+        return round(ang / _ANGLE_SNAP_RAD) * _ANGLE_SNAP_RAD
+
+    def _compute_moves(self, angle: float) -> dict:
+        ids = self._vertex_ids
+        pts = np.array([self._orig[v] for v in ids], np.float32)
+        new = rotate(pts, self._center, self._normal, angle)
+        return {v: (self._orig[v], new[i]) for i, v in enumerate(ids)}
+
+    def _disk_radius(self) -> float:
+        if not self._orig:
+            return 1.0
+        pts = np.array(list(self._orig.values()), np.float32)
+        r = float(np.max(np.linalg.norm(pts - self._center, axis=1)))
+        return max(r, 0.5)
+
+    def _disk_loop(self, radius: float, segments: int = 48) -> np.ndarray:
+        n = self._normal
+        if abs(n[0]) < 0.9:
+            ref = np.array([1, 0, 0], np.float32)
+        else:
+            ref = np.array([0, 1, 0], np.float32)
+        u = np.cross(n, ref)
+        u = u / (np.linalg.norm(u) + 1e-12)
+        v = np.cross(n, u)
+        loop = np.empty((segments, 3), np.float32)
+        for i in range(segments):
+            t = 2 * math.pi * i / segments
+            loop[i] = self._center + radius * (math.cos(t) * u + math.sin(t) * v)
+        return loop
+
+    @staticmethod
+    def _loop_to_segments(loop: np.ndarray) -> np.ndarray:
+        n = loop.shape[0]
+        segs = np.empty((2 * n, 3), np.float32)
+        for i in range(n):
+            segs[2 * i] = loop[i]
+            segs[2 * i + 1] = loop[(i + 1) % n]
+        return segs
+
+    def _reset(self) -> None:
+        self._stage = _Stage.IDLE
+        self._center = np.zeros(3, np.float32)
+        self._normal = np.array([0, 0, 1], np.float32)
+        self._start_dir = np.array([1, 0, 0], np.float32)
+        self._cur_dir = np.array([1, 0, 0], np.float32)
+        self._forced_axis = None
+        self._vertex_ids = []
+        self._orig = {}
