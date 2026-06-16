@@ -416,6 +416,41 @@ std::vector<std::uint32_t> loop_with_inserted(
 
 }  // namespace
 
+void pluton::HalfEdgeMesh::recompute_face_normal(std::uint32_t f_id) {
+    if (!face_is_live(f_id)) return;
+    auto n = compute_face_normal_geometric(*this, f_id);  // {0,0,0} if degenerate
+    faces_[f_id].normal[0] = n[0];
+    faces_[f_id].normal[1] = n[1];
+    faces_[f_id].normal[2] = n[2];
+}
+
+void pluton::HalfEdgeMesh::set_vertex_position(std::uint32_t v_id, float x, float y, float z) {
+    if (v_id >= vertices_.size() || !vertices_[v_id].alive) {
+        throw std::out_of_range(
+            "HalfEdgeMesh::set_vertex_position: v_id " + std::to_string(v_id) + " is not live");
+    }
+    // Collapse negative zero so -0.0 and 0.0 hash identically (matches add_vertex).
+    if (x == 0.0f) x = 0.0f;
+    if (y == 0.0f) y = 0.0f;
+    if (z == 0.0f) z = 0.0f;
+
+    Vertex& v = vertices_[v_id];
+    // Dedup-index upkeep: drop the old packed key, install the new one.
+    position_index_.erase(pack_position(v.pos[0], v.pos[1], v.pos[2]));
+    v.pos[0] = x; v.pos[1] = y; v.pos[2] = z;
+    position_index_[pack_position(x, y, z)] = v_id;
+
+    // Recompute cached normals on every incident face. Each incident face has
+    // exactly one boundary half-edge originating at v_id; recompute is
+    // idempotent, so no dedup is needed.
+    for (const auto& he : halfedges_) {
+        if (he.alive && he.origin == v_id && he.face != INVALID_ID) {
+            recompute_face_normal(he.face);
+        }
+    }
+    dirty_ = true;
+}
+
 bool pluton::HalfEdgeMesh::faces_are_coplanar(std::uint32_t f1_id,
                                               std::uint32_t f2_id,
                                               float angle_tol_cos,

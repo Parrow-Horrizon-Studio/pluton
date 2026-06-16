@@ -52,6 +52,13 @@ public:
                       const std::vector<std::uint32_t>& loop,
                       const std::vector<std::int32_t>& triangles);
 
+    /// Move an existing live vertex to (x, y, z) in place. Updates the
+    /// position dedup index (last-writer-wins on a coincident collision) and
+    /// recomputes the cached normal of every incident face. Throws
+    /// std::out_of_range if v_id is dead/out of range. No re-triangulation,
+    /// no topological merge.
+    void set_vertex_position(std::uint32_t v_id, float x, float y, float z);
+
     void clear() noexcept;
 
     // ---- Queries -----------------------------------------------------
@@ -129,6 +136,7 @@ private:
     // Helpers
     static std::uint64_t pack_position(float x, float y, float z) noexcept;
     static std::uint64_t pack_pair(std::uint32_t a, std::uint32_t b) noexcept;
+    void recompute_face_normal(std::uint32_t f_id);
 };
 
 }  // namespace pluton

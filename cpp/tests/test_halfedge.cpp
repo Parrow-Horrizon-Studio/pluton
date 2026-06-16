@@ -817,3 +817,45 @@ TEST(SplitEdge, RejectsSplitLandingOnExistingVertex) {
     for (auto f=m.next_live_face(0); f!=pluton::HalfEdgeMesh::INVALID_ID; f=m.next_live_face(f+1)) ++faces_after;
     EXPECT_EQ(faces_after, faces_before);
 }
+
+TEST(HalfEdgeSetVertexPosition, MovesVertexAndUpdatesIndex) {
+    pluton::HalfEdgeMesh m;
+    auto a = m.add_vertex(0.0f, 0.0f, 0.0f);
+    m.set_vertex_position(a, 5.0f, 6.0f, 7.0f);
+    auto p = m.vertex_position(a);
+    EXPECT_FLOAT_EQ(p[0], 5.0f);
+    EXPECT_FLOAT_EQ(p[1], 6.0f);
+    EXPECT_FLOAT_EQ(p[2], 7.0f);
+    // Old key freed → re-adding the old position allocates a NEW vertex.
+    auto a_old = m.add_vertex(0.0f, 0.0f, 0.0f);
+    EXPECT_NE(a_old, a);
+    // New position is idempotent → returns the moved vertex.
+    auto a_new = m.add_vertex(5.0f, 6.0f, 7.0f);
+    EXPECT_EQ(a_new, a);
+}
+
+TEST(HalfEdgeSetVertexPosition, RecomputesIncidentFaceNormal) {
+    pluton::HalfEdgeMesh m;
+    auto a = m.add_vertex(0.0f, 0.0f, 0.0f);
+    auto b = m.add_vertex(1.0f, 0.0f, 0.0f);
+    auto c = m.add_vertex(0.0f, 1.0f, 0.0f);
+    m.add_halfedge_pair(a, b);
+    m.add_halfedge_pair(b, c);
+    m.add_halfedge_pair(c, a);
+    m.add_face_from_loop({a, b, c},
+        {static_cast<std::int32_t>(a), static_cast<std::int32_t>(b), static_cast<std::int32_t>(c)});
+    auto buf0 = m.face_triangle_buffer();           // (positions, normals)
+    ASSERT_GE(buf0.second.size(), 3u);
+    EXPECT_NEAR(std::abs(buf0.second[2]), 1.0f, 1e-4f);   // flat in XY → |nz| ≈ 1
+    // Tilt the face: lift c in +Z.
+    m.set_vertex_position(c, 0.0f, 1.0f, 1.0f);
+    auto buf1 = m.face_triangle_buffer();
+    ASSERT_GE(buf1.second.size(), 3u);
+    float nx = buf1.second[0], ny = buf1.second[1];
+    EXPECT_GT(std::abs(nx) + std::abs(ny), 0.1f);   // normal now has a horizontal component
+}
+
+TEST(HalfEdgeSetVertexPosition, ThrowsOnDeadVertex) {
+    pluton::HalfEdgeMesh m;
+    EXPECT_THROW(m.set_vertex_position(999u, 1.0f, 2.0f, 3.0f), std::out_of_range);
+}
