@@ -859,3 +859,47 @@ TEST(HalfEdgeSetVertexPosition, ThrowsOnDeadVertex) {
     pluton::HalfEdgeMesh m;
     EXPECT_THROW(m.set_vertex_position(999u, 1.0f, 2.0f, 3.0f), std::out_of_range);
 }
+
+TEST(HalfEdgeSetVertexPosition, RecomputesAllIncidentFacesOfAFanVertexAndLeavesOthers) {
+    pluton::HalfEdgeMesh m;
+    auto o  = m.add_vertex(0.0f, 0.0f, 0.0f);
+    auto p1 = m.add_vertex(1.0f, 0.0f, 0.0f);
+    auto p2 = m.add_vertex(1.0f, 1.0f, 0.0f);
+    auto p3 = m.add_vertex(0.0f, 1.0f, 0.0f);
+    // Two coplanar (XY) triangles sharing vertex o and edge o-p2.
+    m.add_halfedge_pair(o, p1);
+    m.add_halfedge_pair(p1, p2);
+    m.add_halfedge_pair(p2, o);
+    m.add_face_from_loop({o, p1, p2},
+        {static_cast<std::int32_t>(o), static_cast<std::int32_t>(p1), static_cast<std::int32_t>(p2)});
+    m.add_halfedge_pair(o, p2);
+    m.add_halfedge_pair(p2, p3);
+    m.add_halfedge_pair(p3, o);
+    m.add_face_from_loop({o, p2, p3},
+        {static_cast<std::int32_t>(o), static_cast<std::int32_t>(p2), static_cast<std::int32_t>(p3)});
+    // A separate, non-incident triangle far away (also flat in XY).
+    auto q0 = m.add_vertex(5.0f, 5.0f, 0.0f);
+    auto q1 = m.add_vertex(6.0f, 5.0f, 0.0f);
+    auto q2 = m.add_vertex(5.0f, 6.0f, 0.0f);
+    m.add_halfedge_pair(q0, q1);
+    m.add_halfedge_pair(q1, q2);
+    m.add_halfedge_pair(q2, q0);
+    m.add_face_from_loop({q0, q1, q2},
+        {static_cast<std::int32_t>(q0), static_cast<std::int32_t>(q1), static_cast<std::int32_t>(q2)});
+
+    // Faces are emitted in id (creation) order; each is one triangle → 9 normal floats.
+    auto before = m.face_triangle_buffer().second;
+    ASSERT_GE(before.size(), 27u);
+    for (int f = 0; f < 3; ++f) {
+        EXPECT_NEAR(std::abs(before[f * 9 + 2]), 1.0f, 1e-4f);  // all flat → |nz| ≈ 1
+    }
+
+    // Move the shared fan vertex up: both incident faces must tilt, the far one must not.
+    m.set_vertex_position(o, 0.0f, 0.0f, 1.0f);
+    auto after = m.face_triangle_buffer().second;
+    ASSERT_GE(after.size(), 27u);
+    EXPECT_GT(std::abs(after[0 * 9 + 0]) + std::abs(after[0 * 9 + 1]), 0.1f);  // face 0 incident
+    EXPECT_GT(std::abs(after[1 * 9 + 0]) + std::abs(after[1 * 9 + 1]), 0.1f);  // face 1 incident
+    EXPECT_NEAR(std::abs(after[2 * 9 + 2]), 1.0f, 1e-4f);                      // face 2 untouched
+    EXPECT_LT(std::abs(after[2 * 9 + 0]) + std::abs(after[2 * 9 + 1]), 1e-3f);
+}
