@@ -116,7 +116,10 @@ All follow the existing `Tool` ABC (`activate/deactivate`, `on_mouse_press/move/
 **ScaleTool (S)** — full bounding-box gizmo:
 - On activate with a selection, compute the selection's **world-axis-aligned bounding box** (AABB) over the vertex set. Render the box + grips: 8 corners, 12 edge-midpoints, 6 face-centers. Degenerate axes (flat selection) collapse coincident grips → the planar handle set is what remains.
 - Press on a grip starts a drag; the **anchor** is the opposite grip (corner↔corner, edge↔edge, face↔face). Modifiers: **Ctrl = scale about the AABB center** (anchor → center); **Shift = uniform** (lock all dragged axes to one factor) on edge/face grips.
-- Drag computes the scale `factors` (3-vector; 1.0 on axes the grip doesn't drive): corner = all non-degenerate axes share one uniform factor; edge = two axes; face = one axis. Factor = ratio of current vs. original signed extent from the anchor along each driven axis; clamp each factor to a small positive epsilon (no mirror in v1).
+- Drag computes the scale `factors` (3-vector; 1.0 on axes the grip doesn't drive):
+  - **edge / face** grips: each driven axis factor = (signed extent from anchor to the cursor, per axis) ÷ (signed extent from anchor to the grip's start position, per axis).
+  - **corner** grip: a single uniform factor = (cursor projected onto the anchor→grip diagonal, signed length) ÷ (original anchor→grip diagonal length), applied to all non-degenerate axes.
+  - clamp each factor to a small positive epsilon (no mirror in v1).
 - Release: `scale(points, anchor, factors)` → `TransformVerticesCommand` named "Scale". `status_text` shows the live factor(s).
 - Overlay: AABB edges (world segments), grip squares (screen-space markers, active grip highlighted), live-scaled ghost preview.
 
