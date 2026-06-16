@@ -379,3 +379,33 @@ class SplitEdgeCommand(Command):
         scene.restore_edge(self._edge_id, va, vb)
         for fid, loop in self._orig_faces:
             scene.restore_face(fid, loop)
+
+
+class TransformVerticesCommand(Command):
+    """Move a set of vertices to new positions; undo restores the old ones.
+
+    `moves` maps vertex_id -> (old_xyz, new_xyz). No-op entries (old == new)
+    are dropped at construction. Topology is unchanged, so do() and undo() are
+    both just absolute position writes — id-preserving and re-entrant.
+    """
+
+    name = "Transform"
+
+    def __init__(self, moves: dict) -> None:
+        self._moves: dict[int, tuple[np.ndarray, np.ndarray]] = {}
+        for vid, (old, new) in moves.items():
+            o = np.asarray(old, dtype=np.float32).reshape(3).copy()
+            n = np.asarray(new, dtype=np.float32).reshape(3).copy()
+            if not np.array_equal(o, n):
+                self._moves[int(vid)] = (o, n)
+
+    def is_empty(self) -> bool:
+        return not self._moves
+
+    def do(self, scene) -> None:
+        for vid, (_old, new) in self._moves.items():
+            scene.set_vertex_position(vid, new)
+
+    def undo(self, scene) -> None:
+        for vid, (old, _new) in self._moves.items():
+            scene.set_vertex_position(vid, old)
