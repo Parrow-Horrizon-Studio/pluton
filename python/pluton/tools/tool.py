@@ -24,6 +24,7 @@ class ToolContext:
     camera: object = None  # M3b-introduced — pluton.viewport.camera.Camera
     widget_size_provider: object = None  # M3b-introduced — callable () -> tuple[int, int] returning (width, height)
     selection: object = None  # M4b — pluton.selection.Selection (shared)
+    units_provider: object = None  # M4d — callable () -> pluton.units.Units (or None)
 
 
 @dataclass(frozen=True, slots=True)
@@ -94,6 +95,14 @@ class Tool(ABC):
 
     def on_key_press(self, event: QKeyEvent) -> None:
         """Default: do nothing."""
+
+    def apply_typed_value(self, text: str, units) -> bool:  # noqa: ANN001
+        """Apply a typed VCB value to the in-progress gesture.
+
+        Returns True if the value was consumed (the tool re-resolved + committed
+        or advanced its gesture), else False. Default: not supported.
+        """
+        return False
 
     @abstractmethod
     def overlay(self) -> ToolOverlay: ...
