@@ -41,8 +41,34 @@ def _parse_metric(text: str, units: Units) -> float | None:
     return value * _METRIC_FACTOR[unit]
 
 
-def _parse_imperial(text: str) -> None:  # stub — Task 2 replaces this
-    return None
+_IMPERIAL_RE = re.compile(
+    r"^\s*(?:(\d+(?:\.\d+)?)\s*')?"           # optional feet
+    r"\s*(?:(\d+)\s*)?"                        # optional whole inches
+    r"(?:(\d+)\s*/\s*(\d+)\s*)?"               # optional fraction
+    r'"?\s*$'                                  # optional close-quote
+)
+
+
+def _parse_imperial(text: str) -> float | None:
+    # Require at least a foot or inch marker so plain numbers don't match here.
+    if "'" not in text and '"' not in text:
+        return None
+    m = _IMPERIAL_RE.match(text)
+    if not m:
+        return None
+    feet = float(m.group(1)) if m.group(1) else 0.0
+    whole_in = float(m.group(2)) if m.group(2) else 0.0
+    if m.group(3) and m.group(4):
+        den = int(m.group(4))
+        if den == 0:
+            return None
+        frac = int(m.group(3)) / den
+    else:
+        frac = 0.0
+    if not (m.group(1) or m.group(2) or m.group(3)):
+        return None  # empty / just a quote
+    inches = feet * 12.0 + whole_in + frac
+    return inches * INCH_M
 
 
 def _format_imperial(meters: float, units: Units) -> str:  # stub — Task 3 replaces this
@@ -67,5 +93,11 @@ def parse_length(text: str, units: Units) -> float | None:
     if not t:
         return None
     if "'" in t or '"' in t:
-        return _parse_imperial(t)   # Task 2
+        return _parse_imperial(t)
+    if units.system is UnitSystem.IMPERIAL:
+        # bare number → inches
+        try:
+            return float(t) * INCH_M if float(t) >= 0 else None
+        except ValueError:
+            return None
     return _parse_metric(t, units)
