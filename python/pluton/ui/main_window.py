@@ -27,6 +27,7 @@ from pluton.tools import (
     ToolManager,
 )
 from pluton.ui.status_bar import StatusBar
+from pluton.ui.value_control_box import ValueControlBox
 from pluton.viewport.viewport_widget import ViewportWidget
 
 
@@ -40,6 +41,9 @@ class MainWindow(QMainWindow):
 
         # Per-document settings (units etc.)
         self._doc = DocumentSettings()
+
+        # Measurements box (VCB) — pure state, no Qt dependency.
+        self._vcb = ValueControlBox()
 
         # Scene + tool manager + command stack
         self._scene = Scene()
@@ -72,6 +76,7 @@ class MainWindow(QMainWindow):
                 camera=self._viewport.camera,
                 widget_size_provider=lambda: (self._viewport.width(), self._viewport.height()),
                 selection=self._selection,
+                units_provider=lambda: self._doc.units,
             )
         )
 
@@ -114,6 +119,14 @@ class MainWindow(QMainWindow):
         QShortcut(QKeySequence("Ctrl+Y"), self, activated=self._on_redo)
         QShortcut(QKeySequence("Ctrl+Shift+Z"), self, activated=self._on_redo)
 
+        # Install the VCB event filter on the QApplication so it intercepts
+        # key events (and ShortcutOverride) before any QShortcut fires.
+        # Guard for None so headless unit tests without a QApplication still work.
+        from PySide6.QtWidgets import QApplication
+        _app = QApplication.instance()
+        if _app is not None:
+            _app.installEventFilter(self)
+
         # Units menu
         menubar = self.menuBar()
         self._units_menu = menubar.addMenu("Units")
@@ -129,11 +142,62 @@ class MainWindow(QMainWindow):
 
     def _refresh_status_text(self) -> None:
         active = self._tool_manager.active
-        if active is None:
+        if self._vcb.active:
+            self._status_bar.set_status(self._vcb.text + "▏")
+        elif active is None:
             self._status_bar.set_status("")
         else:
             self._status_bar.set_status(active.status_text or "")
         self._refresh_selection_status()
+
+    def _vcb_handle_key(self, event) -> bool:
+        """Pure VCB key logic. Returns True if the key was consumed."""
+        active_tool = self._tool_manager.active
+        if active_tool is None:
+            return False
+        key = event.key()
+        text = event.text()
+        if self._vcb.active:
+            if key in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
+                if self._vcb.text:
+                    active_tool.apply_typed_value(self._vcb.text, self._doc.units)
+                self._vcb.clear()
+                self._refresh_status_text()
+                self._viewport.update()
+                return True
+            if key == Qt.Key.Key_Escape:
+                self._vcb.clear()
+                self._refresh_status_text()
+                self._viewport.update()
+                return True
+            if key == Qt.Key.Key_Backspace:
+                self._vcb.backspace()
+                self._refresh_status_text()
+                self._viewport.update()
+                return True
+            if text and text.isprintable() and text not in ("\r", "\n"):
+                self._vcb.feed(text)
+                self._refresh_status_text()
+                self._viewport.update()
+                return True
+            return False
+        # inactive: only a digit activates the box.
+        if text in set("0123456789"):
+            self._vcb.feed(text)
+            self._refresh_status_text()
+            self._viewport.update()
+            return True
+        return False
+
+    def eventFilter(self, obj, event):  # noqa: N802
+        from PySide6.QtCore import QEvent
+        if event.type() in (QEvent.Type.KeyPress, QEvent.Type.ShortcutOverride):
+            if self._vcb.active or (event.type() == QEvent.Type.KeyPress
+                                    and event.text() in set("0123456789")):
+                if self._vcb_handle_key(event):
+                    event.accept()
+                    return True
+        return super().eventFilter(obj, event)
 
     def _activate(self, shortcut: str) -> None:
         if self._tool_manager.activate_by_shortcut(shortcut):
