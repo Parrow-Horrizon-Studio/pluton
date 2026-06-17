@@ -82,12 +82,13 @@ clear()           # buffer = "", active = False
 text -> str
 ```
 
-Event filter installed by `MainWindow` (on the app or the window). On a key event **while a tool is active**:
-- Printable VCB char (`0-9`, `.`, `,`, `'`, `"`, `/`, space, and unit letters `m c f` etc.): `feed`, refresh the status bar, **consume** the event (so the single-letter tool shortcut does NOT fire). The first such char activates the box.
-- `Backspace`: `backspace()`, consume.
+Event filter installed by `MainWindow` (on the app or the window). **Activation rule:** only a **digit** (`0-9`) activates the box; letters never activate it (so `m` still fires the Move shortcut when nothing is being typed). **Once active, every printable character feeds the buffer** — so `1500mm`, `3' 6 1/2"`, `6s` all type cleanly. On a key event **while a tool is active**:
+- A `0-9` digit (when inactive) → activate + `feed`, consume.
+- Any printable char (`0-9`, `.`, `,`, `'`, `"`, `/`, space, letters) **while active** → `feed`, refresh the status bar, **consume** the event (so the single-letter tool shortcut does NOT fire).
+- `Backspace`: `backspace()`, consume (only while active).
 - `Enter`/`Return`: if `active` and `buffer` non-empty → `applied = active_tool.apply_typed_value(buffer, units)`; `clear()`; consume. Else fall through to the existing finish-gesture path.
 - `Esc`: if `active` → `clear()`, consume; else fall through to the existing escape path.
-- Letters when **not** active → fall through (the tool shortcut fires as today).
+- Any key while **not** active and not a digit → fall through (tool shortcuts / Enter / Esc behave exactly as today).
 
 Qt detail: the filter must handle **`ShortcutOverride`** (accept it to pre-empt the QShortcut while the VCB is active) in addition to `KeyPress`, because single-letter QShortcuts otherwise swallow letter keys. The status bar shows `buffer` (with a trailing caret) while active, else the tool's live `status_text`.
 
