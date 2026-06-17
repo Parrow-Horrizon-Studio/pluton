@@ -9,6 +9,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 from enum import Enum
+from fractions import Fraction
 
 INCH_M = 0.0254
 _METRIC_FACTOR = {"mm": 0.001, "cm": 0.01, "m": 1.0}
@@ -71,8 +72,48 @@ def _parse_imperial(text: str) -> float | None:
     return inches * INCH_M
 
 
-def _format_imperial(meters: float, units: Units) -> str:  # stub — Task 3 replaces this
-    return ""
+def _format_imperial(meters: float, units: Units) -> str:
+    den = max(1, units.imperial_denominator)
+    total_in = meters / INCH_M
+    # Round to the nearest 1/den inch up-front, then split.
+    sixteenths = round(total_in * den)
+    feet = sixteenths // (12 * den)
+    rem = sixteenths - feet * 12 * den          # in 1/den inches
+    whole_in = rem // den
+    frac_units = rem - whole_in * den           # numerator over den
+    parts: list[str] = []
+    if feet:
+        parts.append(f"{feet}'")
+    inch_str = ""
+    if whole_in or frac_units:
+        if frac_units:
+            f = Fraction(frac_units, den)        # reduces
+            inch_str = (f"{whole_in} {f.numerator}/{f.denominator}\""
+                        if whole_in else f"{f.numerator}/{f.denominator}\"")
+        else:
+            inch_str = f"{whole_in}\""
+    if inch_str:
+        parts.append(inch_str)
+    if not parts:
+        return "0\""
+    return " ".join(parts)
+
+
+_ANGLE_RE = re.compile(r"^\s*(-?\d+(?:\.\d+)?)\s*(?:°|deg|degrees)?\s*$", re.IGNORECASE)
+
+
+def parse_angle(text: str) -> float | None:
+    if text is None:
+        return None
+    m = _ANGLE_RE.match(text.strip())
+    return float(m.group(1)) if m else None
+
+
+def format_angle(degrees: float, precision: int = 1) -> str:
+    s = f"{degrees:.{precision}f}"
+    if "." in s:
+        s = s.rstrip("0").rstrip(".")
+    return f"{s}°"
 
 
 def format_length(meters: float, units: Units) -> str:
