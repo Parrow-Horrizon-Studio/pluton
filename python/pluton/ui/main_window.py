@@ -8,6 +8,7 @@ from PySide6.QtWidgets import QMainWindow, QVBoxLayout, QWidget
 
 from pluton.commands import CommandStack
 from pluton.commands.scene_commands import ClearSceneCommand
+from pluton.document import DocumentSettings
 from pluton.scene import Scene
 from pluton.selection import Selection
 from pluton.tools import (
@@ -36,6 +37,9 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.setWindowTitle("Pluton")
         self.resize(1280, 800)
+
+        # Per-document settings (units etc.)
+        self._doc = DocumentSettings()
 
         # Scene + tool manager + command stack
         self._scene = Scene()
@@ -109,6 +113,17 @@ class MainWindow(QMainWindow):
         QShortcut(QKeySequence("Ctrl+Z"), self, activated=self._on_undo)
         QShortcut(QKeySequence("Ctrl+Y"), self, activated=self._on_redo)
         QShortcut(QKeySequence("Ctrl+Shift+Z"), self, activated=self._on_redo)
+
+        # Units menu
+        menubar = self.menuBar()
+        self._units_menu = menubar.addMenu("Units")
+        for label, fn in (
+            ("Metric — m", lambda: self._set_units_metric("m")),
+            ("Metric — cm", lambda: self._set_units_metric("cm")),
+            ("Metric — mm", lambda: self._set_units_metric("mm")),
+            ("Imperial — architectural", self._set_units_imperial),
+        ):
+            self._units_menu.addAction(label, fn)
 
     # --- Slots -----------------------------------------------------------
 
@@ -240,3 +255,13 @@ class MainWindow(QMainWindow):
         if self._command_stack.redo(self._scene):
             self._refresh_status_text()
             self._viewport.update()
+
+    def _set_units_metric(self, unit: str) -> None:
+        self._doc.set_metric(unit)
+        self._refresh_status_text()
+        self._viewport.update()
+
+    def _set_units_imperial(self) -> None:
+        self._doc.set_imperial()
+        self._refresh_status_text()
+        self._viewport.update()
