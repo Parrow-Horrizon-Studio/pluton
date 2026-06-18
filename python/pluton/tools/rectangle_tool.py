@@ -89,41 +89,7 @@ class RectangleTool(Tool):
         if np.array_equal(second, self._first_corner):
             self._reset_gesture()
             return
-
-        x0, y0 = float(self._first_corner[0]), float(self._first_corner[1])
-        x1, y1 = float(second[0]), float(second[1])
-
-        # Normalize to a canonical CCW-from-above winding (min -> max on each
-        # axis) so the face normal always points +Z (up), regardless of which
-        # diagonal the user dragged the second corner toward. Without this, a
-        # down-right / up-left drag yields a -Z normal and push/pull would
-        # extrude the rectangle downward instead of up.
-        xlo, xhi = min(x0, x1), max(x0, x1)
-        ylo, yhi = min(y0, y1), max(y0, y1)
-
-        composite = CompositeCommand(name="Draw Rectangle")
-        s = self._scene  # type: ignore[assignment]
-        v_cmds = [
-            AddVertexCommand(np.array([xlo, ylo, 0.0], dtype=np.float32)),
-            AddVertexCommand(np.array([xhi, ylo, 0.0], dtype=np.float32)),
-            AddVertexCommand(np.array([xhi, yhi, 0.0], dtype=np.float32)),
-            AddVertexCommand(np.array([xlo, yhi, 0.0], dtype=np.float32)),
-        ]
-        for c in v_cmds:
-            c.do(s)
-            composite.children.append(c)
-        vids = [c._vertex_id for c in v_cmds]  # type: ignore[attr-defined]
-        for a, b in [(0, 1), (1, 2), (2, 3), (3, 0)]:
-            e_cmd = AddEdgeCommand(vids[a], vids[b])
-            e_cmd.do(s)
-            composite.children.append(e_cmd)
-        f_cmd = AddFaceCommand(tuple(vids))
-        f_cmd.do(s)
-        composite.children.append(f_cmd)
-
-        if self._command_stack is not None:
-            self._command_stack.push_executed(composite)
-        self._reset_gesture()
+        self._commit_rect(second)
 
     def on_key_press(self, event: QKeyEvent) -> None:
         if event.key() != Qt.Key.Key_Escape:
@@ -166,7 +132,67 @@ class RectangleTool(Tool):
     def anchor_or_none(self) -> np.ndarray | None:
         return None  # Rectangle tool doesn't drive axis-lock
 
+    def apply_typed_value(self, text, units) -> bool:
+        from pluton.units import parse_length
+        if (
+            self._state != _State.DRAGGING
+            or self._first_corner is None
+            or self._preview_corner is None
+        ):
+            return False
+        parts = text.replace("*", "x").replace("X", "x").split("x")
+        if len(parts) != 2:
+            return False
+        w = parse_length(parts[0], units)
+        h = parse_length(parts[1], units)
+        if w is None or h is None or w <= 0 or h <= 0:
+            return False
+        fx, fy = float(self._first_corner[0]), float(self._first_corner[1])
+        sx = 1.0 if self._preview_corner[0] >= fx else -1.0
+        sy = 1.0 if self._preview_corner[1] >= fy else -1.0
+        second = np.array([fx + sx * w, fy + sy * h, 0.0], np.float32)
+        self._commit_rect(second)
+        return True
+
     # ---- internal -------------------------------------------------------
+    def _commit_rect(self, second) -> None:
+        """Normalize the two corners and commit a rectangle to the scene."""
+        assert self._first_corner is not None
+        x0, y0 = float(self._first_corner[0]), float(self._first_corner[1])
+        x1, y1 = float(second[0]), float(second[1])
+
+        # Normalize to a canonical CCW-from-above winding (min -> max on each
+        # axis) so the face normal always points +Z (up), regardless of which
+        # diagonal the user dragged the second corner toward. Without this, a
+        # down-right / up-left drag yields a -Z normal and push/pull would
+        # extrude the rectangle downward instead of up.
+        xlo, xhi = min(x0, x1), max(x0, x1)
+        ylo, yhi = min(y0, y1), max(y0, y1)
+
+        composite = CompositeCommand(name="Draw Rectangle")
+        s = self._scene  # type: ignore[assignment]
+        v_cmds = [
+            AddVertexCommand(np.array([xlo, ylo, 0.0], dtype=np.float32)),
+            AddVertexCommand(np.array([xhi, ylo, 0.0], dtype=np.float32)),
+            AddVertexCommand(np.array([xhi, yhi, 0.0], dtype=np.float32)),
+            AddVertexCommand(np.array([xlo, yhi, 0.0], dtype=np.float32)),
+        ]
+        for c in v_cmds:
+            c.do(s)
+            composite.children.append(c)
+        vids = [c._vertex_id for c in v_cmds]  # type: ignore[attr-defined]
+        for a, b in [(0, 1), (1, 2), (2, 3), (3, 0)]:
+            e_cmd = AddEdgeCommand(vids[a], vids[b])
+            e_cmd.do(s)
+            composite.children.append(e_cmd)
+        f_cmd = AddFaceCommand(tuple(vids))
+        f_cmd.do(s)
+        composite.children.append(f_cmd)
+
+        if self._command_stack is not None:
+            self._command_stack.push_executed(composite)
+        self._reset_gesture()
+
     def _reset_gesture(self) -> None:
         self._state = _State.IDLE
         self._first_corner = None

@@ -137,6 +137,37 @@ class LineTool(Tool):
         self._composite.children.append(e_cmd)
         self._gesture_vertex_ids.append(vid)
 
+    def apply_typed_value(self, text, units) -> bool:
+        from pluton.units import parse_length
+        if (
+            self._state != _State.DRAWING
+            or self._preview_tip is None
+            or not self._gesture_vertex_ids
+        ):
+            return False
+        length = parse_length(text, units)
+        if length is None or length <= 0:
+            return False
+        s = self._scene
+        anchor = s.vertex(self._gesture_vertex_ids[-1]).position
+        direction = np.asarray(self._preview_tip, np.float32) - anchor
+        norm = float(np.linalg.norm(direction))
+        if norm < 1e-9:
+            return False
+        target = (anchor + (direction / norm) * length).astype(np.float32)
+        from pluton.commands.scene_commands import AddEdgeCommand, AddVertexCommand
+        assert self._composite is not None
+        v_cmd = AddVertexCommand(target)
+        v_cmd.do(s)
+        self._composite.children.append(v_cmd)
+        new_vid = v_cmd._vertex_id  # type: ignore[attr-defined]
+        e_cmd = AddEdgeCommand(self._gesture_vertex_ids[-1], new_vid)
+        e_cmd.do(s)
+        self._composite.children.append(e_cmd)
+        self._gesture_vertex_ids.append(new_vid)
+        self._preview_tip = target.copy()
+        return True
+
     def on_key_press(self, event: QKeyEvent) -> None:
         key = event.key()
         s = self._scene  # type: ignore[assignment]
