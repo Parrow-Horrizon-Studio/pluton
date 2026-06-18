@@ -44,6 +44,7 @@ class CircleTool(Tool):
     def __init__(self) -> None:
         self._scene = None
         self._command_stack = None
+        self._units_provider = None
         self._state = _State.IDLE
         self._plane = None
         self._center: np.ndarray | None = None
@@ -56,6 +57,7 @@ class CircleTool(Tool):
     def activate(self, ctx: ToolContext) -> None:
         self._scene = ctx.scene  # type: ignore[assignment]
         self._command_stack = ctx.command_stack
+        self._units_provider = ctx.units_provider
         self._reset_gesture()
 
     def deactivate(self) -> None:
@@ -104,6 +106,21 @@ class CircleTool(Tool):
             self._command_stack.push_executed(composite)
         self._reset_gesture()
 
+    def apply_typed_value(self, text, units) -> bool:
+        from pluton.units import parse_length
+        if self._state != _State.DRAWING or self._plane is None:
+            return False
+        radius = parse_length(text, units)
+        if radius is None or radius < _MIN_RADIUS:
+            return False
+        ring_uv = circle(radius, _SEGMENTS, self._start_angle)
+        world = self._plane.to_world(ring_uv).astype(np.float32)
+        composite = build_closed_face(self._scene, world, name="Draw Circle")
+        if composite is not None and self._command_stack is not None:
+            self._command_stack.push_executed(composite)
+        self._reset_gesture()
+        return True
+
     def on_key_press(self, event: QKeyEvent) -> None:
         if event.key() == Qt.Key.Key_Escape:
             self._reset_gesture()
@@ -140,6 +157,9 @@ class CircleTool(Tool):
     @property
     def status_text(self) -> str | None:
         if self._state == _State.DRAWING:
+            if self._units_provider is not None:
+                from pluton.units import format_length
+                return f"Radius: {format_length(self._radius, self._units_provider())}"
             return f"Radius: {self._radius:.3f}"
         return None
 

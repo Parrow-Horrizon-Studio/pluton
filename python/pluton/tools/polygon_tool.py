@@ -45,6 +45,7 @@ class PolygonTool(Tool):
     def __init__(self) -> None:
         self._scene = None
         self._command_stack = None
+        self._units_provider = None
         self._state = _State.IDLE
         self._plane = None
         self._center: np.ndarray | None = None
@@ -58,6 +59,7 @@ class PolygonTool(Tool):
     def activate(self, ctx: ToolContext) -> None:
         self._scene = ctx.scene  # type: ignore[assignment]
         self._command_stack = ctx.command_stack
+        self._units_provider = ctx.units_provider
         self._reset_gesture()
 
     def deactivate(self) -> None:
@@ -106,6 +108,29 @@ class PolygonTool(Tool):
             self._command_stack.push_executed(composite)
         self._reset_gesture()
 
+    def apply_typed_value(self, text, units) -> bool:
+        if self._state != _State.DRAWING or self._plane is None:
+            return False
+        t = text.strip().lower()
+        if t.endswith("s"):
+            try:
+                n = int(t[:-1])
+            except ValueError:
+                return False
+            self._sides = max(_MIN_SIDES, min(_MAX_SIDES, n))
+            return True
+        from pluton.units import parse_length
+        radius = parse_length(t, units)
+        if radius is None or radius < _MIN_RADIUS:
+            return False
+        ring_uv = polygon(radius, self._sides, self._start_angle)
+        world = self._plane.to_world(ring_uv).astype(np.float32)
+        composite = build_closed_face(self._scene, world, name="Draw Polygon")
+        if composite is not None and self._command_stack is not None:
+            self._command_stack.push_executed(composite)
+        self._reset_gesture()
+        return True
+
     def on_key_press(self, event: QKeyEvent) -> None:
         key = event.key()
         if key == Qt.Key.Key_Escape:
@@ -147,6 +172,10 @@ class PolygonTool(Tool):
     @property
     def status_text(self) -> str | None:
         if self._state == _State.DRAWING:
+            if self._units_provider is not None:
+                from pluton.units import format_length
+                r = format_length(self._radius, self._units_provider())
+                return f"Radius: {r}   Sides: {self._sides}"
             return f"Radius: {self._radius:.3f}   Sides: {self._sides}"
         return None
 
