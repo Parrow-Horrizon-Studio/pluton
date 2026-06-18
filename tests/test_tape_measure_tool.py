@@ -60,3 +60,33 @@ def test_esc_resets(qtbot):
         QEvent.Type.KeyPress, Qt.Key.Key_Escape, Qt.KeyboardModifier.NoModifier
     ))
     assert not t.has_active_gesture
+
+
+def _snap_none():
+    return types.SimpleNamespace(
+        kind=SnapKind.NONE,
+        world_position=np.zeros(3, np.float32),
+        axis=None,
+        vertex_id=None,
+        edge_id=None,
+        edge_t=None,
+    )
+
+
+def test_snap_marker_surfaced(qtbot):
+    """on_mouse_move with a real snap kind populates overlay snap_marker_*."""
+    s = Scene()
+    t = TapeMeasureTool()
+    t.activate(_ctx(s))
+
+    pos = [1.0, 2.0, 3.0]
+    t.on_mouse_move(None, _snap(pos))
+    ov = t.overlay()
+    assert ov.snap_marker_position is not None
+    np.testing.assert_allclose(ov.snap_marker_position, np.asarray(pos, np.float32))
+    assert ov.snap_marker_kind == int(SnapKind.ENDPOINT)
+
+    # After a NONE snap the marker clears.
+    t.on_mouse_move(None, _snap_none())
+    ov2 = t.overlay()
+    assert ov2.snap_marker_position is None

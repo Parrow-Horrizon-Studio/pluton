@@ -7,8 +7,10 @@ from PySide6.QtCore import Qt
 from PySide6.QtGui import QKeyEvent, QMouseEvent
 
 from pluton.tools.tool import Tool, ToolContext, ToolOverlay
+from pluton.viewport.snap_engine import MARKER_COLOR_BY_KIND
 
 _LINE_COLOR = (0.95, 0.85, 0.20)
+_NEUTRAL_COLOR = (0.85, 0.85, 0.85)
 
 
 class TapeMeasureTool(Tool):
@@ -26,6 +28,9 @@ class TapeMeasureTool(Tool):
         self._a: np.ndarray | None = None
         self._b: np.ndarray | None = None
         self._cursor: np.ndarray | None = None
+        self._snap_marker_pos: np.ndarray | None = None
+        self._snap_marker_color: tuple[float, float, float] = _NEUTRAL_COLOR
+        self._snap_marker_kind: int = 0
 
     def activate(self, ctx: ToolContext) -> None:
         self._scene = ctx.scene
@@ -37,8 +42,14 @@ class TapeMeasureTool(Tool):
 
     def on_mouse_move(self, event: QMouseEvent, snap) -> None:  # noqa: ANN001
         from pluton.viewport.snap_engine import SnapKind
-        if snap.kind != SnapKind.NONE:
-            self._cursor = np.asarray(snap.world_position, np.float32).copy()
+        if snap.kind == SnapKind.NONE:
+            self._snap_marker_pos = None
+            self._snap_marker_kind = 0
+            return
+        self._cursor = np.asarray(snap.world_position, np.float32).copy()
+        self._snap_marker_pos = snap.world_position.copy()
+        self._snap_marker_color = MARKER_COLOR_BY_KIND.get(snap.kind, _NEUTRAL_COLOR)
+        self._snap_marker_kind = int(snap.kind)
 
     def on_mouse_press(self, event: QMouseEvent, snap) -> None:  # noqa: ANN001
         from pluton.viewport.snap_engine import SnapKind
@@ -65,8 +76,11 @@ class TapeMeasureTool(Tool):
         return ToolOverlay(
             rubber_band_segments=np.zeros((0, 3), np.float32),
             rubber_band_color=(1, 1, 1),
-            snap_marker_position=None,
-            snap_marker_color=(1, 1, 1),
+            snap_marker_position=(
+                self._snap_marker_pos.copy() if self._snap_marker_pos is not None else None
+            ),
+            snap_marker_color=self._snap_marker_color,
+            snap_marker_kind=self._snap_marker_kind,
             world_polylines=polylines,
         )
 
@@ -98,3 +112,6 @@ class TapeMeasureTool(Tool):
         self._a = None
         self._b = None
         self._cursor = None
+        self._snap_marker_pos = None
+        self._snap_marker_color = _NEUTRAL_COLOR
+        self._snap_marker_kind = 0
