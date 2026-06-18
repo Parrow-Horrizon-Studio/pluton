@@ -3,14 +3,13 @@ from __future__ import annotations
 import types
 
 import numpy as np
-from PySide6.QtCore import QEvent, QPointF, Qt
-from PySide6.QtGui import QMouseEvent
-
 from pluton.scene.scene import Scene
 from pluton.tools.tape_measure_tool import TapeMeasureTool
 from pluton.tools.tool import ToolContext
 from pluton.units import Units
 from pluton.viewport.snap_engine import SnapKind
+from PySide6.QtCore import QEvent, QPointF, Qt
+from PySide6.QtGui import QMouseEvent
 
 U = Units()
 
@@ -33,7 +32,8 @@ def _ctx(s):
 
 def test_distance_readout(qtbot):
     s = Scene()
-    t = TapeMeasureTool(); t.activate(_ctx(s))
+    t = TapeMeasureTool()
+    t.activate(_ctx(s))
     t.on_mouse_press(_press(), _snap([0, 0, 0]))
     t.on_mouse_press(_press(), _snap([3, 4, 0]))   # 3-4-5 → distance 5
     assert "5" in (t.status_text or "")
@@ -43,7 +43,8 @@ def test_distance_readout(qtbot):
 def test_measure_only_no_mutation(qtbot):
     s = Scene()
     before = sum(1 for _ in s.vertices_iter())
-    t = TapeMeasureTool(); t.activate(_ctx(s))
+    t = TapeMeasureTool()
+    t.activate(_ctx(s))
     t.on_mouse_press(_press(), _snap([0, 0, 0]))
     t.on_mouse_press(_press(), _snap([1, 0, 0]))
     assert sum(1 for _ in s.vertices_iter()) == before
@@ -52,7 +53,10 @@ def test_measure_only_no_mutation(qtbot):
 def test_esc_resets(qtbot):
     from PySide6.QtGui import QKeyEvent
     s = Scene()
-    t = TapeMeasureTool(); t.activate(_ctx(s))
+    t = TapeMeasureTool()
+    t.activate(_ctx(s))
     t.on_mouse_press(_press(), _snap([0, 0, 0]))
-    t.on_key_press(QKeyEvent(QEvent.Type.KeyPress, Qt.Key.Key_Escape, Qt.KeyboardModifier.NoModifier))
+    t.on_key_press(QKeyEvent(
+        QEvent.Type.KeyPress, Qt.Key.Key_Escape, Qt.KeyboardModifier.NoModifier
+    ))
     assert not t.has_active_gesture

@@ -193,6 +193,7 @@ class ArcTool(Tool):
             bulge_uv = mid + side * val * perp
             pts_uv = arc_2pt(_ORIGIN_UV, self._end_uv, bulge_uv, _SEGMENTS)
             if len(pts_uv) < 2:
+                self._reset_gesture()
                 return False
             world = self._plane.to_world(pts_uv).astype(np.float32)
             composite = build_open_polyline(self._scene, world, name="Draw Arc")

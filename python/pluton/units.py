@@ -87,9 +87,9 @@ def _format_imperial(meters: float, units: Units) -> str:
     inch_str = ""
     if whole_in or frac_units:
         if frac_units:
-            f = Fraction(frac_units, den)        # reduces
-            inch_str = (f"{whole_in} {f.numerator}/{f.denominator}\""
-                        if whole_in else f"{f.numerator}/{f.denominator}\"")
+            fr = Fraction(frac_units, den)        # reduces
+            inch_str = (f"{whole_in} {fr.numerator}/{fr.denominator}\""
+                        if whole_in else f"{fr.numerator}/{fr.denominator}\"")
         else:
             inch_str = f"{whole_in}\""
     if inch_str:
@@ -102,7 +102,7 @@ def _format_imperial(meters: float, units: Units) -> str:
 _ANGLE_RE = re.compile(r"^\s*(-?\d+(?:\.\d+)?)\s*(?:°|deg|degrees)?\s*$", re.IGNORECASE)
 
 
-def parse_angle(text: str) -> float | None:
+def parse_angle(text: str | None) -> float | None:
     if text is None:
         return None
     m = _ANGLE_RE.match(text.strip())
@@ -127,7 +127,7 @@ def format_length(meters: float, units: Units) -> str:
     return f"{s} {units.metric_unit}"
 
 
-def parse_length(text: str, units: Units) -> float | None:
+def parse_length(text: str | None, units: Units) -> float | None:
     if text is None:
         return None
     t = text.strip().replace(",", ".")
@@ -138,7 +138,8 @@ def parse_length(text: str, units: Units) -> float | None:
     if units.system is UnitSystem.IMPERIAL:
         # bare number → inches
         try:
-            return float(t) * INCH_M if float(t) >= 0 else None
+            v = float(t)
+            return v * INCH_M if v >= 0 else None
         except ValueError:
             return None
     return _parse_metric(t, units)
