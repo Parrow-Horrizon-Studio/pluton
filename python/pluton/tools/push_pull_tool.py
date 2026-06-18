@@ -53,6 +53,7 @@ class PushPullTool(Tool):
         self._command_stack = None
         self._camera = None
         self._widget_size_provider = None
+        self._units_provider = None
 
         self._state: _State = _State.IDLE
 
@@ -87,6 +88,9 @@ class PushPullTool(Tool):
     @property
     def status_text(self) -> str | None:
         if self._state == _State.DRAGGING:
+            if self._units_provider is not None:
+                from pluton.units import format_length
+                return f"depth: {format_length(self._current_depth, self._units_provider())}"
             return f"depth: {self._current_depth:.3f}"
         return None
 
@@ -95,6 +99,7 @@ class PushPullTool(Tool):
         self._command_stack = ctx.command_stack
         self._camera = ctx.camera
         self._widget_size_provider = ctx.widget_size_provider
+        self._units_provider = ctx.units_provider
         self._reset_to_idle()
 
     def deactivate(self) -> None:
