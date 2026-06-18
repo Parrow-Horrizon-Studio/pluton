@@ -164,6 +164,44 @@ class ArcTool(Tool):
             return "Drag the bulge"
         return None
 
+    def apply_typed_value(self, text, units) -> bool:
+        from pluton.units import parse_length
+        if self._plane is None:
+            return False
+        val = parse_length(text, units)
+        if val is None or val <= 0:
+            return False
+        if self._state == _State.PLACING_END and self._cursor_uv is not None:
+            d = np.asarray(self._cursor_uv, np.float64)
+            norm = float(np.linalg.norm(d))
+            if norm < _MIN_CHORD:
+                return False
+            self._end_uv = (d / norm * val).astype(np.float64)
+            self._cursor_uv = self._end_uv.copy()
+            self._state = _State.PLACING_BULGE
+            return True
+        if self._state == _State.PLACING_BULGE and self._end_uv is not None:
+            # Bulge point = chord midpoint + sagitta * unit-perpendicular, on the
+            # side the cursor is currently on.
+            mid = (_ORIGIN_UV + self._end_uv) / 2.0
+            chord = self._end_uv - _ORIGIN_UV
+            perp = np.array([-chord[1], chord[0]], np.float64)
+            perp /= (np.linalg.norm(perp) + 1e-12)
+            side = 1.0
+            if self._cursor_uv is not None and float(np.dot(self._cursor_uv - mid, perp)) < 0:
+                side = -1.0
+            bulge_uv = mid + side * val * perp
+            pts_uv = arc_2pt(_ORIGIN_UV, self._end_uv, bulge_uv, _SEGMENTS)
+            if len(pts_uv) < 2:
+                return False
+            world = self._plane.to_world(pts_uv).astype(np.float32)
+            composite = build_open_polyline(self._scene, world, name="Draw Arc")
+            if composite is not None and self._command_stack is not None:
+                self._command_stack.push_executed(composite)
+            self._reset_gesture()
+            return True
+        return False
+
     def _reset_gesture(self) -> None:
         self._state = _State.IDLE
         self._plane = None

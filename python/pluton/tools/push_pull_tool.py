@@ -374,6 +374,18 @@ class PushPullTool(Tool):
         if self._command_stack is not None:
             self._command_stack.push_executed(composite)
 
+    def apply_typed_value(self, text, units) -> bool:
+        from pluton.units import parse_length
+        if self._state != _State.DRAGGING or self._armed_face_id is None:
+            return False
+        depth = parse_length(text, units)
+        if depth is None or depth < _MIN_COMMIT_DEPTH:
+            return False
+        self._current_depth = float(depth)
+        self._commit_extrusion()
+        self._reset_to_idle()
+        return True
+
     def _reset_to_idle(self) -> None:
         self._state = _State.IDLE
         self._hovered_face_id = None
