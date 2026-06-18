@@ -35,6 +35,7 @@ class MoveTool(Tool):
         self._scene = None
         self._stack = None
         self._selection = None
+        self._units_provider = None
         self._dragging = False
         self._grab: np.ndarray | None = None
         self._delta = np.zeros(3, dtype=np.float32)
@@ -45,6 +46,7 @@ class MoveTool(Tool):
         self._scene = ctx.scene
         self._stack = ctx.command_stack
         self._selection = ctx.selection
+        self._units_provider = ctx.units_provider
         self._reset()
 
     def deactivate(self) -> None:
@@ -94,6 +96,28 @@ class MoveTool(Tool):
         if event.key() == Qt.Key.Key_Escape:
             self._reset()
 
+    def apply_typed_value(self, text, units) -> bool:
+        from pluton.units import parse_length
+        if not self._dragging or self._grab is None:
+            return False
+        dist = parse_length(text, units)
+        if dist is None:
+            return False
+        norm = float(np.linalg.norm(self._delta))
+        if norm < 1e-9:
+            return False
+        direction = (self._delta / norm).astype(np.float32)
+        moves = {}
+        for v in self._vertex_ids:
+            old = self._orig[v]
+            moves[v] = (old, (old + direction * dist).astype(np.float32))
+        from pluton.commands.scene_commands import TransformVerticesCommand
+        cmd = TransformVerticesCommand(moves)
+        if not cmd.is_empty() and self._stack is not None:
+            self._stack.execute(cmd, self._scene)
+        self._reset()
+        return True
+
     def overlay(self) -> ToolOverlay:
         polylines: list = []
         segs = np.zeros((0, 3), dtype=np.float32)
@@ -125,8 +149,11 @@ class MoveTool(Tool):
         if self._selection is None or self._selection.is_empty():
             return "Select geometry first"
         if self._dragging:
-            d = self._delta
-            return f"Move Δ ({d[0]:.2f}, {d[1]:.2f}, {d[2]:.2f})"
+            dist = float(np.linalg.norm(self._delta))
+            if self._units_provider is not None:
+                from pluton.units import format_length
+                return f"Move {format_length(dist, self._units_provider())}"
+            return f"Move {dist:.3f}"
         return "Move: pick a grab point"
 
     # ---- internal ----

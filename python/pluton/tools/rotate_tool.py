@@ -50,6 +50,7 @@ class RotateTool(Tool):
         self._selection = None
         self._camera = None
         self._size_provider = None
+        self._units_provider = None
         self._stage = _Stage.IDLE
         self._center = np.zeros(3, np.float32)
         self._normal = np.array([0, 0, 1], np.float32)
@@ -65,6 +66,7 @@ class RotateTool(Tool):
         self._selection = ctx.selection
         self._camera = ctx.camera
         self._size_provider = ctx.widget_size_provider
+        self._units_provider = ctx.units_provider
         self._reset()
 
     def deactivate(self) -> None:
@@ -124,6 +126,23 @@ class RotateTool(Tool):
             if self._stage != _Stage.IDLE:
                 self._normal = self._effective_normal(self._normal)
 
+    def apply_typed_value(self, text, units) -> bool:
+        from pluton.units import parse_angle
+        if self._stage != _Stage.HAVE_START:
+            return False
+        deg = parse_angle(text)
+        if deg is None:
+            return False
+        sign = 1.0 if self._swept_angle_from_cur() >= 0 else -1.0
+        angle = sign * math.radians(deg)
+        moves = self._compute_moves(angle)
+        from pluton.commands.scene_commands import TransformVerticesCommand
+        cmd = TransformVerticesCommand(moves)
+        if not cmd.is_empty() and self._stack is not None:
+            self._stack.execute(cmd, self._scene)
+        self._reset()
+        return True
+
     def overlay(self) -> ToolOverlay:
         fills: list = []
         polylines: list = []
@@ -163,6 +182,9 @@ class RotateTool(Tool):
             return "Rotate: click the center"
         if self._stage == _Stage.HAVE_CENTER:
             return "Rotate: click the start direction"
+        if self._units_provider is not None:
+            from pluton.units import format_angle
+            return f"Rotate: {format_angle(math.degrees(self._swept_angle_from_cur()))} (15° snap)"
         return f"Rotate: {math.degrees(self._swept_angle_from_cur()):.0f} deg (15 deg snap)"
 
     # ---- internal ----

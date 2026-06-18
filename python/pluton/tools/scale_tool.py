@@ -45,6 +45,7 @@ class ScaleTool(Tool):
         self._selection = None
         self._camera = None
         self._size_provider = None
+        self._units_provider = None
         self._lo = None
         self._hi = None
         self._grips: list[GripSpec] = []
@@ -60,6 +61,7 @@ class ScaleTool(Tool):
         self._selection = ctx.selection
         self._camera = ctx.camera
         self._size_provider = ctx.widget_size_provider
+        self._units_provider = ctx.units_provider
         self._rebuild_box()
 
     def deactivate(self) -> None:
@@ -130,6 +132,32 @@ class ScaleTool(Tool):
     def on_key_press(self, event: QKeyEvent) -> None:
         if event.key() == Qt.Key.Key_Escape:
             self._reset_drag()
+
+    def apply_typed_value(self, text, units) -> bool:
+        if self._active is None:
+            return False
+        try:
+            factor = float(text.strip())
+        except (ValueError, AttributeError):
+            return False
+        if factor <= 0:
+            return False
+        out = np.ones(3, np.float32)
+        extent = (self._hi - self._lo).astype(np.float32)
+        for ax in self._active.axes:
+            if abs(float(extent[ax])) > 1e-9:
+                out[ax] = factor
+        ids = self._vertex_ids
+        pts = np.array([self._orig[v] for v in ids], np.float32)
+        new = scale_pts(pts, self._anchor, out)
+        moves = {v: (self._orig[v], new[i]) for i, v in enumerate(ids)}
+        from pluton.commands.scene_commands import TransformVerticesCommand
+        cmd = TransformVerticesCommand(moves)
+        if not cmd.is_empty() and self._stack is not None:
+            self._stack.execute(cmd, self._scene)
+        self._reset_drag()
+        self._rebuild_box()
+        return True
 
     def overlay(self) -> ToolOverlay:
         polylines: list = []
