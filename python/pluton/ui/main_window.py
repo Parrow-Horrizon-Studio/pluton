@@ -23,6 +23,7 @@ from pluton.tools import (
     RotateTool,
     ScaleTool,
     SelectTool,
+    TapeMeasureTool,
     ToolContext,
     ToolManager,
 )
@@ -61,6 +62,7 @@ class MainWindow(QMainWindow):
         self._tool_manager.register(MoveTool())
         self._tool_manager.register(RotateTool())
         self._tool_manager.register(ScaleTool())
+        self._tool_manager.register(TapeMeasureTool())
 
         # Viewport + status bar (created BEFORE setting ToolContext so we can
         # wire the camera + widget_size_provider into the context).
@@ -107,6 +109,7 @@ class MainWindow(QMainWindow):
         QShortcut(QKeySequence("M"), self, activated=lambda: self._activate("M"))
         QShortcut(QKeySequence("Q"), self, activated=lambda: self._activate("Q"))
         QShortcut(QKeySequence("S"), self, activated=lambda: self._activate("S"))
+        QShortcut(QKeySequence("T"), self, activated=lambda: self._activate("T"))
         QShortcut(QKeySequence(Qt.Key.Key_Delete), self, activated=self._on_delete_selection)
         QShortcut(QKeySequence(Qt.Key.Key_Backspace), self, activated=self._on_delete_selection)
         QShortcut(QKeySequence(Qt.Key.Key_Up), self, activated=lambda: self._on_tool_key(Qt.Key.Key_Up))

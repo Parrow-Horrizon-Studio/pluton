@@ -17,7 +17,25 @@ from pluton.tools.rectangle_tool import RectangleTool
 from pluton.tools.rotate_tool import RotateTool
 from pluton.tools.scale_tool import ScaleTool
 from pluton.tools.select_tool import SelectTool
+from pluton.tools.tape_measure_tool import TapeMeasureTool
 from pluton.tools.tool import Tool, ToolContext, ToolOverlay
 from pluton.tools.tool_manager import ToolManager
 
-__all__ = ["ArcTool", "CircleTool", "EraserTool", "LineTool", "MoveTool", "PolygonTool", "PushPullTool", "RectangleTool", "RotateTool", "ScaleTool", "SelectTool", "Tool", "ToolContext", "ToolManager", "ToolOverlay"]
+__all__ = [
+    "ArcTool",
+    "CircleTool",
+    "EraserTool",
+    "LineTool",
+    "MoveTool",
+    "PolygonTool",
+    "PushPullTool",
+    "RectangleTool",
+    "RotateTool",
+    "ScaleTool",
+    "SelectTool",
+    "TapeMeasureTool",
+    "Tool",
+    "ToolContext",
+    "ToolManager",
+    "ToolOverlay",
+]
