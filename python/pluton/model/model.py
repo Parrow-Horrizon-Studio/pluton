@@ -59,6 +59,20 @@ class Model:
         for inst in definition.children:
             yield from self._traverse(inst.definition, world @ inst.transform)
 
+    def clone_definition(self, definition):
+        """Deep-copy a definition's geometry + child instances into a fresh def."""
+        clone = self.new_definition(definition.name, definition.is_group)
+        idmap = {}
+        for v in definition.mesh.vertices_iter():
+            idmap[v.id] = clone.mesh.add_vertex(v.position)
+        for e in definition.mesh.edges_iter():
+            clone.mesh.add_edge(idmap[e.v1_id], idmap[e.v2_id])
+        for f in definition.mesh.faces_iter():
+            clone.mesh.add_face_from_loop([idmap[v] for v in f.loop_vertex_ids])
+        for child in definition.children:
+            clone.children.append(self.new_instance(child.definition, child.transform))
+        return clone
+
     def revalidate_active_path(self) -> None:
         """Pop the active path to the nearest still-reachable instance.
 
