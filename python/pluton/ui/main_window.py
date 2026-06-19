@@ -9,7 +9,7 @@ from PySide6.QtWidgets import QMainWindow, QVBoxLayout, QWidget
 from pluton.commands import CommandStack
 from pluton.commands.scene_commands import ClearSceneCommand
 from pluton.document import DocumentSettings
-from pluton.scene import Scene
+from pluton.model import Model
 from pluton.selection import Selection
 from pluton.tools import (
     ArcTool,
@@ -46,8 +46,8 @@ class MainWindow(QMainWindow):
         # Measurements box (VCB) — pure state, no Qt dependency.
         self._vcb = ValueControlBox()
 
-        # Scene + tool manager + command stack
-        self._scene = Scene()
+        # Scene graph + tool manager + command stack
+        self._model = Model()
         self._selection = Selection()
         self._command_stack = CommandStack()
         self._tool_manager = ToolManager()
@@ -66,21 +66,12 @@ class MainWindow(QMainWindow):
 
         # Viewport + status bar (created BEFORE setting ToolContext so we can
         # wire the camera + widget_size_provider into the context).
-        self._viewport = ViewportWidget(self._scene, self._tool_manager, self)
+        self._viewport = ViewportWidget(self._model, self._tool_manager, self)
         self._viewport.selection = self._selection
         self._status_bar = StatusBar()
 
         # NOW we can build the ToolContext that includes the viewport refs.
-        self._tool_manager.set_context(
-            ToolContext(
-                scene=self._scene,
-                command_stack=self._command_stack,
-                camera=self._viewport.camera,
-                widget_size_provider=lambda: (self._viewport.width(), self._viewport.height()),
-                selection=self._selection,
-                units_provider=lambda: self._doc.units,
-            )
-        )
+        self._rebuild_tool_context()
 
         container = QWidget(self)
         layout = QVBoxLayout(container)
@@ -140,6 +131,37 @@ class MainWindow(QMainWindow):
             ("Imperial — architectural", self._set_units_imperial),
         ):
             self._units_menu.addAction(label, fn)
+
+    # --- Scene graph back-compat property --------------------------------
+
+    @property
+    def scene(self):  # noqa: ANN201
+        """Back-compat: the active scene from the model (root mesh by default)."""
+        return self._model.active_scene
+
+    # --- Tool context -----------------------------------------------------
+
+    def _rebuild_tool_context(self) -> None:
+        """Build a fresh ToolContext pointing at the active scene and install it.
+
+        Called from __init__ and after any active-context change (undo/redo,
+        enter/exit group).  If a tool is already active it is re-activated so
+        it picks up the new scene reference.
+        """
+        ctx = ToolContext(
+            scene=self._model.active_scene,
+            command_stack=self._command_stack,
+            camera=self._viewport.camera,
+            widget_size_provider=lambda: (self._viewport.width(), self._viewport.height()),
+            selection=self._selection,
+            units_provider=lambda: self._doc.units,
+        )
+        self._tool_manager.set_context(ctx)
+        # Re-activate the current tool so it picks up the new context/scene.
+        active = self._tool_manager.active
+        if active is not None:
+            active.deactivate()
+            active.activate(ctx)
 
     # --- Slots -----------------------------------------------------------
 
@@ -251,7 +273,7 @@ class MainWindow(QMainWindow):
         self._viewport.update()
 
     def _on_clear_scene(self) -> None:
-        self._command_stack.execute(ClearSceneCommand(), self._scene)
+        self._command_stack.execute(ClearSceneCommand(), self._model.active_scene)
         self._refresh_status_text()
         self._viewport.update()
 
@@ -266,32 +288,32 @@ class MainWindow(QMainWindow):
         removed_faces: set[int] = set()
         for e_id in list(sel.edges):
             try:
-                self._scene.edge(e_id)
+                self._model.active_scene.edge(e_id)
             except KeyError:
                 continue
-            for f_id in self._scene.edge_faces(e_id):
+            for f_id in self._model.active_scene.edge_faces(e_id):
                 if f_id is None or f_id in removed_faces:
                     continue
                 fc = RemoveFaceCommand(f_id)
-                fc.do(self._scene)
+                fc.do(self._model.active_scene)
                 composite.children.append(fc)
                 removed_faces.add(f_id)
             ec = RemoveEdgeCommand(e_id)
-            ec.do(self._scene)
+            ec.do(self._model.active_scene)
             composite.children.append(ec)
         for f_id in list(sel.faces):
             if f_id in removed_faces:
                 continue
             try:
-                self._scene.face_loop(f_id)
+                self._model.active_scene.face_loop(f_id)
             except KeyError:
                 continue
             fc = RemoveFaceCommand(f_id)
-            fc.do(self._scene)
+            fc.do(self._model.active_scene)
             composite.children.append(fc)
             removed_faces.add(f_id)
         if composite.children:
-            self._command_stack.push_executed(composite, self._scene)
+            self._command_stack.push_executed(composite, self._model.active_scene)
         sel.clear()
         self._refresh_selection_status()
         self._viewport.update()
@@ -312,6 +334,8 @@ class MainWindow(QMainWindow):
         """Called by CommandStack listeners after every successful undo or redo."""
         self._selection.clear()
         self._refresh_selection_status()
+        self._model.revalidate_active_path()
+        self._rebuild_tool_context()
 
     def _on_undo(self) -> None:
         if self._command_stack.undo():

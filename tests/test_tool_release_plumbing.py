@@ -54,7 +54,7 @@ def test_viewport_forwards_lmb_release_to_active_tool(qtbot):
     from PySide6.QtCore import QEvent, QPointF, Qt
     from PySide6.QtGui import QMouseEvent
 
-    from pluton.scene import Scene
+    from pluton.model import Model
     from pluton.viewport.viewport_widget import ViewportWidget
 
     calls = []
@@ -68,7 +68,7 @@ def test_viewport_forwards_lmb_release_to_active_tool(qtbot):
     class _Mgr:
         def __init__(self): self.active = _Recorder()
 
-    vw = ViewportWidget(scene=Scene(), tool_manager=_Mgr())
+    vw = ViewportWidget(model=Model(), tool_manager=_Mgr())
     qtbot.addWidget(vw)
     ev = QMouseEvent(
         QEvent.Type.MouseButtonRelease, QPointF(120.0, 50.0),

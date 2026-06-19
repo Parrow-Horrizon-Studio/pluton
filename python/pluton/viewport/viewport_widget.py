@@ -23,11 +23,11 @@ from pluton.viewport.snap_engine import SnapEngine, SnapKind
 class ViewportWidget(QOpenGLWidget):
     """The 3D viewport. Renders scene + active tool overlay; routes mouse events."""
 
-    def __init__(self, scene=None, tool_manager=None, parent=None) -> None:  # noqa: ANN001
+    def __init__(self, model=None, tool_manager=None, parent=None) -> None:  # noqa: ANN001
         super().__init__(parent)
         self.camera = Camera()
         self.scene_renderer = SceneRenderer()
-        self.scene = scene
+        self.model = model
         self.tool_manager = tool_manager
         self.selection = None  # M4b — set by MainWindow (pluton.selection.Selection)
         self.snap_engine = SnapEngine()
@@ -40,6 +40,11 @@ class ViewportWidget(QOpenGLWidget):
         self._last_mouse_pos: QPoint | None = None
         self._dragging_button: Qt.MouseButton = Qt.MouseButton.NoButton
         self._dragging_modifiers: Qt.KeyboardModifier = Qt.KeyboardModifier.NoModifier
+
+    @property
+    def scene(self):  # noqa: ANN201
+        """The active scene from the model (delegates to model.active_scene)."""
+        return self.model.active_scene if self.model is not None else None
 
     def set_status_bar(self, status_bar) -> None:  # noqa: ANN001
         self._status_bar = status_bar

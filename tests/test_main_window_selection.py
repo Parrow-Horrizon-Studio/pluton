@@ -28,7 +28,7 @@ def test_selection_is_shared_with_viewport(win):
 
 
 def _quad(win):
-    s = win._scene
+    s = win.scene
     a = s.add_vertex(np.array([-1, -1, 0], dtype=np.float32))
     b = s.add_vertex(np.array([1, -1, 0], dtype=np.float32))
     c = s.add_vertex(np.array([1, 1, 0], dtype=np.float32))
