@@ -9,7 +9,7 @@ import math
 
 import numpy as np
 
-from pluton.geometry.transforms import apply_mat, mat_invert
+from pluton.geometry.transforms import apply_mat, is_identity_transform, mat_invert
 
 PICK_PIXEL_TOLERANCE = 8.0  # screen-space; matches the M3d snap feel
 
@@ -26,13 +26,6 @@ def _point_segment_distance(px, py, ax, ay, bx, by) -> float:
     return math.hypot(px - cx, py - cy)
 
 
-def _is_non_identity(world_transform) -> bool:
-    """Return True when world_transform is a non-None, non-identity matrix."""
-    if world_transform is None:
-        return False
-    m = np.asarray(world_transform, dtype=np.float64)
-    return not np.allclose(m, np.eye(4, dtype=np.float64))
-
 
 def pick_selectable(cursor_screen, viewport_size, camera, scene, world_transform=None):  # noqa: ANN001
     """Return ("edge", id) for the nearest edge within PICK_PIXEL_TOLERANCE of
@@ -45,7 +38,7 @@ def pick_selectable(cursor_screen, viewport_size, camera, scene, world_transform
     px, py = float(cursor_screen[0]), float(cursor_screen[1])
     w, h = int(viewport_size[0]), int(viewport_size[1])
 
-    use_wt = _is_non_identity(world_transform)
+    use_wt = not is_identity_transform(world_transform)
     wt = np.asarray(world_transform, dtype=np.float64) if use_wt else None
 
     def _to_world(local_pos):
@@ -145,7 +138,7 @@ def entities_in_box(rect_px, mode, viewport_size, camera, scene, world_transform
     edges: set[int] = set()
     faces: set[int] = set()
 
-    use_wt = _is_non_identity(world_transform)
+    use_wt = not is_identity_transform(world_transform)
     wt = np.asarray(world_transform, dtype=np.float64) if use_wt else None
 
     def _to_world(local_pos):

@@ -36,6 +36,7 @@ class SelectTool(Tool):
         self._camera = None
         self._size_provider = None
         self._selection = None
+        self._model = None
         self._hovered: tuple[str, int] | None = None
         self._press_px: tuple[float, float] | None = None
         self._is_box = False
@@ -47,10 +48,14 @@ class SelectTool(Tool):
         self._camera = ctx.camera
         self._size_provider = ctx.widget_size_provider
         self._selection = ctx.selection
+        self._model = ctx.model
         self._hovered = None
         self._press_px = None
         self._is_box = False
         self._box_rect = None
+
+    def _world_transform(self):
+        return self._model.active_world_transform if self._model is not None else None
 
     def deactivate(self) -> None:
         self._hovered = None
@@ -75,7 +80,8 @@ class SelectTool(Tool):
                 self._box_window = (cx - px) >= 0.0
             return
         self._hovered = pick_selectable(
-            self._cursor(event), self._viewport_size(), self._camera, self._scene
+            self._cursor(event), self._viewport_size(), self._camera, self._scene,
+            world_transform=self._world_transform(),
         )
 
     def on_mouse_press(self, event: QMouseEvent, snap) -> None:  # noqa: ANN001
@@ -92,7 +98,8 @@ class SelectTool(Tool):
             from pluton.viewport.picking import entities_in_box
             mode = "window" if self._box_window else "crossing"
             edges, faces = entities_in_box(
-                self._box_rect, mode, self._viewport_size(), self._camera, self._scene
+                self._box_rect, mode, self._viewport_size(), self._camera, self._scene,
+                world_transform=self._world_transform(),
             )
             if shift:
                 self._selection.add(edges=edges, faces=faces)
@@ -100,7 +107,8 @@ class SelectTool(Tool):
                 self._selection.replace(edges=edges, faces=faces)
         else:
             hit = pick_selectable(
-                self._cursor(event), self._viewport_size(), self._camera, self._scene
+                self._cursor(event), self._viewport_size(), self._camera, self._scene,
+                world_transform=self._world_transform(),
             )
             if hit is None:
                 if not shift:

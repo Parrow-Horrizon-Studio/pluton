@@ -25,6 +25,7 @@ class ToolContext:
     widget_size_provider: object = None  # M3b-introduced — callable () -> tuple[int, int] returning (width, height)
     selection: object = None  # M4b — pluton.selection.Selection (shared)
     units_provider: object = None  # M4d — callable () -> pluton.units.Units (or None)
+    model: object = None  # M4e — pluton.model.Model (the scene graph); used for active transform + enter/exit
 
 
 @dataclass(frozen=True, slots=True)

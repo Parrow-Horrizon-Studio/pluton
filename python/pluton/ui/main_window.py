@@ -155,6 +155,7 @@ class MainWindow(QMainWindow):
             widget_size_provider=lambda: (self._viewport.width(), self._viewport.height()),
             selection=self._selection,
             units_provider=lambda: self._doc.units,
+            model=self._model,
         )
         self._tool_manager.set_context(ctx)
         # Re-activate the current tool so it picks up the new context/scene.

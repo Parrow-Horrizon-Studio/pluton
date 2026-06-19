@@ -91,6 +91,13 @@ def mat_compose(*mats) -> np.ndarray:
     return out
 
 
+def is_identity_transform(m) -> bool:
+    """True if m is None or numerically the 4x4 identity."""
+    if m is None:
+        return True
+    return bool(np.allclose(np.asarray(m, dtype=np.float64), np.eye(4)))
+
+
 def mat_invert(m) -> np.ndarray:
     return np.linalg.inv(np.asarray(m, dtype=np.float64))
 

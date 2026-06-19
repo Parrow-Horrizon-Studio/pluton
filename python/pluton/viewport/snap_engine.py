@@ -13,7 +13,7 @@ from enum import IntEnum
 
 import numpy as np
 
-from pluton.geometry.transforms import apply_mat, mat_invert
+from pluton.geometry.transforms import apply_mat, is_identity_transform, mat_invert
 from pluton.scene import Scene
 from pluton.viewport.camera import Camera
 
@@ -122,13 +122,7 @@ class SnapEngine:
         ground_hit = camera.ray_intersect_ground(px, py, width, height)
 
         # world_transform support: local→world for screen projections; world→local for ray.
-        use_wt = (
-            world_transform is not None
-            and not np.allclose(
-                np.asarray(world_transform, dtype=np.float64),
-                np.eye(4, dtype=np.float64),
-            )
-        )
+        use_wt = not is_identity_transform(world_transform)
         if use_wt:
             wt = np.asarray(world_transform, dtype=np.float64)
             inv = mat_invert(wt)

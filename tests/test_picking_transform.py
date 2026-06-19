@@ -165,3 +165,50 @@ def test_pick_selectable_identity_and_none_equivalent_to_untransformed():
     hit_identity = pick_selectable((cx, cy), (w, h), cam, scene, world_transform=_identity())
 
     assert hit_no_arg == hit_none == hit_identity
+
+
+# ---------------------------------------------------------------------------
+# M4e review-fix: ToolContext.model field + is_identity_transform helper
+# ---------------------------------------------------------------------------
+
+def test_tool_context_has_model_field_defaulting_to_none():
+    """ToolContext must expose a `model` field that defaults to None."""
+    from pluton.tools.tool import ToolContext
+
+    class _FakeScene:
+        pass
+
+    ctx = ToolContext(scene=_FakeScene())
+    assert hasattr(ctx, "model"), "ToolContext must have a 'model' attribute"
+    assert ctx.model is None, "ToolContext.model default must be None"
+
+
+def test_tool_context_model_can_be_set():
+    """ToolContext.model must accept an arbitrary object (the Model)."""
+    from pluton.tools.tool import ToolContext
+
+    class _FakeScene:
+        pass
+
+    class _FakeModel:
+        pass
+
+    ctx = ToolContext(scene=_FakeScene(), model=_FakeModel())
+    assert isinstance(ctx.model, _FakeModel)
+
+
+def test_is_identity_transform_none_is_true():
+    from pluton.geometry.transforms import is_identity_transform
+    assert is_identity_transform(None) is True
+
+
+def test_is_identity_transform_eye4_is_true():
+    from pluton.geometry.transforms import is_identity_transform
+    assert is_identity_transform(np.eye(4)) is True
+
+
+def test_is_identity_transform_translated_is_false():
+    from pluton.geometry.transforms import is_identity_transform
+    m = np.eye(4)
+    m[0, 3] = 1.0  # translate X by 1
+    assert is_identity_transform(m) is False
