@@ -50,6 +50,15 @@ class Model:
         if self.active_path:
             self.active_path.pop()
 
+    def traverse(self):
+        """Yield (definition, world_transform) depth-first from the root."""
+        yield from self._traverse(self.root, np.eye(4, dtype=np.float64))
+
+    def _traverse(self, definition, world):
+        yield definition, world
+        for inst in definition.children:
+            yield from self._traverse(inst.definition, world @ inst.transform)
+
     def revalidate_active_path(self) -> None:
         """Pop the active path to the nearest still-reachable instance.
 
