@@ -122,6 +122,19 @@ class ViewportWidget(QOpenGLWidget):
 
         super().mouseMoveEvent(event)
 
+    def mouseDoubleClickEvent(self, event: QMouseEvent) -> None:
+        if event.button() == Qt.MouseButton.LeftButton:
+            active = self.tool_manager.active if self.tool_manager is not None else None
+            if active is not None:
+                snap = self._snap_for_event(event)
+                active.on_mouse_double_click(event, snap)
+                if self._on_event_finished is not None:
+                    self._on_event_finished()
+                self.update()
+                event.accept()
+                return
+        super().mouseDoubleClickEvent(event)
+
     def mouseReleaseEvent(self, event: QMouseEvent) -> None:
         if event.button() == Qt.MouseButton.MiddleButton:
             self._dragging_button = Qt.MouseButton.NoButton

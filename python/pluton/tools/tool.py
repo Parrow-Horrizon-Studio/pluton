@@ -26,6 +26,7 @@ class ToolContext:
     selection: object = None  # M4b — pluton.selection.Selection (shared)
     units_provider: object = None  # M4d — callable () -> pluton.units.Units (or None)
     model: object = None  # M4e — pluton.model.Model (the scene graph); used for active transform + enter/exit
+    request_context_rebuild: object = None  # M4e — callable () -> None; rebuilds the tool context after the active editing context changes
 
 
 @dataclass(frozen=True, slots=True)
@@ -93,6 +94,9 @@ class Tool(ABC):
     def on_mouse_release(self, event: QMouseEvent, snap) -> None:  # noqa: ANN001
         """Default: do nothing. Tools that need drag-release (e.g. box-select)
         override this."""
+
+    def on_mouse_double_click(self, event: QMouseEvent, snap) -> None:  # noqa: ANN001
+        """Default: do nothing. SelectTool overrides to enter groups/components."""
 
     def on_key_press(self, event: QKeyEvent) -> None:
         """Default: do nothing."""

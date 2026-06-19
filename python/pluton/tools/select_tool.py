@@ -37,11 +37,14 @@ class SelectTool(Tool):
         self._size_provider = None
         self._selection = None
         self._model = None
+        self._request_rebuild = None  # M4e — callable () -> None
         self._hovered: tuple[str, int] | None = None
+        self._hovered_instance = None  # M4e — Instance | None (for Task 15 silhouette)
         self._press_px: tuple[float, float] | None = None
         self._is_box = False
         self._box_rect: tuple[float, float, float, float] | None = None
         self._box_window = True  # True = L->R window, False = R->L crossing
+        self._suppress_next_release = False  # M4e — set after double-click to eat the trailing release
 
     def activate(self, ctx: ToolContext) -> None:
         self._scene = ctx.scene
@@ -49,10 +52,13 @@ class SelectTool(Tool):
         self._size_provider = ctx.widget_size_provider
         self._selection = ctx.selection
         self._model = ctx.model
+        self._request_rebuild = ctx.request_context_rebuild
         self._hovered = None
+        self._hovered_instance = None
         self._press_px = None
         self._is_box = False
         self._box_rect = None
+        self._suppress_next_release = False
 
     def _world_transform(self):
         return self._model.active_world_transform if self._model is not None else None
@@ -83,6 +89,14 @@ class SelectTool(Tool):
             self._cursor(event), self._viewport_size(), self._camera, self._scene,
             world_transform=self._world_transform(),
         )
+        # M4e: also track hovered instance for Task 15 silhouette rendering
+        if self._model is not None and self._camera is not None:
+            cx, cy = self._cursor(event)
+            w, h = self._viewport_size()
+            origin, direction = self._camera.ray_from_screen(cx, cy, w, h)
+            self._hovered_instance = self._model.pick_instance(origin, direction)
+        else:
+            self._hovered_instance = None
 
     def on_mouse_press(self, event: QMouseEvent, snap) -> None:  # noqa: ANN001
         self._press_px = self._cursor(event)
@@ -90,6 +104,11 @@ class SelectTool(Tool):
         self._box_rect = None
 
     def on_mouse_release(self, event: QMouseEvent, snap) -> None:  # noqa: ANN001
+        # M4e: suppress the trailing release after a double-click enter
+        if self._suppress_next_release:
+            self._suppress_next_release = False
+            self._reset_press()
+            return
         if self._selection is None:
             self._reset_press()
             return
@@ -106,13 +125,31 @@ class SelectTool(Tool):
             else:
                 self._selection.replace(edges=edges, faces=faces)
         else:
+            cx, cy = self._cursor(event)
+            w, h = self._viewport_size()
+            # M4e: try instance pick first (only if we have a model + camera)
+            if self._model is not None and self._camera is not None:
+                origin, direction = self._camera.ray_from_screen(cx, cy, w, h)
+                inst = self._model.pick_instance(origin, direction)
+                if inst is not None:
+                    if shift:
+                        self._selection.toggle_instance(inst.id)
+                    else:
+                        self._selection.replace(instances=[inst.id])
+                    self._reset_press()
+                    return
+            # Fall through to entity pick
             hit = pick_selectable(
                 self._cursor(event), self._viewport_size(), self._camera, self._scene,
                 world_transform=self._world_transform(),
             )
             if hit is None:
                 if not shift:
-                    self._selection.clear()
+                    # M4e: inside a group, empty-click exits one level; at root clear selection
+                    if self._model is not None and self._model.active_path:
+                        self._exit_one()
+                    else:
+                        self._selection.clear()
             elif hit[0] == "edge":
                 self._selection.toggle_edge(hit[1]) if shift else self._selection.replace(edges=[hit[1]])
             else:
@@ -125,9 +162,39 @@ class SelectTool(Tool):
         self._box_rect = None
         self._box_window = True
 
-    def on_key_press(self, event: QKeyEvent) -> None:
-        if event.key() == Qt.Key.Key_Escape and self._selection is not None:
+    def on_mouse_double_click(self, event: QMouseEvent, snap) -> None:  # noqa: ANN001
+        """Double-click an instance to enter it (group/component open for editing)."""
+        if self._model is None or self._camera is None:
+            return
+        cx, cy = self._cursor(event)
+        w, h = self._viewport_size()
+        origin, direction = self._camera.ray_from_screen(cx, cy, w, h)
+        inst = self._model.pick_instance(origin, direction)
+        if inst is not None:
+            self._model.enter(inst)
+            self._enter_or_exit_cleanup()
+            self._suppress_next_release = True
+
+    def _enter_or_exit_cleanup(self) -> None:
+        """Clear selection and trigger a context rebuild after enter/exit."""
+        if self._selection is not None:
             self._selection.clear()
+        if self._request_rebuild is not None:
+            self._request_rebuild()
+
+    def _exit_one(self) -> None:
+        """Exit one level of group nesting and rebuild the tool context."""
+        if self._model is not None:
+            self._model.exit_one()
+            self._enter_or_exit_cleanup()
+
+    def on_key_press(self, event: QKeyEvent) -> None:
+        if event.key() == Qt.Key.Key_Escape:
+            # M4e: Esc inside a group exits one level; at root it clears selection
+            if self._model is not None and self._model.active_path:
+                self._exit_one()
+            elif self._selection is not None:
+                self._selection.clear()
 
     def overlay(self) -> ToolOverlay:
         box_rect = self._box_rect if self._is_box else None

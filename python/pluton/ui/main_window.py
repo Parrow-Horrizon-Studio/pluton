@@ -156,6 +156,7 @@ class MainWindow(QMainWindow):
             selection=self._selection,
             units_provider=lambda: self._doc.units,
             model=self._model,
+            request_context_rebuild=self._on_active_context_changed,
         )
         self._tool_manager.set_context(ctx)
         # Re-activate the current tool so it picks up the new context/scene.
@@ -332,6 +333,13 @@ class MainWindow(QMainWindow):
         if ni:
             parts.append(f"{ni} instance" + ("s" if ni != 1 else ""))
         self._status_bar.set_selection(", ".join(parts) + " selected")
+
+    def _on_active_context_changed(self) -> None:
+        """Called by SelectTool after enter/exit to rebuild the tool context
+        for the new active editing context.  A breadcrumb update (Task 15) will
+        also be added here later."""
+        self._rebuild_tool_context()
+        self._viewport.update()
 
     def _on_after_undo_redo(self) -> None:
         """Called by CommandStack listeners after every successful undo or redo."""
