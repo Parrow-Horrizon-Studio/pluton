@@ -3,13 +3,14 @@
 Lifecycle is driven by QOpenGLWidget:
   initialize_gl() -> first paintGL() call sets up VBOs and shader programs.
   resize(w, h)    -> called from resizeGL.
-  render(camera, scene, tool_overlay, selection) -> called from paintGL each frame.
+  render(camera, model, tool_overlay, selection) -> called from paintGL each frame.
 """
 
 from __future__ import annotations
 
 import ctypes
 from collections.abc import Sequence
+from dataclasses import dataclass, field
 from importlib.resources import files
 
 import numpy as np
@@ -54,6 +55,17 @@ _PHONG_UNIFORMS = (
 )
 _LINE_UNIFORMS = ("u_view", "u_projection")
 _GHOST_FILL_UNIFORMS = ("u_view", "u_projection", "u_color")
+
+
+@dataclass
+class _DefBuffers:
+    """Per-definition GL buffer handles and vertex counts."""
+    face_vao: int = 0
+    face_vbo: int = 0
+    face_count: int = 0  # number of triangle vertices
+    edge_vao: int = 0
+    edge_vbo: int = 0
+    edge_count: int = 0  # number of line-segment vertices
 
 
 def _load_shader_source(name: str) -> str:
@@ -253,14 +265,9 @@ class SceneRenderer:
         self._axes_vao: int = 0
         self._axes_vbo: int = 0
         self._axes_vertex_count: int = 0
-        # User-geometry buffers (filled by Scene.dirty refresh path)
-        self._user_face_vao: int = 0
-        self._user_face_vbo: int = 0  # interleaved (pos.xyz, normal.xyz)
-        self._user_face_count: int = 0  # number of vertices to draw
-
-        self._user_edge_vao: int = 0
-        self._user_edge_vbo: int = 0  # interleaved (pos.xyz, color.rgb), 24 bytes per vertex
-        self._user_edge_count: int = 0
+        # Per-definition GL buffer cache (M4e Task 11): keyed by id(definition).
+        # Each entry is a _DefBuffers holding face/edge VAO+VBO+count.
+        self._def_buffers: dict[int, _DefBuffers] = {}
 
         # Tool overlay buffers (rebuilt every frame)
         self._overlay_line_vao: int = 0
@@ -315,7 +322,6 @@ class SceneRenderer:
 
         self._init_grid_buffers()
         self._init_axes_buffers()
-        self._init_user_buffers()
         self._init_overlay_buffers()
         self._init_ghost_fill_buffers()
 
@@ -328,8 +334,14 @@ class SceneRenderer:
             return
         GL.glViewport(0, 0, w, h)
 
-    def render(self, camera: Camera, scene=None, tool_overlay=None, selection=None) -> None:  # noqa: ANN001
-        """Draw the full scene: grid + axes + user faces + user edges + tool overlay."""
+    def render(self, camera: Camera, model=None, tool_overlay=None, selection=None) -> None:  # noqa: ANN001
+        """Draw the full scene: grid + axes + user geometry (all definitions) + tool overlay.
+
+        Iterates model.traverse() to draw each definition's geometry with its
+        accumulated world transform as the model matrix. Per-definition GL
+        buffers are cached in _def_buffers and re-uploaded only when the
+        definition's mesh is dirty.
+        """
         if not self._initialized:
             return
 
@@ -347,19 +359,25 @@ class SceneRenderer:
         # 2. Axes (M1)
         self._draw_lines(self._axes_vao, self._axes_vertex_count, view, projection)
 
-        # 3 & 4. User faces / edges (NEW) — re-upload if scene is dirty
-        if scene is not None:
-            if scene.dirty:
-                self._refresh_user_buffers(scene)
-                scene.mark_clean()
-            if self._user_face_count > 0:
-                self._draw_user_faces(view, projection, camera.position)
-            if self._user_edge_count > 0:
-                self._draw_user_edges(view, projection)
+        # 3 & 4. Draw all definitions in the scene graph with their world transforms.
+        if model is not None:
+            for definition, world in model.traverse():
+                buf = self._def_buffers.get(id(definition))
+                if buf is None or definition.mesh.dirty:
+                    buf = self._upload_definition(definition)
+                    definition.mesh.mark_clean()
+                    self._def_buffers[id(definition)] = buf
+                model_mat = world.astype(np.float32)
+                if buf.face_count > 0:
+                    self._draw_definition_faces(buf, view, projection, camera.position, model_mat)
+                if buf.edge_count > 0:
+                    self._draw_definition_edges(buf, view, projection, model_mat)
 
             # 4.5 Selection highlight (persistent, drawn on top of geometry).
+            # Operates on the active context (root at identity, or entered context).
             if selection is not None:
-                self._draw_selection(scene, selection, view, projection)
+                active_scene = model.active_scene
+                self._draw_selection(active_scene, selection, view, projection)
 
         # 5. Tool overlay (NEW) — drawn on top with depth-test disabled
         if tool_overlay is not None:
@@ -396,17 +414,15 @@ class SceneRenderer:
         self._axes_vertex_count = int(verts.shape[0])
         self._axes_vao, self._axes_vbo = self._upload_interleaved_lines(verts)
 
-    def _init_user_buffers(self) -> None:
-        """Create empty VBOs for user-face and user-edge geometry.
+    def _alloc_def_buffers(self) -> _DefBuffers:
+        """Allocate a new _DefBuffers: create empty VAO+VBO pairs for faces and edges."""
+        buf = _DefBuffers()
 
-        We allocate VAOs/VBOs here but leave them empty until the first
-        scene-dirty refresh fills them with real data.
-        """
-        # User faces — interleaved (pos.xyz, normal.xyz), 24 bytes per vertex
-        self._user_face_vao = int(GL.glGenVertexArrays(1))
-        self._user_face_vbo = int(GL.glGenBuffers(1))
-        GL.glBindVertexArray(self._user_face_vao)
-        GL.glBindBuffer(GL.GL_ARRAY_BUFFER, self._user_face_vbo)
+        # Face buffers — interleaved (pos.xyz, normal.xyz), 24 bytes per vertex
+        buf.face_vao = int(GL.glGenVertexArrays(1))
+        buf.face_vbo = int(GL.glGenBuffers(1))
+        GL.glBindVertexArray(buf.face_vao)
+        GL.glBindBuffer(GL.GL_ARRAY_BUFFER, buf.face_vbo)
         GL.glBufferData(GL.GL_ARRAY_BUFFER, 0, None, GL.GL_DYNAMIC_DRAW)
         GL.glVertexAttribPointer(0, 3, GL.GL_FLOAT, GL.GL_FALSE, 24, None)
         GL.glEnableVertexAttribArray(0)
@@ -414,13 +430,11 @@ class SceneRenderer:
         GL.glEnableVertexAttribArray(1)
         GL.glBindVertexArray(0)
 
-        # User edges — interleaved (pos.xyz, color.rgb), 24 bytes per vertex
-        # The line shader reads per-vertex color from attribute 1, so we pack
-        # a constant edge color alongside each position.
-        self._user_edge_vao = int(GL.glGenVertexArrays(1))
-        self._user_edge_vbo = int(GL.glGenBuffers(1))
-        GL.glBindVertexArray(self._user_edge_vao)
-        GL.glBindBuffer(GL.GL_ARRAY_BUFFER, self._user_edge_vbo)
+        # Edge buffers — interleaved (pos.xyz, color.rgb), 24 bytes per vertex
+        buf.edge_vao = int(GL.glGenVertexArrays(1))
+        buf.edge_vbo = int(GL.glGenBuffers(1))
+        GL.glBindVertexArray(buf.edge_vao)
+        GL.glBindBuffer(GL.GL_ARRAY_BUFFER, buf.edge_vbo)
         GL.glBufferData(GL.GL_ARRAY_BUFFER, 0, None, GL.GL_DYNAMIC_DRAW)
         stride = 6 * ctypes.sizeof(ctypes.c_float)  # 24 bytes
         GL.glVertexAttribPointer(0, 3, GL.GL_FLOAT, GL.GL_FALSE, stride, ctypes.c_void_p(0))
@@ -431,6 +445,8 @@ class SceneRenderer:
         )
         GL.glEnableVertexAttribArray(1)
         GL.glBindVertexArray(0)
+
+        return buf
 
     def _init_overlay_buffers(self) -> None:
         """Create empty VBOs for tool-overlay lines and snap-marker quads.
@@ -502,20 +518,33 @@ class SceneRenderer:
         GL.glBindVertexArray(0)
         GL.glUseProgram(0)
 
-    def _refresh_user_buffers(self, scene) -> None:  # noqa: ANN001
-        """Re-upload face and edge geometry from the scene to the GPU."""
-        # User faces: (3*T, 3) positions + (3*T, 3) normals → interleaved (3*T, 6)
+    def _upload_definition(self, definition) -> _DefBuffers:  # noqa: ANN001
+        """Build or update GL buffers for a single definition's mesh.
+
+        Looks up (or allocates) a _DefBuffers entry for this definition,
+        uploads fresh geometry data, and returns the updated _DefBuffers.
+        The caller is responsible for calling definition.mesh.mark_clean()
+        and storing the result back into self._def_buffers[id(definition)].
+        """
+        # Re-use existing GL objects if we already have them; allocate if not.
+        buf = self._def_buffers.get(id(definition))
+        if buf is None:
+            buf = self._alloc_def_buffers()
+
+        scene = definition.mesh
+
+        # Faces: (3*T, 3) positions + (3*T, 3) normals → interleaved (3*T, 6)
         positions, normals = scene.face_triangle_buffer()
         if positions.shape[0] > 0:
             interleaved = np.concatenate([positions, normals], axis=1).astype(np.float32)
             data = np.ascontiguousarray(interleaved)
-            GL.glBindBuffer(GL.GL_ARRAY_BUFFER, self._user_face_vbo)
+            GL.glBindBuffer(GL.GL_ARRAY_BUFFER, buf.face_vbo)
             GL.glBufferData(GL.GL_ARRAY_BUFFER, data.nbytes, data, GL.GL_DYNAMIC_DRAW)
-            self._user_face_count = int(positions.shape[0])
+            buf.face_count = int(positions.shape[0])
         else:
-            self._user_face_count = 0
+            buf.face_count = 0
 
-        # User edges: (2*E, 3) positions — pack constant color per vertex so the
+        # Edges: (2*E, 3) positions — pack constant color per vertex so the
         # line shader's attribute 1 (in_color) is always satisfied.
         edges = scene.edge_line_buffer()
         if edges.shape[0] > 0:
@@ -524,24 +553,28 @@ class SceneRenderer:
             data = np.ascontiguousarray(
                 np.concatenate([edges.astype(np.float32), colors], axis=1)
             )
-            GL.glBindBuffer(GL.GL_ARRAY_BUFFER, self._user_edge_vbo)
+            GL.glBindBuffer(GL.GL_ARRAY_BUFFER, buf.edge_vbo)
             GL.glBufferData(GL.GL_ARRAY_BUFFER, data.nbytes, data, GL.GL_DYNAMIC_DRAW)
-            self._user_edge_count = n
+            buf.edge_count = n
         else:
-            self._user_edge_count = 0
+            buf.edge_count = 0
 
-    def _draw_user_faces(
+        return buf
+
+    def _draw_definition_faces(
         self,
+        buf: _DefBuffers,
         view: np.ndarray,
         projection: np.ndarray,
         camera_pos: np.ndarray,
+        model_mat: np.ndarray,
     ) -> None:
+        """Draw a definition's face geometry with the given model matrix."""
         GL.glUseProgram(self._phong_program)
         locs = self._phong_locs
         _set_mat4(locs["u_view"], view)
         _set_mat4(locs["u_projection"], projection)
-        # User geometry is already in world space — identity model matrix.
-        _set_mat4(locs["u_model"], np.eye(4, dtype=np.float32))
+        _set_mat4(locs["u_model"], model_mat)
         _set_vec3(locs["u_camera_pos"], camera_pos)
         # Same lighting / material as the old M1 cube.
         _set_vec3(locs["u_light_dir"], _LIGHT_DIR)
@@ -551,20 +584,41 @@ class SceneRenderer:
         _set_vec3(locs["u_material_specular"], _MATERIAL_SPECULAR)
         _set_float(locs["u_material_shininess"], _MATERIAL_SHININESS)
 
-        GL.glBindVertexArray(self._user_face_vao)
-        GL.glDrawArrays(GL.GL_TRIANGLES, 0, self._user_face_count)
+        GL.glBindVertexArray(buf.face_vao)
+        GL.glDrawArrays(GL.GL_TRIANGLES, 0, buf.face_count)
         GL.glBindVertexArray(0)
         GL.glUseProgram(0)
 
-    def _draw_user_edges(self, view: np.ndarray, projection: np.ndarray) -> None:
+    def _draw_definition_edges(
+        self,
+        buf: _DefBuffers,
+        view: np.ndarray,
+        projection: np.ndarray,
+        model_mat: np.ndarray,
+    ) -> None:
+        """Draw a definition's edge geometry with the given model matrix.
+
+        Note: the line shader does not have a u_model uniform (it uses only
+        u_view and u_projection), so edges are always drawn in local space
+        transformed to world space by the line vertex shader via the view
+        matrix. For the root definition at identity this is equivalent to
+        the previous hardcoded behaviour. For child definitions the geometry
+        is already in local space; the model matrix must be folded into the
+        view or the edges drawn in world space. Since the line shader has no
+        u_model, we pre-multiply view by model_mat for this draw call only.
+        """
+        # Pre-multiply: view_for_edges = view @ model_mat (transforms local→clip).
+        # Both are float32; the result is float32.
+        view_x_model = (view.astype(np.float64) @ model_mat.astype(np.float64)).astype(np.float32)
+
         GL.glUseProgram(self._line_program)
         locs = self._line_locs
-        _set_mat4(locs["u_view"], view)
+        _set_mat4(locs["u_view"], view_x_model)
         _set_mat4(locs["u_projection"], projection)
 
-        GL.glBindVertexArray(self._user_edge_vao)
+        GL.glBindVertexArray(buf.edge_vao)
         GL.glLineWidth(1.5)
-        GL.glDrawArrays(GL.GL_LINES, 0, self._user_edge_count)
+        GL.glDrawArrays(GL.GL_LINES, 0, buf.edge_count)
         GL.glLineWidth(1.0)
         GL.glBindVertexArray(0)
         GL.glUseProgram(0)

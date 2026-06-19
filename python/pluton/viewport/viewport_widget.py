@@ -64,7 +64,7 @@ class ViewportWidget(QOpenGLWidget):
     def paintGL(self) -> None:
         active = self.tool_manager.active if self.tool_manager is not None else None
         overlay = active.overlay() if active is not None else None
-        self.scene_renderer.render(self.camera, self.scene, overlay, self.selection)
+        self.scene_renderer.render(self.camera, self.model, overlay, self.selection)
 
     # --- Mouse handling ---------------------------------------------------
 
