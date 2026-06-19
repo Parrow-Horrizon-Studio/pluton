@@ -5,6 +5,10 @@ original positions. Drag computes delta = destination - grab (axis-lock is
 provided by the SnapEngine, which the viewport calls with anchor_or_none =
 the grab point). Release commits one TransformVerticesCommand. The mesh is
 never mutated until release, so Esc/deactivate simply resets.
+
+Instance-mode (M4e §7.3): if ctx.selection.instances is non-empty at press,
+the tool composes the gesture delta into each instance's 4x4 transform and
+emits TransformInstanceCommand(s) instead of TransformVerticesCommand.
 """
 
 from __future__ import annotations
@@ -33,6 +37,7 @@ class MoveTool(Tool):
 
     def __init__(self) -> None:
         self._scene = None
+        self._model = None
         self._stack = None
         self._selection = None
         self._units_provider = None
@@ -41,9 +46,13 @@ class MoveTool(Tool):
         self._delta = np.zeros(3, dtype=np.float32)
         self._vertex_ids: list[int] = []
         self._orig: dict[int, np.ndarray] = {}
+        # instance-mode state
+        self._instance_mode = False
+        self._instances: list = []  # list of Instance objects
 
     def activate(self, ctx: ToolContext) -> None:
         self._scene = ctx.scene
+        self._model = ctx.model
         self._stack = ctx.command_stack
         self._selection = ctx.selection
         self._units_provider = ctx.units_provider
@@ -60,13 +69,26 @@ class MoveTool(Tool):
             return
         if snap.kind == SnapKind.NONE:
             return
-        self._vertex_ids = selection_vertices(self._scene, self._selection)
-        if not self._vertex_ids:
-            return
-        self._orig = {v: self._scene.vertex(v).position.copy() for v in self._vertex_ids}
-        self._grab = np.asarray(snap.world_position, np.float32).copy()
-        self._delta = np.zeros(3, dtype=np.float32)
-        self._dragging = True
+
+        # Determine mode at gesture start
+        self._instance_mode = bool(self._selection.instances)
+
+        if self._instance_mode:
+            self._instances = self._resolve_instances()
+            if not self._instances:
+                self._instance_mode = False
+                return
+            self._grab = np.asarray(snap.world_position, np.float32).copy()
+            self._delta = np.zeros(3, dtype=np.float32)
+            self._dragging = True
+        else:
+            self._vertex_ids = selection_vertices(self._scene, self._selection)
+            if not self._vertex_ids:
+                return
+            self._orig = {v: self._scene.vertex(v).position.copy() for v in self._vertex_ids}
+            self._grab = np.asarray(snap.world_position, np.float32).copy()
+            self._delta = np.zeros(3, dtype=np.float32)
+            self._dragging = True
 
     def on_mouse_move(self, event: QMouseEvent, snap) -> None:  # noqa: ANN001
         from pluton.viewport.snap_engine import SnapKind
@@ -82,14 +104,18 @@ class MoveTool(Tool):
                 and snap.kind != SnapKind.NONE and self._grab is not None:
             dest = np.asarray(snap.world_position, np.float32)
             self._delta = (dest - self._grab).astype(np.float32)
-        ids = self._vertex_ids
-        if ids:
-            pts = np.array([self._orig[v] for v in ids], np.float32)
-            new = translate(pts, self._delta)
-            moves = {v: (self._orig[v], new[i]) for i, v in enumerate(ids)}
-            cmd = TransformVerticesCommand(moves)
-            if not cmd.is_empty() and self._stack is not None:
-                self._stack.execute(cmd, self._scene)
+
+        if self._instance_mode:
+            self._commit_instance_move(self._delta)
+        else:
+            ids = self._vertex_ids
+            if ids:
+                pts = np.array([self._orig[v] for v in ids], np.float32)
+                new = translate(pts, self._delta)
+                moves = {v: (self._orig[v], new[i]) for i, v in enumerate(ids)}
+                cmd = TransformVerticesCommand(moves)
+                if not cmd.is_empty() and self._stack is not None:
+                    self._stack.execute(cmd, self._scene)
         self._reset()
 
     def on_key_press(self, event: QKeyEvent) -> None:
@@ -107,10 +133,17 @@ class MoveTool(Tool):
         if norm < 1e-9:
             return False
         direction = (self._delta / norm).astype(np.float32)
+        typed_delta = direction * dist
+
+        if self._instance_mode:
+            self._commit_instance_move(typed_delta)
+            self._reset()
+            return True
+
         moves = {}
         for v in self._vertex_ids:
             old = self._orig[v]
-            moves[v] = (old, (old + direction * dist).astype(np.float32))
+            moves[v] = (old, (old + typed_delta).astype(np.float32))
         from pluton.commands.scene_commands import TransformVerticesCommand
         cmd = TransformVerticesCommand(moves)
         if not cmd.is_empty() and self._stack is not None:
@@ -123,9 +156,10 @@ class MoveTool(Tool):
         segs = np.zeros((0, 3), dtype=np.float32)
         marker = None
         if self._dragging and self._grab is not None and self._scene is not None:
-            ghost = self._ghost_segments()
-            if ghost.shape[0] >= 2:
-                polylines.append((ghost, _GHOST, 2.0))
+            if not self._instance_mode:
+                ghost = self._ghost_segments()
+                if ghost.shape[0] >= 2:
+                    polylines.append((ghost, _GHOST, 2.0))
             segs = np.array([self._grab, self._grab + self._delta], dtype=np.float32)
             marker = (self._grab + self._delta).astype(np.float32)
         return ToolOverlay(
@@ -157,6 +191,37 @@ class MoveTool(Tool):
         return "Move: pick a grab point"
 
     # ---- internal ----
+
+    def _resolve_instances(self) -> list:
+        """Resolve selected instance ids to Instance objects from the active context."""
+        if self._model is None or self._selection is None:
+            return []
+        inst_ids = self._selection.instances
+        return [
+            inst for inst in self._model.active_context.children
+            if inst.id in inst_ids
+        ]
+
+    def _commit_instance_move(self, delta: np.ndarray) -> None:
+        """Emit TransformInstanceCommand(s) for the current instance selection."""
+        from pluton.geometry.transforms import mat_translate
+        from pluton.commands.instance_commands import TransformInstanceCommand
+        from pluton.commands.command import CompositeCommand
+
+        delta_mat = mat_translate(delta)
+        cmds = [
+            TransformInstanceCommand(inst, delta_mat @ inst.transform)
+            for inst in self._instances
+        ]
+        if not cmds:
+            return
+        if len(cmds) == 1:
+            cmd = cmds[0]
+        else:
+            cmd = CompositeCommand(name="Move Instances", children=cmds)
+        if self._stack is not None and self._model is not None:
+            self._stack.execute(cmd, self._model)
+
     def _ghost_segments(self) -> np.ndarray:
         """Selection edges + face loops as world segments, translated by delta."""
         s = self._scene
@@ -191,3 +256,5 @@ class MoveTool(Tool):
         self._delta = np.zeros(3, dtype=np.float32)
         self._vertex_ids = []
         self._orig = {}
+        self._instance_mode = False
+        self._instances = []

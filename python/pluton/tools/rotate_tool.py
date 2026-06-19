@@ -4,6 +4,10 @@ Three clicks: center -> start direction -> angle. The protractor plane is the
 plane of the face under the cursor when the center is placed (else the ground
 plane). Up/Down arrows cycle a forced axis (X/Y/Z/auto) overriding the inferred
 normal. The swept angle snaps to 15 degrees. One TransformVerticesCommand on commit.
+
+Instance-mode (M4e §7.3): if ctx.selection.instances is non-empty when the center
+is placed, the tool composes the rotate delta into each instance's 4x4 transform and
+emits TransformInstanceCommand(s) instead of TransformVerticesCommand.
 """
 
 from __future__ import annotations
@@ -46,6 +50,7 @@ class RotateTool(Tool):
 
     def __init__(self) -> None:
         self._scene = None
+        self._model = None
         self._stack = None
         self._selection = None
         self._camera = None
@@ -59,9 +64,13 @@ class RotateTool(Tool):
         self._forced_axis: int | None = None
         self._vertex_ids: list[int] = []
         self._orig: dict[int, np.ndarray] = {}
+        # instance-mode state
+        self._instance_mode = False
+        self._instances: list = []
 
     def activate(self, ctx: ToolContext) -> None:
         self._scene = ctx.scene
+        self._model = ctx.model
         self._stack = ctx.command_stack
         self._selection = ctx.selection
         self._camera = ctx.camera
@@ -81,10 +90,18 @@ class RotateTool(Tool):
         p = np.asarray(snap.world_position, np.float32)
 
         if self._stage == _Stage.IDLE:
-            self._vertex_ids = selection_vertices(self._scene, self._selection)
-            if not self._vertex_ids:
-                return
-            self._orig = {v: self._scene.vertex(v).position.copy() for v in self._vertex_ids}
+            # Determine mode at gesture start (center placement)
+            self._instance_mode = bool(self._selection.instances)
+            if self._instance_mode:
+                self._instances = self._resolve_instances()
+                if not self._instances:
+                    self._instance_mode = False
+                    # fall through to entity mode
+            if not self._instance_mode:
+                self._vertex_ids = selection_vertices(self._scene, self._selection)
+                if not self._vertex_ids:
+                    return
+                self._orig = {v: self._scene.vertex(v).position.copy() for v in self._vertex_ids}
             self._center = p.copy()
             self._normal = self._effective_normal(self._pick_plane_normal(event))
             self._stage = _Stage.HAVE_CENTER
@@ -100,10 +117,13 @@ class RotateTool(Tool):
             return
 
         angle = self._swept_angle(p)
-        moves = self._compute_moves(angle)
-        cmd = TransformVerticesCommand(moves)
-        if not cmd.is_empty() and self._stack is not None:
-            self._stack.execute(cmd, self._scene)
+        if self._instance_mode:
+            self._commit_instance_rotate(angle)
+        else:
+            moves = self._compute_moves(angle)
+            cmd = TransformVerticesCommand(moves)
+            if not cmd.is_empty() and self._stack is not None:
+                self._stack.execute(cmd, self._scene)
         self._reset()
 
     def on_mouse_move(self, event: QMouseEvent, snap) -> None:  # noqa: ANN001
@@ -135,6 +155,12 @@ class RotateTool(Tool):
             return False
         sign = 1.0 if self._swept_angle_from_cur() >= 0 else -1.0
         angle = sign * math.radians(deg)
+
+        if self._instance_mode:
+            self._commit_instance_rotate(angle)
+            self._reset()
+            return True
+
         moves = self._compute_moves(angle)
         from pluton.commands.scene_commands import TransformVerticesCommand
         cmd = TransformVerticesCommand(moves)
@@ -188,6 +214,37 @@ class RotateTool(Tool):
         return f"Rotate: {math.degrees(self._swept_angle_from_cur()):.0f} deg (15 deg snap)"
 
     # ---- internal ----
+
+    def _resolve_instances(self) -> list:
+        """Resolve selected instance ids to Instance objects from the active context."""
+        if self._model is None or self._selection is None:
+            return []
+        inst_ids = self._selection.instances
+        return [
+            inst for inst in self._model.active_context.children
+            if inst.id in inst_ids
+        ]
+
+    def _commit_instance_rotate(self, angle: float) -> None:
+        """Emit TransformInstanceCommand(s) for the rotate gesture."""
+        from pluton.geometry.transforms import mat_rotate
+        from pluton.commands.instance_commands import TransformInstanceCommand
+        from pluton.commands.command import CompositeCommand
+
+        delta_mat = mat_rotate(self._center, self._normal, angle)
+        cmds = [
+            TransformInstanceCommand(inst, delta_mat @ inst.transform)
+            for inst in self._instances
+        ]
+        if not cmds:
+            return
+        if len(cmds) == 1:
+            cmd = cmds[0]
+        else:
+            cmd = CompositeCommand(name="Rotate Instances", children=cmds)
+        if self._stack is not None and self._model is not None:
+            self._stack.execute(cmd, self._model)
+
     def _pick_plane_normal(self, event) -> np.ndarray:  # noqa: ANN001
         """Normal of the face under the cursor, or +Z (ground) if none/no camera."""
         if self._camera is None or self._size_provider is None or self._scene is None:
@@ -233,6 +290,9 @@ class RotateTool(Tool):
         return {v: (self._orig[v], new[i]) for i, v in enumerate(ids)}
 
     def _disk_radius(self) -> float:
+        if self._instance_mode:
+            # Use a unit radius for instance mode (no orig vertices)
+            return 1.0
         if not self._orig:
             return 1.0
         pts = np.array(list(self._orig.values()), np.float32)
@@ -272,3 +332,5 @@ class RotateTool(Tool):
         self._forced_axis = None
         self._vertex_ids = []
         self._orig = {}
+        self._instance_mode = False
+        self._instances = []

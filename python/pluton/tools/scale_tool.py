@@ -5,6 +5,11 @@ grip (screen space); its opposite is the anchor (Ctrl -> AABB centre). Drag
 computes per-axis factors (corner = uniform along the diagonal; edge/face =
 per-axis; Shift = uniform across driven axes). Zero-extent driven axes stay 1.
 Release commits one TransformVerticesCommand. Preview is overlay-only.
+
+Instance-mode (M4e §7.3): if ctx.selection.instances is non-empty, the gizmo
+AABB is derived from the union of each selected instance's world bounding box
+(local_aabb transformed by active_world_transform @ inst.transform). Commit
+emits TransformInstanceCommand(s) via mat_scale(anchor, factor_vec).
 """
 
 from __future__ import annotations
@@ -41,6 +46,7 @@ class ScaleTool(Tool):
 
     def __init__(self) -> None:
         self._scene = None
+        self._model = None
         self._stack = None
         self._selection = None
         self._camera = None
@@ -54,9 +60,13 @@ class ScaleTool(Tool):
         self._active: GripSpec | None = None
         self._anchor = np.zeros(3, np.float32)
         self._factor_vec = np.ones(3, np.float32)
+        # instance-mode state
+        self._instance_mode = False
+        self._instances: list = []
 
     def activate(self, ctx: ToolContext) -> None:
         self._scene = ctx.scene
+        self._model = ctx.model
         self._stack = ctx.command_stack
         self._selection = ctx.selection
         self._camera = ctx.camera
@@ -68,15 +78,27 @@ class ScaleTool(Tool):
         self._reset_drag()
         self._lo = self._hi = None
         self._grips = []
+        self._instance_mode = False
+        self._instances = []
 
     def _rebuild_box(self) -> None:
         self._reset_drag()
-        self._vertex_ids = (
-            selection_vertices(self._scene, self._selection)
-            if self._selection is not None and not self._selection.is_empty()
-            else []
-        )
-        box = selection_aabb(self._scene, self._vertex_ids)
+        if self._selection is not None and not self._selection.is_empty() \
+                and self._selection.instances:
+            # Instance mode: compute AABB from world bboxes of selected instances
+            self._instance_mode = True
+            self._instances = self._resolve_instances()
+            box = self._instance_world_aabb()
+        else:
+            self._instance_mode = False
+            self._instances = []
+            self._vertex_ids = (
+                selection_vertices(self._scene, self._selection)
+                if self._selection is not None and not self._selection.is_empty()
+                else []
+            )
+            box = selection_aabb(self._scene, self._vertex_ids)
+
         if box is None:
             self._lo = self._hi = None
             self._grips = []
@@ -90,7 +112,8 @@ class ScaleTool(Tool):
         grip = self._pick_grip(event)
         if grip is None:
             return
-        self._orig = {v: self._scene.vertex(v).position.copy() for v in self._vertex_ids}
+        if not self._instance_mode:
+            self._orig = {v: self._scene.vertex(v).position.copy() for v in self._vertex_ids}
         self._active = grip
         ctrl = bool(event.modifiers() & Qt.KeyboardModifier.ControlModifier)
         self._anchor = (
@@ -118,14 +141,17 @@ class ScaleTool(Tool):
             self._factor_vec = self._factor_vec_for(
                 self._active, self._anchor, cursor, extent, uniform
             )
-        ids = self._vertex_ids
-        if ids:
-            pts = np.array([self._orig[v] for v in ids], np.float32)
-            new = scale_pts(pts, self._anchor, self._factor_vec)
-            moves = {v: (self._orig[v], new[i]) for i, v in enumerate(ids)}
-            cmd = TransformVerticesCommand(moves)
-            if not cmd.is_empty() and self._stack is not None:
-                self._stack.execute(cmd, self._scene)
+        if self._instance_mode:
+            self._commit_instance_scale(self._anchor, self._factor_vec)
+        else:
+            ids = self._vertex_ids
+            if ids:
+                pts = np.array([self._orig[v] for v in ids], np.float32)
+                new = scale_pts(pts, self._anchor, self._factor_vec)
+                moves = {v: (self._orig[v], new[i]) for i, v in enumerate(ids)}
+                cmd = TransformVerticesCommand(moves)
+                if not cmd.is_empty() and self._stack is not None:
+                    self._stack.execute(cmd, self._scene)
         self._reset_drag()
         self._rebuild_box()
 
@@ -147,6 +173,13 @@ class ScaleTool(Tool):
         for ax in self._active.axes:
             if abs(float(extent[ax])) > 1e-9:
                 out[ax] = factor
+
+        if self._instance_mode:
+            self._commit_instance_scale(self._anchor, out)
+            self._reset_drag()
+            self._rebuild_box()
+            return True
+
         ids = self._vertex_ids
         pts = np.array([self._orig[v] for v in ids], np.float32)
         new = scale_pts(pts, self._anchor, out)
@@ -235,6 +268,66 @@ class ScaleTool(Tool):
             for ax in driven:
                 out[ax] = f
         return out
+
+    # ---- instance helpers ----
+
+    def _resolve_instances(self) -> list:
+        """Resolve selected instance ids to Instance objects from the active context."""
+        if self._model is None or self._selection is None:
+            return []
+        inst_ids = self._selection.instances
+        return [
+            inst for inst in self._model.active_context.children
+            if inst.id in inst_ids
+        ]
+
+    def _instance_world_aabb(self) -> tuple[np.ndarray, np.ndarray] | None:
+        """Union of world bounding boxes for all selected instances."""
+        if not self._instances or self._model is None:
+            return None
+        world0 = self._model.active_world_transform
+        all_pts: list[np.ndarray] = []
+        for inst in self._instances:
+            local_box = inst.definition.local_aabb()
+            if local_box is None:
+                continue
+            lo, hi = local_box
+            # 8 corners of the local AABB
+            corners = np.array([
+                [lo[0], lo[1], lo[2]], [hi[0], lo[1], lo[2]],
+                [hi[0], hi[1], lo[2]], [lo[0], hi[1], lo[2]],
+                [lo[0], lo[1], hi[2]], [hi[0], lo[1], hi[2]],
+                [hi[0], hi[1], hi[2]], [lo[0], hi[1], hi[2]],
+            ], dtype=np.float64)
+            world_mat = world0 @ inst.transform
+            # transform corners: (8,4) @ (4,4).T -> (8,4)
+            hom = np.hstack([corners, np.ones((8, 1))])
+            world_corners = (hom @ world_mat.T)[:, :3].astype(np.float32)
+            all_pts.append(world_corners)
+        if not all_pts:
+            return None
+        pts = np.vstack(all_pts)
+        return pts.min(axis=0).astype(np.float32), pts.max(axis=0).astype(np.float32)
+
+    def _commit_instance_scale(self, anchor: np.ndarray, factor_vec: np.ndarray) -> None:
+        """Emit TransformInstanceCommand(s) for the scale gesture."""
+        from pluton.geometry.transforms import mat_scale
+        from pluton.commands.instance_commands import TransformInstanceCommand
+        from pluton.commands.command import CompositeCommand
+
+        delta_mat = mat_scale(anchor, factor_vec)
+        cmds = [
+            TransformInstanceCommand(inst, delta_mat @ inst.transform)
+            for inst in self._instances
+        ]
+        if not cmds:
+            return
+        if len(cmds) == 1:
+            cmd = cmds[0]
+        else:
+            cmd = CompositeCommand(name="Scale Instances", children=cmds)
+        if self._stack is not None and self._model is not None:
+            self._stack.execute(cmd, self._model)
 
     # ---- screen picking (camera-dependent; stubbed in unit tests) ----
     def _pick_grip(self, event) -> GripSpec | None:  # noqa: ANN001
