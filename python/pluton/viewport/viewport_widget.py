@@ -164,10 +164,12 @@ class ViewportWidget(QOpenGLWidget):
         pos = event.position()
         active = self.tool_manager.active if self.tool_manager is not None else None
         anchor = active.anchor_or_none if active is not None else None
+        wt = self.model.active_world_transform if self.model is not None else None
         return self.snap_engine.snap(
             (float(pos.x()), float(pos.y())),
             (self.width(), self.height()),
             self.camera,
             self.scene,
             anchor=anchor,
+            world_transform=wt,
         )

@@ -13,6 +13,7 @@ from enum import IntEnum
 
 import numpy as np
 
+from pluton.geometry.transforms import apply_mat, mat_invert
 from pluton.scene import Scene
 from pluton.viewport.camera import Camera
 
@@ -101,11 +102,16 @@ class SnapEngine:
     AXIS_DEG_TOLERANCE = 5.0
     GRID_SIZE_WORLD = 1.0
 
-    def snap(self, cursor_screen, viewport_size, camera, scene, anchor=None) -> SnapResult:
+    def snap(self, cursor_screen, viewport_size, camera, scene, anchor=None, world_transform=None) -> SnapResult:
         """Return the chosen 3D snap for the given cursor.
 
         cursor_screen: (px, py) pixel coords. viewport_size: (width, height).
         The cursor ray and ground hit are derived internally from the camera.
+
+        world_transform: optional (4,4) matrix mapping local (scene) coords to world.
+        None or identity → behaviour is identical to the no-arg call (regression-safe).
+        When non-identity, vertex/edge positions are transformed to world before screen
+        projection, and the camera ray is transformed to local space for face picking.
         """
         if cursor_screen is None or camera is None or scene is None:
             return self._none()
@@ -115,13 +121,42 @@ class SnapEngine:
         ray_origin, ray_dir = camera.ray_from_screen(px, py, width, height)
         ground_hit = camera.ray_intersect_ground(px, py, width, height)
 
-        cands: list[_Candidate] = []
-        cands += self._endpoint_candidates(px, py, width, height, camera, scene)
-        cands += self._edge_point_candidates(
-            px, py, width, height, camera, scene, ray_origin, ray_dir
+        # world_transform support: local→world for screen projections; world→local for ray.
+        use_wt = (
+            world_transform is not None
+            and not np.allclose(
+                np.asarray(world_transform, dtype=np.float64),
+                np.eye(4, dtype=np.float64),
+            )
         )
-        face_cand = self._face_candidate(ray_origin, ray_dir, scene)
+        if use_wt:
+            wt = np.asarray(world_transform, dtype=np.float64)
+            inv = mat_invert(wt)
+
+            def _to_world(local_pos):
+                return apply_mat(local_pos, wt)[0]
+
+            # Camera ray in local space (for face picking).
+            ray_origin_local = apply_mat(ray_origin, inv)[0]
+            ray_dir_local = (inv[:3, :3] @ np.asarray(ray_dir, dtype=np.float64)).astype(np.float32)
+        else:
+            def _to_world(local_pos):  # type: ignore[misc]
+                return local_pos
+
+            ray_origin_local = ray_origin
+            ray_dir_local = ray_dir
+
+        cands: list[_Candidate] = []
+        cands += self._endpoint_candidates(px, py, width, height, camera, scene, _to_world)
+        cands += self._edge_point_candidates(
+            px, py, width, height, camera, scene, ray_origin, ray_dir, _to_world,
+            ray_origin_local, ray_dir_local,
+        )
+        face_cand = self._face_candidate(ray_origin_local, ray_dir_local, scene)
         if face_cand is not None:
+            if use_wt:
+                # Surface the snap result in world space.
+                face_cand.world_position = apply_mat(face_cand.world_position, wt)[0]
             cands.append(face_cand)
         if anchor is not None:
             a = np.asarray(anchor, dtype=np.float32)
@@ -168,53 +203,77 @@ class SnapEngine:
 
     # --- candidate generators --------------------------------------------
 
-    def _endpoint_candidates(self, px, py, width, height, camera, scene):
+    def _endpoint_candidates(self, px, py, width, height, camera, scene, _to_world=None):
+        if _to_world is None:
+            def _to_world(p):  # type: ignore[misc]
+                return p
         out: list[_Candidate] = []
         for v in scene.vertices_iter():
-            proj = camera.world_to_screen(v.position, width, height)
+            world_pos = _to_world(v.position)
+            proj = camera.world_to_screen(world_pos, width, height)
             if proj is None:
                 continue
             sx, sy, depth = proj
             d = math.hypot(sx - px, sy - py)
             if d <= self.PIXEL_TOLERANCE:
                 out.append(_Candidate(
-                    kind=SnapKind.ENDPOINT, world_position=v.position.copy(),
+                    kind=SnapKind.ENDPOINT, world_position=np.asarray(world_pos, dtype=np.float32),
                     screen_dist=d, depth=depth, label="Endpoint", vertex_id=v.id,
                 ))
         return out
 
-    def _edge_point_candidates(self, px, py, width, height, camera, scene, ray_origin, ray_dir):
+    def _edge_point_candidates(
+        self, px, py, width, height, camera, scene, ray_origin, ray_dir,
+        _to_world=None, ray_origin_local=None, ray_dir_local=None,
+    ):
         """Midpoint AND On-Edge candidates for each live edge.
 
         The Midpoint block projects the geometric midpoint of each edge.
         The On-Edge block uses `ray_origin`/`ray_dir` (the cursor ray) to find
         the closest point on the 3D segment to the ray, producing an ON_EDGE
         candidate whenever that projected point is within pixel tolerance.
+
+        _to_world: optional callable that maps a local position to world space.
+        ray_origin_local / ray_dir_local: the camera ray in local space (for
+        finding the closest point on local-space segments).
         """
+        if _to_world is None:
+            def _to_world(p):  # type: ignore[misc]
+                return p
+        if ray_origin_local is None:
+            ray_origin_local = ray_origin
+        if ray_dir_local is None:
+            ray_dir_local = ray_dir
+
         out: list[_Candidate] = []
         for e in scene.edges_iter():
             p1 = scene.vertex(e.v1_id).position
             p2 = scene.vertex(e.v2_id).position
-            mid = (p1 + p2) * 0.5
-            proj = camera.world_to_screen(mid, width, height)
+            # Work in local space for segment math; project world positions to screen.
+            mid_local = (p1 + p2) * 0.5
+            mid_world = _to_world(mid_local)
+            proj = camera.world_to_screen(mid_world, width, height)
             if proj is not None:
                 sx, sy, depth = proj
                 d = math.hypot(sx - px, sy - py)
                 if d <= self.PIXEL_TOLERANCE:
                     out.append(_Candidate(
-                        kind=SnapKind.MIDPOINT, world_position=mid.astype(np.float32),
+                        kind=SnapKind.MIDPOINT,
+                        world_position=np.asarray(mid_world, dtype=np.float32),
                         screen_dist=d, depth=depth, label="Midpoint",
                         edge_id=e.id, edge_t=0.5,
                     ))
-            # On-Edge: closest point on the 3D segment to the cursor ray.
-            on_pt, t = _closest_point_on_segment_to_ray(ray_origin, ray_dir, p1, p2)
-            proj_e = camera.world_to_screen(on_pt, width, height)
+            # On-Edge: closest point on the local 3D segment to the local cursor ray.
+            on_pt_local, t = _closest_point_on_segment_to_ray(ray_origin_local, ray_dir_local, p1, p2)
+            on_pt_world = _to_world(on_pt_local)
+            proj_e = camera.world_to_screen(on_pt_world, width, height)
             if proj_e is not None:
                 sx, sy, depth = proj_e
                 d = math.hypot(sx - px, sy - py)
                 if d <= self.PIXEL_TOLERANCE:
                     out.append(_Candidate(
-                        kind=SnapKind.ON_EDGE, world_position=on_pt,
+                        kind=SnapKind.ON_EDGE,
+                        world_position=np.asarray(on_pt_world, dtype=np.float32),
                         screen_dist=d, depth=depth, label="On Edge",
                         edge_id=e.id, edge_t=t,
                     ))

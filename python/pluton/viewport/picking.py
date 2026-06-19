@@ -7,6 +7,10 @@ from __future__ import annotations
 
 import math
 
+import numpy as np
+
+from pluton.geometry.transforms import apply_mat, mat_invert
+
 PICK_PIXEL_TOLERANCE = 8.0  # screen-space; matches the M3d snap feel
 
 
@@ -22,18 +26,38 @@ def _point_segment_distance(px, py, ax, ay, bx, by) -> float:
     return math.hypot(px - cx, py - cy)
 
 
-def pick_selectable(cursor_screen, viewport_size, camera, scene):  # noqa: ANN001
+def _is_non_identity(world_transform) -> bool:
+    """Return True when world_transform is a non-None, non-identity matrix."""
+    if world_transform is None:
+        return False
+    m = np.asarray(world_transform, dtype=np.float64)
+    return not np.allclose(m, np.eye(4, dtype=np.float64))
+
+
+def pick_selectable(cursor_screen, viewport_size, camera, scene, world_transform=None):  # noqa: ANN001
     """Return ("edge", id) for the nearest edge within PICK_PIXEL_TOLERANCE of
     the cursor (screen-space); else ("face", id) under the cursor ray; else None.
-    Edge-priority: thin targets are harder to hit, so they win over the face."""
+    Edge-priority: thin targets are harder to hit, so they win over the face.
+
+    world_transform: optional (4,4) matrix mapping local (scene) coords to world.
+    None or identity → behaviour is identical to the no-arg call (regression-safe).
+    """
     px, py = float(cursor_screen[0]), float(cursor_screen[1])
     w, h = int(viewport_size[0]), int(viewport_size[1])
+
+    use_wt = _is_non_identity(world_transform)
+    wt = np.asarray(world_transform, dtype=np.float64) if use_wt else None
+
+    def _to_world(local_pos):
+        if not use_wt:
+            return local_pos
+        return apply_mat(local_pos, wt)[0]
 
     best_edge: int | None = None
     best_d = PICK_PIXEL_TOLERANCE
     for e in scene.edges_iter():
-        p1 = scene.vertex(e.v1_id).position
-        p2 = scene.vertex(e.v2_id).position
+        p1 = _to_world(scene.vertex(e.v1_id).position)
+        p2 = _to_world(scene.vertex(e.v2_id).position)
         s1 = camera.world_to_screen(p1, w, h)
         s2 = camera.world_to_screen(p2, w, h)
         if s1 is None or s2 is None:
@@ -46,7 +70,13 @@ def pick_selectable(cursor_screen, viewport_size, camera, scene):  # noqa: ANN00
         return ("edge", best_edge)
 
     origin, direction = camera.ray_from_screen(px, py, w, h)
-    hit = scene.ray_pick_face(origin, direction)
+    if use_wt:
+        inv = mat_invert(wt)
+        origin_local = apply_mat(origin, inv)[0]
+        direction_local = (inv[:3, :3] @ np.asarray(direction, dtype=np.float64)).astype(np.float32)
+        hit = scene.ray_pick_face(origin_local, direction_local)
+    else:
+        hit = scene.ray_pick_face(origin, direction)
     if hit is not None:
         return ("face", int(hit.face_id))
     return None
@@ -103,16 +133,28 @@ def _normalize_rect(rect):
     return (min(x0, x1), min(y0, y1), max(x0, x1), max(y0, y1))
 
 
-def entities_in_box(rect_px, mode, viewport_size, camera, scene):  # noqa: ANN001
+def entities_in_box(rect_px, mode, viewport_size, camera, scene, world_transform=None):  # noqa: ANN001
     """Return (edge_ids: set, face_ids: set) inside rect_px under the given mode.
-    mode="window": only fully-enclosed; mode="crossing": anything touched."""
+    mode="window": only fully-enclosed; mode="crossing": anything touched.
+
+    world_transform: optional (4,4) matrix mapping local (scene) coords to world.
+    None or identity → behaviour is identical to the no-arg call (regression-safe).
+    """
     rect = _normalize_rect(rect_px)
     w, h = int(viewport_size[0]), int(viewport_size[1])
     edges: set[int] = set()
     faces: set[int] = set()
 
-    def proj(world):
-        return camera.world_to_screen(world, w, h)
+    use_wt = _is_non_identity(world_transform)
+    wt = np.asarray(world_transform, dtype=np.float64) if use_wt else None
+
+    def _to_world(local_pos):
+        if not use_wt:
+            return local_pos
+        return apply_mat(local_pos, wt)[0]
+
+    def proj(local_pos):
+        return camera.world_to_screen(_to_world(local_pos), w, h)
 
     for e in scene.edges_iter():
         s1 = proj(scene.vertex(e.v1_id).position)
