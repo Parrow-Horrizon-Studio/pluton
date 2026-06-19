@@ -190,7 +190,7 @@ class RectangleTool(Tool):
         composite.children.append(f_cmd)
 
         if self._command_stack is not None:
-            self._command_stack.push_executed(composite)
+            self._command_stack.push_executed(composite, self._scene)
         self._reset_gesture()
 
     def _reset_gesture(self) -> None:

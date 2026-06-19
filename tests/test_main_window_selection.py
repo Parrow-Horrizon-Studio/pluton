@@ -44,7 +44,7 @@ def test_delete_selection_removes_face_and_is_undoable(win):
     win._on_delete_selection()
     assert len(list(scene.faces_iter())) == f0 - 1
     assert win._selection.is_empty()
-    win._command_stack.undo(scene)
+    win._command_stack.undo()
     assert len(list(scene.faces_iter())) == f0
 
 
@@ -62,7 +62,7 @@ def test_undo_clears_selection(win):
     win._selection.replace(faces=[fid])
     win._on_delete_selection()
     win._selection.replace(faces=[fid])
-    win._command_stack.undo(scene)
+    win._command_stack.undo()
     assert win._selection.is_empty()
 
 

@@ -105,7 +105,7 @@ class EraserTool(Tool):
 
     def on_mouse_release(self, event: QMouseEvent, snap) -> None:  # noqa: ANN001
         if self._stroke is not None and self._stroke.children and self._command_stack is not None:
-            self._command_stack.push_executed(self._stroke)
+            self._command_stack.push_executed(self._stroke, self._scene)
         self._stroke = None
         self._erased = set()
         self._hovered_edge = None

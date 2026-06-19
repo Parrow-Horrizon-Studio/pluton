@@ -61,7 +61,7 @@ def test_move_translates_selection(qtbot):
     for vid, base in ((a, [0, 0, 0]), (b, [2, 0, 0]), (c, [2, 2, 0]), (d, [0, 2, 0])):
         assert np.allclose(s.vertex(vid).position, np.array(base) + [0, 0, 3])
     assert stack.can_undo
-    stack.undo(s)
+    stack.undo()
     assert np.allclose(s.vertex(a).position, [0, 0, 0])
 
 

@@ -124,11 +124,11 @@ def test_rectangle_tool_pushes_composite_to_command_stack():
     tool.on_mouse_press(None, _snap_at((3.0, 2.0, 0.0)))  # type: ignore[arg-type]
 
     assert stack.can_undo
-    stack.undo(scene)
+    stack.undo()
     assert len(list(scene.vertices_iter())) == 0
     assert len(list(scene.faces_iter())) == 0
 
-    stack.redo(scene)
+    stack.redo()
     assert len(list(scene.vertices_iter())) == 4
     assert len(list(scene.faces_iter())) == 1
 

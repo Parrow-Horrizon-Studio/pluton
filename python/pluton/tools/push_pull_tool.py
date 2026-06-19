@@ -377,7 +377,7 @@ class PushPullTool(Tool):
         composite.children.extend(seam_cmds)
 
         if self._command_stack is not None:
-            self._command_stack.push_executed(composite)
+            self._command_stack.push_executed(composite, self._scene)
 
     def apply_typed_value(self, text, units) -> bool:
         from pluton.units import parse_length

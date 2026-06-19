@@ -78,10 +78,10 @@ def test_erase_is_atomically_undoable(qtbot):
     tool.on_mouse_press(_press(sx, sy), None)
     tool.on_mouse_release(_release(sx, sy), None)
     assert stack.can_undo
-    stack.undo(scene)
+    stack.undo()
     assert (len(list(scene.vertices_iter())), len(list(scene.edges_iter())),
             len(list(scene.faces_iter()))) == (v0, e0, f0)
-    stack.redo(scene)
+    stack.redo()
     assert len(list(scene.faces_iter())) == f0 - 1
 
 
@@ -97,7 +97,7 @@ def test_drag_erase_two_edges_is_one_undo(qtbot):
     tool.on_mouse_move(_move(p_bc[0], p_bc[1]), None)
     tool.on_mouse_release(_release(p_bc[0], p_bc[1]), None)
     assert len(list(scene.edges_iter())) <= e0 - 2
-    stack.undo(scene)
+    stack.undo()
     assert len(list(scene.edges_iter())) == e0
 
 
@@ -138,5 +138,5 @@ def test_erase_interior_edge_removes_both_faces(qtbot):
     tool.on_mouse_press(_press(sx, sy), None)
     tool.on_mouse_release(_release(sx, sy), None)
     assert len(list(s.faces_iter())) == f0 - 2   # both faces cascaded
-    stack.undo(s)
+    stack.undo()
     assert len(list(s.faces_iter())) == f0        # both restored

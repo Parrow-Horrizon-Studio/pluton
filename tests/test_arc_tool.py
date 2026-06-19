@@ -65,9 +65,9 @@ def test_arc_commit_is_atomically_undoable():
     tool.on_mouse_press(None, _snap((1.0, 0.0, 0.0)))
     tool.on_mouse_press(None, _snap((0.0, 1.0, 0.0)))
     assert stack.can_undo
-    stack.undo(scene)
+    stack.undo()
     assert len(list(scene.vertices_iter())) == 0
-    stack.redo(scene)
+    stack.redo()
     assert len(list(scene.edges_iter())) == 12
 
 

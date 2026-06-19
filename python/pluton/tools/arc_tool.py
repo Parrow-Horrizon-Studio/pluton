@@ -118,7 +118,7 @@ class ArcTool(Tool):
         world = self._plane.to_world(pts_uv).astype(np.float32)
         composite = build_open_polyline(s, world, name="Draw Arc")
         if composite is not None and self._command_stack is not None:
-            self._command_stack.push_executed(composite)
+            self._command_stack.push_executed(composite, self._scene)
         self._reset_gesture()
 
     def on_key_press(self, event: QKeyEvent) -> None:
@@ -198,7 +198,7 @@ class ArcTool(Tool):
             world = self._plane.to_world(pts_uv).astype(np.float32)
             composite = build_open_polyline(self._scene, world, name="Draw Arc")
             if composite is not None and self._command_stack is not None:
-                self._command_stack.push_executed(composite)
+                self._command_stack.push_executed(composite, self._scene)
             self._reset_gesture()
             return True
         return False

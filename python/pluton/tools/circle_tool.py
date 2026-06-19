@@ -103,7 +103,7 @@ class CircleTool(Tool):
         world = self._plane.to_world(ring_uv).astype(np.float32)
         composite = build_closed_face(s, world, name="Draw Circle")
         if composite is not None and self._command_stack is not None:
-            self._command_stack.push_executed(composite)
+            self._command_stack.push_executed(composite, self._scene)
         self._reset_gesture()
 
     def apply_typed_value(self, text, units) -> bool:
@@ -117,7 +117,7 @@ class CircleTool(Tool):
         world = self._plane.to_world(ring_uv).astype(np.float32)
         composite = build_closed_face(self._scene, world, name="Draw Circle")
         if composite is not None and self._command_stack is not None:
-            self._command_stack.push_executed(composite)
+            self._command_stack.push_executed(composite, self._scene)
         self._reset_gesture()
         return True
 

@@ -164,7 +164,7 @@ def test_case2_composite_undoes_atomically():
     pre_positions = _live_vertex_positions(scene)
 
     stack = _commit_pp_directly(scene, top, depth=1.0)
-    stack.undo(scene)
+    stack.undo()
 
     assert sum(1 for _ in scene.faces_iter()) == pre_face_count
     assert sum(1 for _ in scene.edges_iter()) == pre_edge_count
@@ -220,8 +220,8 @@ def test_case2_composite_redo_restores_merged_state():
     merged_face_count = sum(1 for _ in scene.faces_iter())
     assert merged_face_count == 6
 
-    stack.undo(scene)
-    stack.redo(scene)
+    stack.undo()
+    stack.redo()
 
     assert sum(1 for _ in scene.faces_iter()) == 6
     for e in old_top_edge_ids:

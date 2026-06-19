@@ -156,7 +156,7 @@ class TestPushPullCommit:
         )
         tool.on_mouse_move(_make_move(), snap=None)
         tool.on_mouse_press(_make_press(), snap=None)
-        assert cmd_stack.undo(scene)
+        assert cmd_stack.undo()
         assert _live_vertex_count(scene) == 4
         assert _live_edge_count(scene) == 4
         assert _live_face_count(scene) == 1
@@ -173,8 +173,8 @@ class TestPushPullCommit:
         )
         tool.on_mouse_move(_make_move(), snap=None)
         tool.on_mouse_press(_make_press(), snap=None)
-        cmd_stack.undo(scene)
-        cmd_stack.redo(scene)
+        cmd_stack.undo()
+        cmd_stack.redo()
         assert _live_vertex_count(scene) == 8
         assert _live_edge_count(scene) == 12
         assert _live_face_count(scene) == 6

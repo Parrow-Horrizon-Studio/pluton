@@ -181,7 +181,7 @@ def test_line_tool_pushes_composite_at_loop_close():
     assert stack.can_undo
     assert len(list(scene.faces_iter())) == 1
 
-    stack.undo(scene)
+    stack.undo()
     assert len(list(scene.vertices_iter())) == 0
     assert len(list(scene.edges_iter())) == 0
     assert len(list(scene.faces_iter())) == 0
@@ -259,7 +259,7 @@ def test_line_tool_enter_finishes_and_commits_open_polyline():
     assert stack.can_undo
 
     # A single undo removes ALL the polyline geometry.
-    stack.undo(scene)
+    stack.undo()
     assert len(list(scene.vertices_iter())) == 0
     assert len(list(scene.edges_iter())) == 0
 

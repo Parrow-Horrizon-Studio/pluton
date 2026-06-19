@@ -291,7 +291,7 @@ class MainWindow(QMainWindow):
             composite.children.append(fc)
             removed_faces.add(f_id)
         if composite.children:
-            self._command_stack.push_executed(composite)
+            self._command_stack.push_executed(composite, self._scene)
         sel.clear()
         self._refresh_selection_status()
         self._viewport.update()
@@ -314,12 +314,12 @@ class MainWindow(QMainWindow):
         self._refresh_selection_status()
 
     def _on_undo(self) -> None:
-        if self._command_stack.undo(self._scene):
+        if self._command_stack.undo():
             self._refresh_status_text()
             self._viewport.update()
 
     def _on_redo(self) -> None:
-        if self._command_stack.redo(self._scene):
+        if self._command_stack.redo():
             self._refresh_status_text()
             self._viewport.update()
 

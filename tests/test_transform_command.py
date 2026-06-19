@@ -39,9 +39,9 @@ def test_redo_via_stack():
     )
     stack.execute(cmd, s)
     assert np.allclose(s.vertex(a).position, [9, 0, 0])
-    stack.undo(s)
+    stack.undo()
     assert np.allclose(s.vertex(a).position, [0, 0, 0])
-    stack.redo(s)
+    stack.redo()
     assert np.allclose(s.vertex(a).position, [9, 0, 0])
 
 

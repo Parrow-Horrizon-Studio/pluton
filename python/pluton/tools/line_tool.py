@@ -120,7 +120,7 @@ class LineTool(Tool):
             f_cmd.do(s)
             self._composite.children.append(f_cmd)
             if self._command_stack is not None:
-                self._command_stack.push_executed(self._composite)
+                self._command_stack.push_executed(self._composite, self._scene)
             self._reset_gesture()
             return
 
@@ -178,7 +178,7 @@ class LineTool(Tool):
             if self._state == _State.DRAWING and self._composite is not None:
                 if len(self._gesture_vertex_ids) >= 2 and self._composite.children:
                     if self._command_stack is not None:
-                        self._command_stack.push_executed(self._composite)
+                        self._command_stack.push_executed(self._composite, self._scene)
                 else:
                     # Only the start point was placed — nothing to commit; discard.
                     self._composite.undo(s)

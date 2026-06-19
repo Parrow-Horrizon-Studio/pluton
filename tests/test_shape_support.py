@@ -56,17 +56,17 @@ def test_build_closed_face_creates_ring_face_and_undoes_atomically():
     pts = np.array([[0, 0, 0], [2, 0, 0], [2, 2, 0], [0, 2, 0]], dtype=np.float32)
     composite = build_closed_face(scene, pts, name="X")
     assert composite is not None
-    stack.push_executed(composite)
+    stack.push_executed(composite, scene)
 
     assert len(list(scene.vertices_iter())) == 4
     assert len(list(scene.edges_iter())) == 4
     assert len(list(scene.faces_iter())) == 1
 
-    stack.undo(scene)
+    stack.undo()
     assert len(list(scene.vertices_iter())) == 0
     assert len(list(scene.faces_iter())) == 0
 
-    stack.redo(scene)
+    stack.redo()
     assert len(list(scene.vertices_iter())) == 4
     assert len(list(scene.faces_iter())) == 1
 
@@ -94,15 +94,15 @@ def test_build_open_polyline_creates_edges_no_face():
     composite = build_open_polyline(scene, pts, name="A")
     assert composite is not None
     assert composite.children
-    stack.push_executed(composite)
+    stack.push_executed(composite, scene)
     assert len(list(scene.vertices_iter())) == 3
     assert len(list(scene.edges_iter())) == 2
     assert len(list(scene.faces_iter())) == 0
 
-    stack.undo(scene)
+    stack.undo()
     assert len(list(scene.vertices_iter())) == 0
     assert len(list(scene.edges_iter())) == 0
-    stack.redo(scene)
+    stack.redo()
     assert len(list(scene.edges_iter())) == 2
     assert len(list(scene.faces_iter())) == 0
 

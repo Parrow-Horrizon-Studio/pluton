@@ -57,7 +57,7 @@ def test_execute_runs_do_and_pushes_to_undo_stack():
     log: list[str] = []
     cmd = CompositeCommand(name="C", children=[_RecordingCommand("x", log)])
     s = CommandStack()
-    s.execute(cmd, scene=None)
+    s.execute(cmd, None)
     assert log == ["do:x"]
     assert s.can_undo
     assert not s.can_redo
@@ -69,7 +69,7 @@ def test_push_executed_appends_without_calling_do():
     log: list[str] = []
     cmd = CompositeCommand(name="C", children=[_RecordingCommand("x", log)])
     s = CommandStack()
-    s.push_executed(cmd)
+    s.push_executed(cmd, None)
     assert log == []  # do was NOT called
     assert s.can_undo
 
@@ -80,9 +80,9 @@ def test_undo_calls_command_undo_and_moves_to_redo():
     log: list[str] = []
     cmd = CompositeCommand(name="C", children=[_RecordingCommand("x", log)])
     s = CommandStack()
-    s.execute(cmd, scene=None)
+    s.execute(cmd, None)
     log.clear()
-    assert s.undo(scene=None) is True
+    assert s.undo() is True
     assert log == ["undo:x"]
     assert not s.can_undo
     assert s.can_redo
@@ -94,10 +94,10 @@ def test_redo_runs_do_again():
     log: list[str] = []
     cmd = CompositeCommand(name="C", children=[_RecordingCommand("x", log)])
     s = CommandStack()
-    s.execute(cmd, scene=None)
-    s.undo(scene=None)
+    s.execute(cmd, None)
+    s.undo()
     log.clear()
-    assert s.redo(scene=None) is True
+    assert s.redo() is True
     assert log == ["do:x"]
 
 
@@ -108,10 +108,10 @@ def test_new_execute_clears_redo_stack():
     s = CommandStack()
     cmd_a = CompositeCommand(name="A", children=[_RecordingCommand("a", log)])
     cmd_b = CompositeCommand(name="B", children=[_RecordingCommand("b", log)])
-    s.execute(cmd_a, scene=None)
-    s.undo(scene=None)
+    s.execute(cmd_a, None)
+    s.undo()
     assert s.can_redo
-    s.execute(cmd_b, scene=None)
+    s.execute(cmd_b, None)
     assert not s.can_redo  # new execute cleared redo
 
 
@@ -119,14 +119,14 @@ def test_undo_on_empty_returns_false():
     from pluton.commands import CommandStack
 
     s = CommandStack()
-    assert s.undo(scene=None) is False
+    assert s.undo() is False
 
 
 def test_redo_on_empty_returns_false():
     from pluton.commands import CommandStack
 
     s = CommandStack()
-    assert s.redo(scene=None) is False
+    assert s.redo() is False
 
 
 # ---------------------------------------------------------------------------
@@ -146,8 +146,8 @@ def test_undo_listener_fires_once_after_successful_undo():
     s.add_undo_listener(lambda: undo_fired.append(1))
     s.add_redo_listener(lambda: redo_fired.append(1))
 
-    s.execute(cmd, scene=None)
-    assert s.undo(scene=None) is True
+    s.execute(cmd, None)
+    assert s.undo() is True
 
     assert undo_fired == [1], "undo listener must fire exactly once after a successful undo"
     assert redo_fired == [], "redo listener must NOT fire when undo is called"
@@ -165,11 +165,11 @@ def test_redo_listener_fires_once_after_successful_redo():
     s.add_undo_listener(lambda: undo_fired.append(1))
     s.add_redo_listener(lambda: redo_fired.append(1))
 
-    s.execute(cmd, scene=None)
-    s.undo(scene=None)
+    s.execute(cmd, None)
+    s.undo()
     undo_fired.clear()  # reset to isolate the redo assertion
 
-    assert s.redo(scene=None) is True
+    assert s.redo() is True
 
     assert redo_fired == [1], "redo listener must fire exactly once after a successful redo"
     assert undo_fired == [], "undo listener must NOT fire when redo is called"
@@ -183,7 +183,7 @@ def test_undo_listener_does_not_fire_on_empty_stack():
     undo_fired: list[int] = []
     s.add_undo_listener(lambda: undo_fired.append(1))
 
-    result = s.undo(scene=None)
+    result = s.undo()
 
     assert result is False
     assert undo_fired == [], "undo listener must not fire when undo stack is empty"
@@ -197,10 +197,52 @@ def test_redo_listener_does_not_fire_on_empty_stack():
     redo_fired: list[int] = []
     s.add_redo_listener(lambda: redo_fired.append(1))
 
-    result = s.redo(scene=None)
+    result = s.redo()
 
     assert result is False
     assert redo_fired == [], "redo listener must not fire when redo stack is empty"
+
+
+# ---------------------------------------------------------------------------
+# M4e Task 5 — per-command target threading
+# ---------------------------------------------------------------------------
+
+
+class _Recorder:
+    name = "Rec"
+
+    def __init__(self, log, tag):
+        self._log, self._tag = log, tag
+
+    def do(self, target):
+        self._log.append(("do", self._tag, target))
+
+    def undo(self, target):
+        self._log.append(("undo", self._tag, target))
+
+
+def test_stack_threads_per_command_target():
+    from pluton.commands import CommandStack
+
+    log = []
+    s = CommandStack()
+    s.execute(_Recorder(log, "a"), "SCENE_A")
+    s.execute(_Recorder(log, "b"), "SCENE_B")
+    assert s.undo() is True          # undoes b against SCENE_B
+    assert s.undo() is True          # undoes a against SCENE_A
+    assert s.undo() is False
+    assert ("undo", "b", "SCENE_B") in log
+    assert ("undo", "a", "SCENE_A") in log
+
+
+def test_push_executed_remembers_target():
+    from pluton.commands import CommandStack
+
+    log = []
+    s = CommandStack()
+    s.push_executed(_Recorder(log, "x"), "TARGET_X")
+    assert s.undo() is True
+    assert ("undo", "x", "TARGET_X") in log
 
 
 def test_listener_fire_counts_across_full_undo_redo_cycle():
@@ -217,23 +259,23 @@ def test_listener_fire_counts_across_full_undo_redo_cycle():
     s.add_undo_listener(lambda: undo_fired.append(1))
     s.add_redo_listener(lambda: redo_fired.append(1))
 
-    s.execute(cmd, scene=None)
+    s.execute(cmd, None)
 
     # First undo — listener should fire once
-    assert s.undo(scene=None) is True
+    assert s.undo() is True
     assert undo_fired == [1]
     assert redo_fired == []
 
     # Redo — redo listener fires, undo listener stays silent
-    assert s.redo(scene=None) is True
+    assert s.redo() is True
     assert redo_fired == [1]
     assert undo_fired == [1]  # unchanged since redo
 
     # Second undo — undo listener fires again (total 2)
-    assert s.undo(scene=None) is True
+    assert s.undo() is True
     assert undo_fired == [1, 1]
 
     # Stack is now empty — third undo returns False, no additional fire
-    assert s.undo(scene=None) is False
+    assert s.undo() is False
     assert undo_fired == [1, 1], "listener must not fire a third time on an empty stack"
     assert redo_fired == [1], "redo listener must still be at exactly 1"
