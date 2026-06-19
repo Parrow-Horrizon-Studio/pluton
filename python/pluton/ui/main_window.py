@@ -115,6 +115,9 @@ class MainWindow(QMainWindow):
         QShortcut(QKeySequence("Ctrl+Z"), self, activated=self._on_undo)
         QShortcut(QKeySequence("Ctrl+Y"), self, activated=self._on_redo)
         QShortcut(QKeySequence("Ctrl+Shift+Z"), self, activated=self._on_redo)
+        QShortcut(QKeySequence("Ctrl+G"), self, activated=self._on_make_group)
+        QShortcut(QKeySequence("Ctrl+Shift+G"), self, activated=self._on_make_component)
+        QShortcut(QKeySequence("Ctrl+Shift+E"), self, activated=self._on_explode)
 
         # Install the VCB event filter on the QApplication so it intercepts
         # key events (and ShortcutOverride) before any QShortcut fires.
@@ -124,8 +127,16 @@ class MainWindow(QMainWindow):
         if _app is not None:
             _app.installEventFilter(self)
 
-        # Units menu
+        # Edit menu
         menubar = self.menuBar()
+        self._edit_menu = menubar.addMenu("Edit")
+        self._edit_menu.addAction("Make Group\tCtrl+G", self._on_make_group)
+        self._edit_menu.addAction("Make Component…\tCtrl+Shift+G", self._on_make_component)
+        self._edit_menu.addSeparator()
+        self._edit_menu.addAction("Explode\tCtrl+Shift+E", self._on_explode)
+        self._edit_menu.addAction("Make Unique", self._on_make_unique)
+
+        # Units menu
         self._units_menu = menubar.addMenu("Units")
         for label, fn in (
             ("Metric — m", lambda: self._set_units_metric("m")),
@@ -282,13 +293,121 @@ class MainWindow(QMainWindow):
         self._refresh_status_text()
         self._viewport.update()
 
+    # --- Edit-menu handlers -----------------------------------------------
+
+    def _on_make_group(self) -> None:
+        from pluton.commands.group_commands import MakeGroupCommand
+        from pluton.tools.transform_support import selection_vertices
+
+        sel = self._selection
+        if not (sel.edges or sel.faces):
+            self._status_bar.set_status("Select edges or faces to group.")
+            return
+        vertex_ids = selection_vertices(self._model.active_scene, sel)
+        edge_ids = list(sel.edges)
+        face_ids = list(sel.faces)
+        cmd = MakeGroupCommand(self._model.active_context, vertex_ids, edge_ids, face_ids)
+        self._command_stack.execute(cmd, self._model)
+        sel.replace(instances=[cmd.created_instance.id])
+        self._refresh_selection_status()
+        self._refresh_breadcrumb()
+        self._viewport.update()
+
+    def _prompt_component_name(self, default: str) -> str | None:
+        """Show a dialog to get a component name. Overridable for testing."""
+        from PySide6.QtWidgets import QInputDialog
+        name, ok = QInputDialog.getText(self, "Make Component", "Component name:", text=default)
+        return name if ok else None
+
+    def _on_make_component(self) -> None:
+        from pluton.commands.group_commands import MakeComponentCommand
+        from pluton.tools.transform_support import selection_vertices
+
+        sel = self._selection
+        if not (sel.edges or sel.faces):
+            self._status_bar.set_status("Select edges or faces to make a component.")
+            return
+        default = f"Component #{self._model._next_def_id}"
+        name = self._prompt_component_name(default)
+        if name is None:
+            return
+        vertex_ids = selection_vertices(self._model.active_scene, sel)
+        edge_ids = list(sel.edges)
+        face_ids = list(sel.faces)
+        cmd = MakeComponentCommand(self._model.active_context, vertex_ids, edge_ids, face_ids,
+                                   name=name)
+        self._command_stack.execute(cmd, self._model)
+        sel.replace(instances=[cmd.created_instance.id])
+        self._refresh_selection_status()
+        self._refresh_breadcrumb()
+        self._viewport.update()
+
+    def _on_explode(self) -> None:
+        from pluton.commands.explode_command import ExplodeInstanceCommand
+
+        sel = self._selection
+        if not sel.instances:
+            self._status_bar.set_status("Select an instance to explode.")
+            return
+        inst_id = next(iter(sel.instances))
+        inst = next((c for c in self._model.active_context.children if c.id == inst_id), None)
+        if inst is None:
+            return
+        cmd = ExplodeInstanceCommand(self._model.active_context, inst)
+        self._command_stack.execute(cmd, self._model)
+        sel.clear()
+        self._refresh_selection_status()
+        self._rebuild_tool_context()
+        self._viewport.update()
+
+    def _on_make_unique(self) -> None:
+        from pluton.commands.instance_lifecycle_commands import MakeUniqueCommand
+
+        sel = self._selection
+        if not sel.instances:
+            self._status_bar.set_status("Select an instance to make unique.")
+            return
+        inst_id = next(iter(sel.instances))
+        inst = next((c for c in self._model.active_context.children if c.id == inst_id), None)
+        if inst is None:
+            return
+        cmd = MakeUniqueCommand(inst)
+        self._command_stack.execute(cmd, self._model)
+        self._refresh_selection_status()
+        self._viewport.update()
+
     def _on_delete_selection(self) -> None:
         from pluton.commands import CompositeCommand
+        from pluton.commands.instance_lifecycle_commands import DeleteInstanceCommand
         from pluton.commands.scene_commands import RemoveEdgeCommand, RemoveFaceCommand
 
         sel = self._selection
         if sel.is_empty():
             return
+
+        # Instance delete takes priority when instances are selected.
+        if sel.instances:
+            children_by_id = {c.id: c for c in self._model.active_context.children}
+            cmds = []
+            for inst_id in list(sel.instances):
+                inst = children_by_id.get(inst_id)
+                if inst is None:
+                    continue
+                cmds.append(DeleteInstanceCommand(self._model.active_context, inst))
+            if not cmds:
+                sel.clear()
+                return
+            if len(cmds) == 1:
+                cmd = cmds[0]
+            else:
+                cmd = CompositeCommand(name="Delete Instances")
+                cmd.children = cmds
+            self._command_stack.execute(cmd, self._model)
+            sel.clear()
+            self._refresh_selection_status()
+            self._viewport.update()
+            return
+
         composite = CompositeCommand(name="Delete Selection")
         removed_faces: set[int] = set()
         for e_id in list(sel.edges):
