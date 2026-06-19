@@ -73,6 +73,26 @@ class Model:
             clone.children.append(self.new_instance(child.definition, child.transform))
         return clone
 
+    def pick_instance(self, origin, direction):
+        """Return the nearest Instance (among active context's children) hit by the ray.
+
+        The world ray is transformed into each instance's local frame via mat_invert.
+        Returns the Instance with the smallest hit.t, or None if no hit.
+        """
+        from pluton.geometry.transforms import mat_invert
+
+        best, best_t = None, float("inf")
+        world0 = self.active_world_transform
+        for inst in self.active_context.children:
+            world = world0 @ inst.transform
+            inv = mat_invert(world)
+            o = (inv @ np.append(origin, 1.0))[:3]
+            d = inv[:3, :3] @ np.asarray(direction, np.float64)
+            hit = inst.definition.mesh.ray_pick_face(o, d)
+            if hit is not None and hit.t < best_t:
+                best, best_t = inst, hit.t
+        return best
+
     def revalidate_active_path(self) -> None:
         """Pop the active path to the nearest still-reachable instance.
 

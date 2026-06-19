@@ -320,8 +320,8 @@ class MainWindow(QMainWindow):
         self._viewport.update()
 
     def _refresh_selection_status(self) -> None:
-        ne, nf = self._selection.counts()
-        if ne == 0 and nf == 0:
+        ne, nf, ni = self._selection.counts()
+        if ne == 0 and nf == 0 and ni == 0:
             self._status_bar.set_selection("")
             return
         parts = []
@@ -329,6 +329,8 @@ class MainWindow(QMainWindow):
             parts.append(f"{ne} edge" + ("s" if ne != 1 else ""))
         if nf:
             parts.append(f"{nf} face" + ("s" if nf != 1 else ""))
+        if ni:
+            parts.append(f"{ni} instance" + ("s" if ni != 1 else ""))
         self._status_bar.set_selection(", ".join(parts) + " selected")
 
     def _on_after_undo_redo(self) -> None:

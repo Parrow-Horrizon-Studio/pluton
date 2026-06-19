@@ -8,7 +8,7 @@ from pluton.selection import Selection
 def test_starts_empty():
     s = Selection()
     assert s.is_empty()
-    assert s.counts() == (0, 0)
+    assert s.counts() == (0, 0, 0)
     assert s.edges == set()
     assert s.faces == set()
 
@@ -19,7 +19,7 @@ def test_replace_sets_contents_and_bumps_version():
     s.replace(edges=[1, 2], faces=[5])
     assert s.edges == {1, 2}
     assert s.faces == {5}
-    assert s.counts() == (2, 1)
+    assert s.counts() == (2, 1, 0)
     assert not s.is_empty()
     assert s.version > v0
     s.replace(edges=[9])

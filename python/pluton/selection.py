@@ -12,11 +12,12 @@ from collections.abc import Iterable
 
 
 class Selection:
-    __slots__ = ("_edges", "_faces", "_version")
+    __slots__ = ("_edges", "_faces", "_instances", "_version")
 
     def __init__(self) -> None:
         self._edges: set[int] = set()
         self._faces: set[int] = set()
+        self._instances: set[int] = set()
         self._version: int = 0
 
     @property
@@ -28,20 +29,38 @@ class Selection:
         return self._faces
 
     @property
+    def instances(self) -> set[int]:
+        return self._instances
+
+    @property
     def version(self) -> int:
         return self._version
 
     def _bump(self) -> None:
         self._version += 1
 
-    def replace(self, *, edges: Iterable[int] = (), faces: Iterable[int] = ()) -> None:
+    def replace(
+        self,
+        *,
+        edges: Iterable[int] = (),
+        faces: Iterable[int] = (),
+        instances: Iterable[int] = (),
+    ) -> None:
         self._edges = set(edges)
         self._faces = set(faces)
+        self._instances = set(instances)
         self._bump()
 
-    def add(self, *, edges: Iterable[int] = (), faces: Iterable[int] = ()) -> None:
+    def add(
+        self,
+        *,
+        edges: Iterable[int] = (),
+        faces: Iterable[int] = (),
+        instances: Iterable[int] = (),
+    ) -> None:
         self._edges |= set(edges)
         self._faces |= set(faces)
+        self._instances |= set(instances)
         self._bump()
 
     def toggle_edge(self, e_id: int) -> None:
@@ -52,10 +71,15 @@ class Selection:
         self._faces.symmetric_difference_update({f_id})
         self._bump()
 
+    def toggle_instance(self, i_id: int) -> None:
+        self._instances.symmetric_difference_update({i_id})
+        self._bump()
+
     def clear(self) -> None:
-        if self._edges or self._faces:
+        if self._edges or self._faces or self._instances:
             self._edges.clear()
             self._faces.clear()
+            self._instances.clear()
             self._bump()
 
     def contains_edge(self, e_id: int) -> bool:
@@ -64,8 +88,11 @@ class Selection:
     def contains_face(self, f_id: int) -> bool:
         return f_id in self._faces
 
-    def is_empty(self) -> bool:
-        return not self._edges and not self._faces
+    def contains_instance(self, i_id: int) -> bool:
+        return i_id in self._instances
 
-    def counts(self) -> tuple[int, int]:
-        return (len(self._edges), len(self._faces))
+    def is_empty(self) -> bool:
+        return not self._edges and not self._faces and not self._instances
+
+    def counts(self) -> tuple[int, int, int]:
+        return (len(self._edges), len(self._faces), len(self._instances))
