@@ -20,6 +20,15 @@ from pluton.viewport.camera import Camera
 from pluton.viewport.snap_engine import SnapKind
 
 
+def definition_is_dimmed(definition, model) -> bool:  # noqa: ANN001
+    """True when `definition` should render dimmed (recede) — i.e. you are
+    inside a group (active_path is non-empty) and this definition is not the
+    active editing context. At the root context, nothing is dimmed."""
+    if not model.active_path:
+        return False
+    return definition is not model.active_context
+
+
 # --- AABB helpers (Task 15) -------------------------------------------------
 
 def aabb_world_edges(lo, hi, world_transform) -> np.ndarray:
@@ -421,7 +430,6 @@ class SceneRenderer:
 
         # 3 & 4. Draw all definitions in the scene graph with their world transforms.
         if model is not None:
-            active_ctx = model.active_context  # Definition currently being edited
             for definition, world in model.traverse():
                 buf = self._def_buffers.get(id(definition))
                 if buf is None or definition.mesh.dirty:
@@ -430,8 +438,8 @@ class SceneRenderer:
                     self._def_buffers[id(definition)] = buf
                 model_mat = world.astype(np.float32)
                 # Task 15: dim pass — dim anything that is NOT the active context.
-                # At root (active_ctx is root), nothing is dimmed.
-                dimmed = (definition is not active_ctx)
+                # At root (active_path is empty), nothing is dimmed.
+                dimmed = definition_is_dimmed(definition, model)
                 if buf.face_count > 0:
                     self._draw_definition_faces(
                         buf, view, projection, camera.position, model_mat, dimmed=dimmed
