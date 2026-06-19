@@ -1,0 +1,68 @@
+# python/pluton/commands/explode_command.py
+from __future__ import annotations
+
+import numpy as np
+
+from pluton.commands.command import Command
+from pluton.geometry.transforms import apply_mat
+
+
+class ExplodeInstanceCommand(Command):
+    name = "Explode"
+
+    def __init__(self, parent_definition, instance) -> None:
+        self._parent = parent_definition
+        self._inst = instance
+        self._baked = None       # list of (new_vid_in_parent) for undo removal
+        self._child_records = None  # reparented child instances (for undo)
+
+    def do(self, model) -> None:  # noqa: ANN001
+        parent_scene = self._parent.mesh
+        defn = self._inst.definition
+        t = self._inst.transform
+
+        # Bake geometry: copy verts/edges/faces with transformed positions.
+        idmap = {}
+        new_vids = []
+        for v in defn.mesh.vertices_iter():
+            world_pos = apply_mat(v.position.reshape(1, 3), t)[0]
+            nv = parent_scene.add_vertex(world_pos)
+            idmap[v.id] = nv
+            new_vids.append(nv)
+        for e in defn.mesh.edges_iter():
+            parent_scene.add_edge(idmap[e.v1_id], idmap[e.v2_id])
+        new_faces = []
+        for f in defn.mesh.faces_iter():
+            nf = parent_scene.add_face_from_loop([idmap[v] for v in f.loop_vertex_ids])
+            new_faces.append(nf)
+        self._baked = (new_vids, new_faces)
+
+        # Reparent the instance's children into the parent, composing transforms.
+        self._child_records = list(defn.children)
+        for child in defn.children:
+            child.transform = t @ child.transform
+            self._parent.children.append(child)
+
+        # Remove the exploded instance.
+        if self._inst in self._parent.children:
+            self._parent.children.remove(self._inst)
+
+    def undo(self, model) -> None:  # noqa: ANN001
+        parent_scene = self._parent.mesh
+        new_vids, new_faces = self._baked
+        for nf in new_faces:
+            parent_scene.remove_face(nf)
+        # Edges auto-handled with verts where possible; remove leftover verts.
+        for nv in new_vids:
+            try:
+                parent_scene.remove_vertex(nv)
+            except Exception:
+                pass
+        # Un-reparent children + undo their transform compose.
+        t = self._inst.transform
+        tinv = np.linalg.inv(np.asarray(t, np.float64))
+        for child in self._child_records:
+            if child in self._parent.children:
+                self._parent.children.remove(child)
+            child.transform = tinv @ child.transform
+        self._parent.children.append(self._inst)
