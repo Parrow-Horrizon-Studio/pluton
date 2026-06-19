@@ -29,13 +29,15 @@ class ExplodeInstanceCommand(Command):
             nv = parent_scene.add_vertex(world_pos)
             idmap[v.id] = nv
             new_vids.append(nv)
+        new_eids = []
         for e in defn.mesh.edges_iter():
-            parent_scene.add_edge(idmap[e.v1_id], idmap[e.v2_id])
+            ne = parent_scene.add_edge(idmap[e.v1_id], idmap[e.v2_id])
+            new_eids.append(ne)
         new_faces = []
         for f in defn.mesh.faces_iter():
             nf = parent_scene.add_face_from_loop([idmap[v] for v in f.loop_vertex_ids])
             new_faces.append(nf)
-        self._baked = (new_vids, new_faces)
+        self._baked = (new_vids, new_eids, new_faces)
 
         # Reparent the instance's children into the parent, composing transforms.
         self._child_records = list(defn.children)
@@ -49,14 +51,18 @@ class ExplodeInstanceCommand(Command):
 
     def undo(self, model) -> None:  # noqa: ANN001
         parent_scene = self._parent.mesh
-        new_vids, new_faces = self._baked
+        new_vids, new_eids, new_faces = self._baked
         for nf in new_faces:
             parent_scene.remove_face(nf)
-        # Edges auto-handled with verts where possible; remove leftover verts.
+        for ne in new_eids:
+            try:
+                parent_scene.remove_edge(ne)
+            except ValueError:
+                pass
         for nv in new_vids:
             try:
                 parent_scene.remove_vertex(nv)
-            except Exception:
+            except ValueError:
                 pass
         # Un-reparent children + undo their transform compose.
         t = self._inst.transform

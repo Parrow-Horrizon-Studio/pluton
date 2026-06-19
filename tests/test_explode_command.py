@@ -107,3 +107,27 @@ def test_explode_reparents_child_instance():
     assert np.isclose(float(c.transform[0, 3]), 1.0, atol=1e-5)
     # inst_g should be back
     assert inst_g in m.root.children
+
+
+def test_explode_undo_removes_baked_edges_and_faces():
+    m = Model()
+    d = m.new_definition("G", is_group=True)
+    a = d.mesh.add_vertex(np.array([0, 0, 0], np.float32))
+    b = d.mesh.add_vertex(np.array([1, 0, 0], np.float32))
+    c = d.mesh.add_vertex(np.array([0, 1, 0], np.float32))
+    d.mesh.add_face_from_loop([a, b, c])  # triangle: 3 verts, 3 edges, 1 face
+    t = np.eye(4); t[:3, 3] = [10, 0, 0]
+    inst = m.new_instance(d, t)
+    m.root.children.append(inst)
+
+    cmd = ExplodeInstanceCommand(m.root, inst)
+    cmd.do(m)
+    # baked into parent:
+    assert len(list(m.root.mesh.faces_iter())) == 1
+    assert len(list(m.root.mesh.edges_iter())) == 3
+    cmd.undo(m)
+    # undo must FULLY clear the baked geometry — this fails before the fix:
+    assert list(m.root.mesh.faces_iter()) == []
+    assert list(m.root.mesh.edges_iter()) == []
+    assert list(m.root.mesh.vertices_iter()) == []
+    assert inst in m.root.children
