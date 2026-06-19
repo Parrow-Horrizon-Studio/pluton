@@ -106,7 +106,8 @@ class MoveTool(Tool):
             self._delta = (dest - self._grab).astype(np.float32)
 
         if self._instance_mode:
-            self._commit_instance_move(self._delta)
+            ctrl = bool(event.modifiers() & Qt.KeyboardModifier.ControlModifier)
+            self._commit_instance_move(self._delta, move_copy=ctrl)
         else:
             ids = self._vertex_ids
             if ids:
@@ -202,25 +203,51 @@ class MoveTool(Tool):
             if inst.id in inst_ids
         ]
 
-    def _commit_instance_move(self, delta: np.ndarray) -> None:
-        """Emit TransformInstanceCommand(s) for the current instance selection."""
+    def _commit_instance_move(self, delta: np.ndarray, move_copy: bool = False) -> None:
+        """Emit TransformInstanceCommand(s) or CreateInstanceCommand(s) for the current instance selection.
+
+        If *move_copy* is True the originals stay put and new instances are created at the
+        translated transform (Ctrl-during-Move behaviour).
+        """
         from pluton.geometry.transforms import mat_translate
-        from pluton.commands.instance_commands import TransformInstanceCommand
+        from pluton.commands.instance_commands import TransformInstanceCommand, CreateInstanceCommand
         from pluton.commands.command import CompositeCommand
 
         delta_mat = mat_translate(delta)
-        cmds = [
-            TransformInstanceCommand(inst, delta_mat @ inst.transform)
-            for inst in self._instances
-        ]
-        if not cmds:
-            return
-        if len(cmds) == 1:
-            cmd = cmds[0]
+
+        if move_copy:
+            if self._model is None:
+                return
+            parent = self._model.active_context
+            created_cmds = [
+                CreateInstanceCommand(parent, inst.definition, delta_mat @ inst.transform)
+                for inst in self._instances
+            ]
+            if not created_cmds:
+                return
+            if len(created_cmds) == 1:
+                cmd = created_cmds[0]
+            else:
+                cmd = CompositeCommand(name="Move-copy", children=created_cmds)
+            if self._stack is not None:
+                self._stack.execute(cmd, self._model)
+            # Update selection to the newly created instances
+            if self._selection is not None:
+                new_ids = [c.created_instance.id for c in created_cmds]
+                self._selection.replace(instances=new_ids)
         else:
-            cmd = CompositeCommand(name="Move Instances", children=cmds)
-        if self._stack is not None and self._model is not None:
-            self._stack.execute(cmd, self._model)
+            cmds = [
+                TransformInstanceCommand(inst, delta_mat @ inst.transform)
+                for inst in self._instances
+            ]
+            if not cmds:
+                return
+            if len(cmds) == 1:
+                cmd = cmds[0]
+            else:
+                cmd = CompositeCommand(name="Move Instances", children=cmds)
+            if self._stack is not None and self._model is not None:
+                self._stack.execute(cmd, self._model)
 
     def _ghost_segments(self) -> np.ndarray:
         """Selection edges + face loops as world segments, translated by delta."""
