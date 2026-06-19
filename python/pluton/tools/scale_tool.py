@@ -311,9 +311,9 @@ class ScaleTool(Tool):
 
     def _commit_instance_scale(self, anchor: np.ndarray, factor_vec: np.ndarray) -> None:
         """Emit TransformInstanceCommand(s) for the scale gesture."""
-        from pluton.geometry.transforms import mat_scale
-        from pluton.commands.instance_commands import TransformInstanceCommand
         from pluton.commands.command import CompositeCommand
+        from pluton.commands.instance_commands import TransformInstanceCommand
+        from pluton.geometry.transforms import mat_scale
 
         delta_mat = mat_scale(anchor, factor_vec)
         cmds = [

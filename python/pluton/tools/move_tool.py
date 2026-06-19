@@ -209,9 +209,12 @@ class MoveTool(Tool):
         If *move_copy* is True the originals stay put and new instances are created at the
         translated transform (Ctrl-during-Move behaviour).
         """
-        from pluton.geometry.transforms import mat_translate
-        from pluton.commands.instance_commands import TransformInstanceCommand, CreateInstanceCommand
         from pluton.commands.command import CompositeCommand
+        from pluton.commands.instance_commands import (
+            CreateInstanceCommand,
+            TransformInstanceCommand,
+        )
+        from pluton.geometry.transforms import mat_translate
 
         delta_mat = mat_translate(delta)
 

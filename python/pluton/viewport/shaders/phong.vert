@@ -13,8 +13,11 @@ out vec3 v_world_normal;
 void main() {
     vec4 world_pos = u_model * vec4(in_position, 1.0);
     v_world_pos = world_pos.xyz;
-    // Model matrix is rigid (rotation + translation) in M1, so mat3(u_model)
-    // suffices for the normal. Non-uniform scaling would require a normal matrix.
-    v_world_normal = mat3(u_model) * in_normal;
+    // Use inverse-transpose of mat3(u_model) as the normal matrix so normals
+    // transform correctly under non-uniform scale (M4e Scale tool).
+    // transpose(inverse()) equals mat3(u_model) for rotation-only/uniform-scale
+    // transforms, so existing scenes are unaffected.
+    mat3 normal_matrix = transpose(inverse(mat3(u_model)));
+    v_world_normal = normalize(normal_matrix * in_normal);
     gl_Position = u_projection * u_view * world_pos;
 }

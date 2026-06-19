@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import ctypes
 from collections.abc import Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from importlib.resources import files
 
 import numpy as np

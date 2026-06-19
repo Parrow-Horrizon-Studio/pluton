@@ -14,7 +14,7 @@ class Instance:
     __slots__ = ("id", "definition", "transform")
 
     def __init__(
-        self, instance_id: int, definition: "Definition", transform: np.ndarray | None = None
+        self, instance_id: int, definition: Definition, transform: np.ndarray | None = None
     ) -> None:
         self.id = int(instance_id)
         self.definition = definition

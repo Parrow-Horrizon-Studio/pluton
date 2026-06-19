@@ -343,7 +343,9 @@ class MainWindow(QMainWindow):
         self._viewport.update()
 
     def _on_explode(self) -> None:
+        from pluton.commands import CompositeCommand
         from pluton.commands.explode_command import ExplodeInstanceCommand
+        from pluton.commands.instance_lifecycle_commands import MakeUniqueCommand
 
         sel = self._selection
         if not sel.instances:
@@ -353,7 +355,13 @@ class MainWindow(QMainWindow):
         inst = next((c for c in self._model.active_context.children if c.id == inst_id), None)
         if inst is None:
             return
-        cmd = ExplodeInstanceCommand(self._model.active_context, inst)
+        if len(inst.definition.instances) > 1:
+            cmd = CompositeCommand(name="Explode", children=[
+                MakeUniqueCommand(inst),
+                ExplodeInstanceCommand(self._model.active_context, inst),
+            ])
+        else:
+            cmd = ExplodeInstanceCommand(self._model.active_context, inst)
         self._command_stack.execute(cmd, self._model)
         sel.clear()
         self._refresh_selection_status()

@@ -227,9 +227,9 @@ class RotateTool(Tool):
 
     def _commit_instance_rotate(self, angle: float) -> None:
         """Emit TransformInstanceCommand(s) for the rotate gesture."""
-        from pluton.geometry.transforms import mat_rotate
-        from pluton.commands.instance_commands import TransformInstanceCommand
         from pluton.commands.command import CompositeCommand
+        from pluton.commands.instance_commands import TransformInstanceCommand
+        from pluton.geometry.transforms import mat_rotate
 
         delta_mat = mat_rotate(self._center, self._normal, angle)
         cmds = [
