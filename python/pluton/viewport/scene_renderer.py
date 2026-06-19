@@ -113,8 +113,6 @@ _DIM_DIFFUSE = (0.40, 0.40, 0.42)   # desaturated diffuse for dimmed definitions
 _DIM_ALPHA_BLEND = 0.35             # alpha for dimmed geometry (blended toward bg)
 _INSTANCE_BBOX_COLOR = (0.30, 0.55, 0.95)   # selection-blue bbox for selected instances
 _INSTANCE_BBOX_WIDTH = 2.0
-_HOVER_BBOX_COLOR = (0.60, 0.78, 1.00)      # lighter blue for hovered instance silhouette
-_HOVER_BBOX_WIDTH = 1.5
 # Uniform names looked up once per program in initialize_gl().
 _PHONG_UNIFORMS = (
     "u_view", "u_projection", "u_model", "u_camera_pos",
@@ -698,6 +696,7 @@ class SceneRenderer:
 
         if dimmed:
             GL.glDisable(GL.GL_BLEND)
+            GL.glBlendFunc(GL.GL_SRC_ALPHA, GL.GL_ONE_MINUS_SRC_ALPHA)
 
     def _draw_definition_edges(
         self,
@@ -745,6 +744,7 @@ class SceneRenderer:
 
         if dimmed:
             GL.glDisable(GL.GL_BLEND)
+            GL.glBlendFunc(GL.GL_SRC_ALPHA, GL.GL_ONE_MINUS_SRC_ALPHA)
 
     def _draw_tool_overlay(
         self,
