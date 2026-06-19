@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import numpy as np
-
 from pluton.commands.command import Command
 
 
@@ -22,6 +20,9 @@ class MakeGroupCommand(Command):
         self._captured = None  # (verts, edges, faces) descriptors for undo
 
     def do(self, model) -> None:  # noqa: ANN001
+        if self._captured is not None:
+            self._redo(model)
+            return
         parent_scene = self._parent.mesh
         # 1. Capture lifted geometry descriptors (original ids) for undo restore.
         verts = [(v, parent_scene.vertex(v).position.copy()) for v in self._vids]
@@ -72,12 +73,35 @@ class MakeGroupCommand(Command):
         self._parent.children.append(inst)
         self.created_instance = inst
 
+    def _redo(self, model) -> None:  # noqa: ANN001
+        parent_scene = self._parent.mesh
+        verts, edges, faces = self._captured
+        for f, _loop in faces:
+            parent_scene.remove_face(f)
+        for e, _v1, _v2 in edges:
+            try:
+                parent_scene.remove_edge(e)
+            except Exception:
+                pass
+        for v, _pos in verts:
+            try:
+                parent_scene.remove_vertex(v)
+            except Exception:
+                pass
+        inst = self.created_instance
+        if inst not in inst.definition.instances:
+            inst.definition.instances.append(inst)
+        self._parent.children.append(inst)
+
     def undo(self, model) -> None:  # noqa: ANN001
         parent_scene = self._parent.mesh
         verts, edges, faces = self._captured
         # Remove the instance + definition.
         if self.created_instance in self._parent.children:
             self._parent.children.remove(self.created_instance)
+        inst = self.created_instance
+        if inst in inst.definition.instances:
+            inst.definition.instances.remove(inst)
         # Restore parent geometry by original ids (verts first, then edges, then faces).
         for v, pos in verts:
             parent_scene.restore_vertex(v, pos)

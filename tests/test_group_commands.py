@@ -36,3 +36,20 @@ def test_make_group_undo_restores_parent_geometry():
     cmd.undo(m)
     assert {f.id for f in m.root.mesh.faces_iter()} == before_face_ids
     assert m.root.children == []
+
+
+def test_make_group_redo_is_id_stable():
+    m = Model()
+    verts, face = _triangle(m.root.mesh)
+    cmd = MakeGroupCommand(m.root, verts, [], [face])
+    cmd.do(m)
+    inst_id = cmd.created_instance.id
+    def_obj = cmd.created_instance.definition
+    cmd.undo(m)
+    cmd.do(m)  # redo
+    assert cmd.created_instance.id == inst_id          # same instance, stable id
+    assert cmd.created_instance.definition is def_obj  # no second definition leaked
+    assert len(m.root.children) == 1
+    assert list(m.root.mesh.faces_iter()) == []        # geometry lifted again
+    cmd.undo(m)                                          # undo after redo restores again
+    assert len(list(m.root.mesh.faces_iter())) == 1
