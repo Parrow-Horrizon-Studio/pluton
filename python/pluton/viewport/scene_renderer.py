@@ -20,6 +20,57 @@ from pluton.viewport.camera import Camera
 from pluton.viewport.snap_engine import SnapKind
 
 
+# --- AABB helpers (Task 15) -------------------------------------------------
+
+def aabb_world_edges(lo, hi, world_transform) -> np.ndarray:
+    """Return (24, 3) float32 array of 12 AABB edge endpoint pairs in world space.
+
+    Builds the 8 corners of the axis-aligned box [lo, hi] and transforms each
+    with ``world_transform`` using ``apply_mat``.  The 12 edges are returned as
+    24 endpoints (two per edge, interleaved) suitable for GL_LINES.
+
+    Args:
+        lo: (3,) array-like — minimum corner in local space.
+        hi: (3,) array-like — maximum corner in local space.
+        world_transform: (4, 4) array-like — local-to-world matrix.
+
+    Returns:
+        np.ndarray of shape (24, 3), dtype float32.
+    """
+    from pluton.geometry.transforms import apply_mat
+
+    lx, ly, lz = float(lo[0]), float(lo[1]), float(lo[2])
+    hx, hy, hz = float(hi[0]), float(hi[1]), float(hi[2])
+
+    # 8 corners of the box
+    corners = np.array([
+        [lx, ly, lz],  # 0 — low-low-low
+        [hx, ly, lz],  # 1 — high-low-low
+        [hx, hy, lz],  # 2 — high-high-low
+        [lx, hy, lz],  # 3 — low-high-low
+        [lx, ly, hz],  # 4 — low-low-high
+        [hx, ly, hz],  # 5 — high-low-high
+        [hx, hy, hz],  # 6 — high-high-high
+        [lx, hy, hz],  # 7 — low-high-high
+    ], dtype=np.float64)
+
+    # Transform all corners at once
+    world_corners = apply_mat(corners, world_transform)  # (8, 3) float32
+
+    # 12 edges — each edge is a pair of corner indices
+    _EDGES = [
+        (0, 1), (1, 2), (2, 3), (3, 0),  # bottom face
+        (4, 5), (5, 6), (6, 7), (7, 4),  # top face
+        (0, 4), (1, 5), (2, 6), (3, 7),  # vertical pillars
+    ]
+
+    out = np.empty((24, 3), dtype=np.float32)
+    for i, (a, b) in enumerate(_EDGES):
+        out[2 * i] = world_corners[a]
+        out[2 * i + 1] = world_corners[b]
+    return out
+
+
 # --- Constants for the scene -----------------------------------------------
 
 _GRID_HALF_EXTENT = 5.0  # meters, so grid is 10x10
@@ -46,6 +97,15 @@ _BG_COLOR = (0.15, 0.15, 0.18, 1.0)
 _USER_EDGE_COLOR = (0.85, 0.85, 0.85)
 _SELECTION_FILL_COLOR = (0.20, 0.50, 0.95, 0.25)   # selected faces (blue, 25% alpha)
 _SELECTION_EDGE_COLOR = (0.20, 0.55, 1.00)         # selected edges (bright blue)
+
+# Task 15 — dim pass + instance bbox colors.
+_DIM_AMBIENT = (0.30, 0.30, 0.31)   # desaturated ambient for dimmed definitions
+_DIM_DIFFUSE = (0.40, 0.40, 0.42)   # desaturated diffuse for dimmed definitions
+_DIM_ALPHA_BLEND = 0.35             # alpha for dimmed geometry (blended toward bg)
+_INSTANCE_BBOX_COLOR = (0.30, 0.55, 0.95)   # selection-blue bbox for selected instances
+_INSTANCE_BBOX_WIDTH = 2.0
+_HOVER_BBOX_COLOR = (0.60, 0.78, 1.00)      # lighter blue for hovered instance silhouette
+_HOVER_BBOX_WIDTH = 1.5
 # Uniform names looked up once per program in initialize_gl().
 _PHONG_UNIFORMS = (
     "u_view", "u_projection", "u_model", "u_camera_pos",
@@ -361,6 +421,7 @@ class SceneRenderer:
 
         # 3 & 4. Draw all definitions in the scene graph with their world transforms.
         if model is not None:
+            active_ctx = model.active_context  # Definition currently being edited
             for definition, world in model.traverse():
                 buf = self._def_buffers.get(id(definition))
                 if buf is None or definition.mesh.dirty:
@@ -368,16 +429,35 @@ class SceneRenderer:
                     definition.mesh.mark_clean()
                     self._def_buffers[id(definition)] = buf
                 model_mat = world.astype(np.float32)
+                # Task 15: dim pass — dim anything that is NOT the active context.
+                # At root (active_ctx is root), nothing is dimmed.
+                dimmed = (definition is not active_ctx)
                 if buf.face_count > 0:
-                    self._draw_definition_faces(buf, view, projection, camera.position, model_mat)
+                    self._draw_definition_faces(
+                        buf, view, projection, camera.position, model_mat, dimmed=dimmed
+                    )
                 if buf.edge_count > 0:
-                    self._draw_definition_edges(buf, view, projection, model_mat)
+                    self._draw_definition_edges(buf, view, projection, model_mat, dimmed=dimmed)
 
             # 4.5 Selection highlight (persistent, drawn on top of geometry).
             # Operates on the active context (root at identity, or entered context).
             if selection is not None:
                 active_scene = model.active_scene
                 self._draw_selection(active_scene, selection, view, projection)
+
+            # 4.6 Task 15: Selected-instance bounding boxes (selection-blue).
+            if selection is not None and selection.instances:
+                active_world = model.active_world_transform
+                for inst in model.active_context.children:
+                    if inst.id in selection.instances:
+                        aabb = inst.definition.local_aabb()
+                        if aabb is not None:
+                            lo, hi = aabb
+                            world_t = active_world @ inst.transform
+                            segs = aabb_world_edges(lo, hi, world_t)
+                            self._draw_world_segments(
+                                segs, _INSTANCE_BBOX_COLOR, _INSTANCE_BBOX_WIDTH, view, projection
+                            )
 
         # 5. Tool overlay (NEW) — drawn on top with depth-test disabled
         if tool_overlay is not None:
@@ -568,26 +648,48 @@ class SceneRenderer:
         projection: np.ndarray,
         camera_pos: np.ndarray,
         model_mat: np.ndarray,
+        *,
+        dimmed: bool = False,
     ) -> None:
-        """Draw a definition's face geometry with the given model matrix."""
+        """Draw a definition's face geometry with the given model matrix.
+
+        When ``dimmed`` is True (Task 15 — not the active editing context), the
+        material uses desaturated ambient/diffuse and alpha-blending is enabled
+        at a reduced opacity so the geometry recedes into the background.
+        """
         GL.glUseProgram(self._phong_program)
         locs = self._phong_locs
         _set_mat4(locs["u_view"], view)
         _set_mat4(locs["u_projection"], projection)
         _set_mat4(locs["u_model"], model_mat)
         _set_vec3(locs["u_camera_pos"], camera_pos)
-        # Same lighting / material as the old M1 cube.
         _set_vec3(locs["u_light_dir"], _LIGHT_DIR)
         _set_vec3(locs["u_light_color"], _LIGHT_COLOR)
-        _set_vec3(locs["u_material_ambient"], _MATERIAL_AMBIENT)
-        _set_vec3(locs["u_material_diffuse"], _MATERIAL_DIFFUSE)
+        if dimmed:
+            _set_vec3(locs["u_material_ambient"], _DIM_AMBIENT)
+            _set_vec3(locs["u_material_diffuse"], _DIM_DIFFUSE)
+        else:
+            _set_vec3(locs["u_material_ambient"], _MATERIAL_AMBIENT)
+            _set_vec3(locs["u_material_diffuse"], _MATERIAL_DIFFUSE)
         _set_vec3(locs["u_material_specular"], _MATERIAL_SPECULAR)
         _set_float(locs["u_material_shininess"], _MATERIAL_SHININESS)
+
+        if dimmed:
+            GL.glEnable(GL.GL_BLEND)
+            GL.glBlendFunc(GL.GL_SRC_ALPHA, GL.GL_ONE_MINUS_SRC_ALPHA)
+            # Use the ghost-fill program's u_color alpha to fade out — but the
+            # Phong program doesn't have an alpha uniform, so we use the blend
+            # constant-alpha trick: glBlendColor + GL_CONSTANT_ALPHA.
+            GL.glBlendColor(0.0, 0.0, 0.0, _DIM_ALPHA_BLEND)
+            GL.glBlendFunc(GL.GL_CONSTANT_ALPHA, GL.GL_ONE_MINUS_CONSTANT_ALPHA)
 
         GL.glBindVertexArray(buf.face_vao)
         GL.glDrawArrays(GL.GL_TRIANGLES, 0, buf.face_count)
         GL.glBindVertexArray(0)
         GL.glUseProgram(0)
+
+        if dimmed:
+            GL.glDisable(GL.GL_BLEND)
 
     def _draw_definition_edges(
         self,
@@ -595,6 +697,8 @@ class SceneRenderer:
         view: np.ndarray,
         projection: np.ndarray,
         model_mat: np.ndarray,
+        *,
+        dimmed: bool = False,
     ) -> None:
         """Draw a definition's edge geometry with the given model matrix.
 
@@ -606,6 +710,9 @@ class SceneRenderer:
         is already in local space; the model matrix must be folded into the
         view or the edges drawn in world space. Since the line shader has no
         u_model, we pre-multiply view by model_mat for this draw call only.
+
+        When ``dimmed`` is True (Task 15), lines are drawn at reduced opacity
+        using the constant-alpha blend so the geometry recedes.
         """
         # Pre-multiply: view_for_edges = view @ model_mat (transforms local→clip).
         # Both are float32; the result is float32.
@@ -616,12 +723,20 @@ class SceneRenderer:
         _set_mat4(locs["u_view"], view_x_model)
         _set_mat4(locs["u_projection"], projection)
 
+        if dimmed:
+            GL.glEnable(GL.GL_BLEND)
+            GL.glBlendColor(0.0, 0.0, 0.0, _DIM_ALPHA_BLEND)
+            GL.glBlendFunc(GL.GL_CONSTANT_ALPHA, GL.GL_ONE_MINUS_CONSTANT_ALPHA)
+
         GL.glBindVertexArray(buf.edge_vao)
         GL.glLineWidth(1.5)
         GL.glDrawArrays(GL.GL_LINES, 0, buf.edge_count)
         GL.glLineWidth(1.0)
         GL.glBindVertexArray(0)
         GL.glUseProgram(0)
+
+        if dimmed:
+            GL.glDisable(GL.GL_BLEND)
 
     def _draw_tool_overlay(
         self,

@@ -12,7 +12,7 @@ from PySide6.QtWidgets import QLabel
 
 
 class StatusBar(QLabel):
-    """Single-label status bar — joins tool / snap / status text."""
+    """Single-label status bar — joins breadcrumb / tool / snap / status text."""
 
     def __init__(self) -> None:
         super().__init__()
@@ -20,6 +20,7 @@ class StatusBar(QLabel):
         self._snap: str = ""
         self._status: str = ""
         self._selection: str = ""
+        self._breadcrumb: str = ""  # Task 15: active editing path, e.g. "Model ▸ Group #3"
         self.setText("")
         self.setMinimumHeight(22)
         self.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
@@ -44,13 +45,25 @@ class StatusBar(QLabel):
         self._selection = text or ""
         self._refresh()
 
+    def set_breadcrumb(self, text: str) -> None:
+        """Task 15: set the active editing path breadcrumb (e.g. 'Model ▸ Group #3')."""
+        self._breadcrumb = text or ""
+        self._refresh()
+
     def _refresh(self) -> None:
         if not self._tool:
-            # No active tool — show only the selection count if present.
-            self.setText(self._selection)
+            # No active tool — show breadcrumb (if inside a group) and selection count.
+            parts = []
+            if self._breadcrumb:
+                parts.append(self._breadcrumb)
+            if self._selection:
+                parts.append(self._selection)
+            self.setText(" · ".join(parts) if parts else "")
             return
         snap = self._snap if self._snap else "—"
         parts = [f"{self._tool} · {snap}"]
+        if self._breadcrumb:
+            parts.append(self._breadcrumb)
         if self._status:
             parts.append(self._status)
         if self._selection:

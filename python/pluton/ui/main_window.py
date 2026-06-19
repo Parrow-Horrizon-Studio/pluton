@@ -72,6 +72,9 @@ class MainWindow(QMainWindow):
 
         # NOW we can build the ToolContext that includes the viewport refs.
         self._rebuild_tool_context()
+        # Task 15: initialize breadcrumb (clears it since we start at root).
+        # _status_bar exists — it was created just above.
+        self._refresh_breadcrumb()
 
         container = QWidget(self)
         layout = QVBoxLayout(container)
@@ -334,11 +337,27 @@ class MainWindow(QMainWindow):
             parts.append(f"{ni} instance" + ("s" if ni != 1 else ""))
         self._status_bar.set_selection(", ".join(parts) + " selected")
 
+    def _refresh_breadcrumb(self) -> None:
+        """Task 15: rebuild the breadcrumb from model.active_path and push to status bar.
+
+        Format: ``Model ▸ <name> ▸ …``  Built from the root definition's name
+        (model.root.name) followed by each entered instance's definition name.
+        When at root (active_path is empty), the breadcrumb is cleared so the
+        status bar is uncluttered.
+        """
+        if not self._model.active_path:
+            self._status_bar.set_breadcrumb("")
+            return
+        parts = [self._model.root.name]
+        for inst in self._model.active_path:
+            parts.append(inst.definition.name)
+        self._status_bar.set_breadcrumb(" ▸ ".join(parts))
+
     def _on_active_context_changed(self) -> None:
         """Called by SelectTool after enter/exit to rebuild the tool context
-        for the new active editing context.  A breadcrumb update (Task 15) will
-        also be added here later."""
+        for the new active editing context and update the breadcrumb."""
         self._rebuild_tool_context()
+        self._refresh_breadcrumb()
         self._viewport.update()
 
     def _on_after_undo_redo(self) -> None:
@@ -347,6 +366,7 @@ class MainWindow(QMainWindow):
         self._refresh_selection_status()
         self._model.revalidate_active_path()
         self._rebuild_tool_context()
+        self._refresh_breadcrumb()
 
     def _on_undo(self) -> None:
         if self._command_stack.undo():

@@ -20,6 +20,7 @@ _NEUTRAL_COLOR = (0.85, 0.85, 0.85)
 _BOX_WINDOW_COLOR = (0.25, 0.50, 0.95)   # left->right, enclose-only
 _BOX_CROSSING_COLOR = (0.15, 0.65, 0.30)  # right->left, touch
 _DRAG_THRESHOLD_PX = 4.0
+_HOVER_BBOX_COLOR = (0.60, 0.78, 1.00)   # Task 15: lighter blue for hover silhouette bbox
 
 
 class SelectTool(Tool):
@@ -219,6 +220,24 @@ class SelectTool(Tool):
                     )]
                 except KeyError:
                     pass
+
+        # Task 15: hover silhouette — draw the hovered instance's bbox as a
+        # lighter-blue world polyline so it renders via the existing overlay path.
+        world_polylines: list = []
+        if (
+            not self._is_box
+            and self._hovered_instance is not None
+            and self._model is not None
+        ):
+            aabb = self._hovered_instance.definition.local_aabb()
+            if aabb is not None:
+                from pluton.viewport.scene_renderer import aabb_world_edges
+                lo, hi = aabb
+                active_world = self._model.active_world_transform
+                world_t = active_world @ self._hovered_instance.transform
+                bbox_segs = aabb_world_edges(lo, hi, world_t)
+                world_polylines.append((bbox_segs, _HOVER_BBOX_COLOR, 1.5))
+
         return ToolOverlay(
             rubber_band_segments=segs,
             rubber_band_color=_HOVER_EDGE_COLOR,
@@ -229,6 +248,7 @@ class SelectTool(Tool):
             face_fill_color=_HOVER_FILL_COLOR,
             box_rect=box_rect,
             box_rect_color=box_color,
+            world_polylines=world_polylines,
         )
 
     @property
