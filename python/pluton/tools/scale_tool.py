@@ -19,7 +19,7 @@ from PySide6.QtCore import Qt
 from PySide6.QtGui import QKeyEvent, QMouseEvent
 
 from pluton.commands.scene_commands import TransformVerticesCommand
-from pluton.geometry.transforms import scale as scale_pts
+from pluton.geometry.transforms import apply_mat, is_identity_transform, scale as scale_pts
 from pluton.tools.tool import Tool, ToolContext, ToolOverlay
 from pluton.tools.transform_support import (
     GripSpec,
@@ -27,6 +27,7 @@ from pluton.tools.transform_support import (
     selection_aabb,
     selection_vertices,
 )
+from pluton.viewport.picking import world_to_local_point
 
 _GRIP_PX = 9.0
 _GRIP_COLOR = (0.20, 0.75, 0.35)
@@ -63,6 +64,12 @@ class ScaleTool(Tool):
         # instance-mode state
         self._instance_mode = False
         self._instances: list = []
+        # True when grips are expressed in LOCAL scene coords (entity-mode);
+        # False when they are already in WORLD coords (instance-mode).
+        self._grips_are_local = True
+
+    def _world_transform(self):
+        return self._model.active_world_transform if self._model is not None else None
 
     def activate(self, ctx: ToolContext) -> None:
         self._scene = ctx.scene
@@ -85,12 +92,15 @@ class ScaleTool(Tool):
         self._reset_drag()
         if self._selection is not None and not self._selection.is_empty() \
                 and self._selection.instances:
-            # Instance mode: compute AABB from world bboxes of selected instances
+            # Instance mode: compute AABB from world bboxes of selected instances.
+            # Grips end up in WORLD space.
             self._instance_mode = True
+            self._grips_are_local = False
             self._instances = self._resolve_instances()
             box = self._instance_world_aabb()
         else:
             self._instance_mode = False
+            self._grips_are_local = True
             self._instances = []
             self._vertex_ids = (
                 selection_vertices(self._scene, self._selection)
@@ -203,13 +213,25 @@ class ScaleTool(Tool):
                 )
                 preview_lo = np.minimum(corners[0], corners[1]).astype(np.float32)
                 preview_hi = np.maximum(corners[0], corners[1]).astype(np.float32)
-            polylines.append((self._box_segments(preview_lo, preview_hi), _BOX_COLOR, 1.5))
+            # Box segments: in entity-mode lo/hi are LOCAL; lift to world if needed.
+            if self._grips_are_local:
+                wt = self._world_transform()
+                if not is_identity_transform(wt):
+                    box_segs_local = self._box_segments(preview_lo, preview_hi)
+                    box_segs = apply_mat(box_segs_local.reshape(-1, 3), wt).reshape(-1, 3)
+                else:
+                    box_segs = self._box_segments(preview_lo, preview_hi)
+            else:
+                box_segs = self._box_segments(preview_lo, preview_hi)
+            polylines.append((box_segs, _BOX_COLOR, 1.5))
             for g in self._grips:
                 is_active = (
                     self._active is not None and np.allclose(g.position, self._active.position)
                 )
                 color = _ACTIVE_COLOR if is_active else _GRIP_COLOR
-                markers.append((g.position.copy(), _GRIP_PX, color))
+                # Markers must be in WORLD space; lift local grips to world.
+                world_pos = self._grip_world_pos(g)
+                markers.append((world_pos, _GRIP_PX, color))
         return ToolOverlay(
             rubber_band_segments=np.zeros((0, 3), np.float32),
             rubber_band_color=(1, 1, 1),
@@ -330,6 +352,21 @@ class ScaleTool(Tool):
             self._stack.execute(cmd, self._model)
 
     # ---- screen picking (camera-dependent; stubbed in unit tests) ----
+
+    def _grip_world_pos(self, g: GripSpec) -> np.ndarray:
+        """Return the world position of a grip.
+
+        In entity-mode grips are LOCAL; lift them to world via the active
+        world transform.  In instance-mode they are already world.
+        When the world transform is identity (root context) this is a no-op.
+        """
+        if not self._grips_are_local:
+            return g.position
+        wt = self._world_transform()
+        if is_identity_transform(wt):
+            return g.position
+        return apply_mat(np.asarray(g.position, np.float64).reshape(1, 3), wt)[0]
+
     def _pick_grip(self, event) -> GripSpec | None:  # noqa: ANN001
         if self._camera is None or self._size_provider is None:
             return None
@@ -337,7 +374,8 @@ class ScaleTool(Tool):
         pos = event.position()
         best, best_d = None, _GRIP_PX * 1.6
         for g in self._grips:
-            proj = self._camera.world_to_screen(g.position, w, h)
+            world_pos = self._grip_world_pos(g)
+            proj = self._camera.world_to_screen(world_pos, w, h)
             if proj is None:
                 continue
             sx, sy, _d = proj
@@ -350,6 +388,12 @@ class ScaleTool(Tool):
         """Cursor ray intersect the ground-parallel plane through the grip.
 
         Falls back to None if no camera. (M4d refines with axis-aware dragging.)
+
+        In entity-mode the grips are LOCAL.  We use the grip's WORLD position as
+        the plane anchor (p0) so the projection is stable in screen space, then
+        convert the resulting world-space cursor back to LOCAL so the factor math
+        (which compares cursor to LOCAL grips/anchor) operates in the right frame.
+        In instance-mode grips are already world; the cursor stays world.
         """
         if self._camera is None or self._size_provider is None:
             return None
@@ -357,14 +401,32 @@ class ScaleTool(Tool):
         pos = event.position()
         origin, direction = self._camera.ray_from_screen(pos.x(), pos.y(), w, h)
         n = np.array([0, 0, 1], np.float32)
-        p0 = self._active.position if self._active is not None else self._anchor
+        # Plane anchor: world position of the active grip (or anchor).
+        if self._active is not None:
+            p0 = self._grip_world_pos(self._active)
+        else:
+            # self._anchor is always in the grips' own frame; lift if local.
+            if self._grips_are_local:
+                wt = self._world_transform()
+                if is_identity_transform(wt):
+                    p0 = np.asarray(self._anchor, np.float32)
+                else:
+                    p0 = apply_mat(np.asarray(self._anchor, np.float64).reshape(1, 3), wt)[0]
+            else:
+                p0 = np.asarray(self._anchor, np.float32)
         denom = float(np.dot(direction, n))
         if abs(denom) < 1e-9:
             return None
         t = float(np.dot(p0 - origin, n)) / denom
         if t <= 0:
             return None
-        return (origin + t * direction).astype(np.float32)
+        cursor_world = (origin + t * direction).astype(np.float32)
+        # In entity-mode convert the world cursor back to LOCAL so the factor
+        # math (comparing to LOCAL grips/anchor) remains correct.
+        if self._grips_are_local:
+            wt = self._world_transform()
+            return world_to_local_point(cursor_world, wt).astype(np.float32)
+        return cursor_world
 
     def _box_segments(self, lo, hi) -> np.ndarray:
         lo = np.asarray(lo, np.float32)
