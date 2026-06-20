@@ -16,6 +16,7 @@ from importlib.resources import files
 import numpy as np
 from OpenGL import GL
 
+from pluton.geometry.transforms import apply_mat, is_identity_transform
 from pluton.viewport.camera import Camera
 from pluton.viewport.snap_engine import SnapKind
 
@@ -449,7 +450,10 @@ class SceneRenderer:
             # Operates on the active context (root at identity, or entered context).
             if selection is not None:
                 active_scene = model.active_scene
-                self._draw_selection(active_scene, selection, view, projection)
+                self._draw_selection(
+                    active_scene, selection, view, projection,
+                    world_transform=model.active_world_transform,
+                )
 
             # 4.6 Task 15: Selected-instance bounding boxes (selection-blue).
             if selection is not None and selection.instances:
@@ -474,6 +478,7 @@ class SceneRenderer:
             self.draw_face_fill_overlays(
                 polygons=tool_overlay.face_fill_polygons,
                 color=tool_overlay.face_fill_color,
+                world_transform=model.active_world_transform if model is not None else None,
             )
 
         # 7. Box-select rectangle (M4b) — screen space, on top.
@@ -884,13 +889,20 @@ class SceneRenderer:
                 loop[2 * i + 1, 0:2] = quad[(i + 1) % 4]
             self._draw_screen_space_lines(loop, color, 1.5)
 
-    def _draw_selection(self, scene, selection, view, projection) -> None:  # noqa: ANN001
+    def _draw_selection(  # noqa: ANN001
+        self, scene, selection, view, projection, world_transform=None
+    ) -> None:
         if selection is None:
             return
+        need_transform = not is_identity_transform(world_transform)
         polys = _selection_face_polygons(scene, selection)
         if polys:
+            if need_transform:
+                polys = [apply_mat(p, world_transform) for p in polys]
             self.draw_face_fill_overlays(polygons=polys, color=_SELECTION_FILL_COLOR)
         segs = _selection_edge_segments(scene, selection)
+        if need_transform and segs.shape[0] > 0:
+            segs = apply_mat(segs, world_transform)
         self._draw_world_segments(segs, _SELECTION_EDGE_COLOR, 3.0, view, projection)
 
     def _init_ghost_fill_buffers(self) -> None:
@@ -913,6 +925,7 @@ class SceneRenderer:
         self,
         polygons: list[np.ndarray],
         color: tuple[float, float, float, float] = (0.4, 0.7, 1.0, 0.15),
+        world_transform=None,
     ) -> None:
         """Draw alpha-blended filled polygons on top of the scene.
 
@@ -925,6 +938,9 @@ class SceneRenderer:
 
         Empty polygon list is a no-op (and avoids touching GL state if the
         renderer wasn't initialized — useful for unit tests).
+
+        world_transform: optional 4x4 float64 to convert local-space polygon
+        coords to world space before drawing.  Identity (or None) is a no-op.
         """
         if not polygons:
             return
@@ -934,6 +950,10 @@ class SceneRenderer:
             return
 
         import mapbox_earcut
+
+        # Apply world transform when non-identity (entered-instance context).
+        if not is_identity_transform(world_transform):
+            polygons = [apply_mat(p, world_transform) for p in polygons]
 
         triangle_vertices: list[float] = []
         for loop in polygons:
