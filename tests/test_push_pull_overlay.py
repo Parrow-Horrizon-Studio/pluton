@@ -132,3 +132,123 @@ class TestPushPullOverlay:
         overlay = tool.overlay()
         # Ghost color (light blue, 0.15 alpha) — see PushPullTool constants.
         assert overlay.face_fill_color[3] == 0.15
+
+
+class TestPushPullOverlayWorldLift:
+    """M4e double-transform fix: face_fill_polygons must be in WORLD coords.
+
+    When push/pull is active inside a translated group (+10 on X), the returned
+    polygons must already be offset by +10 so the renderer can draw them at
+    identity without an additional transform.  At root (identity) the lift is a
+    no-op and existing test assertions still hold.
+    """
+
+    def _make_tool_inside_translated_group(self, tx: float = 10.0):
+        """Build a Model with one group translated by (tx, 0, 0), enter it,
+        then activate PushPullTool against the group's scene."""
+        from pluton.model.model import Model
+        from pluton.scene import Scene
+        from pluton.tools.push_pull_tool import PushPullTool
+        from pluton.tools.tool import ToolContext
+
+        model = Model()
+
+        # Build a unit-square face in a new definition (group).
+        group_def = model.new_definition("G", is_group=True)
+        scene: Scene = group_def.mesh
+        v0 = scene.add_vertex(np.array([0.0, 0.0, 0.0], dtype=np.float32))
+        v1 = scene.add_vertex(np.array([1.0, 0.0, 0.0], dtype=np.float32))
+        v2 = scene.add_vertex(np.array([1.0, 1.0, 0.0], dtype=np.float32))
+        v3 = scene.add_vertex(np.array([0.0, 1.0, 0.0], dtype=np.float32))
+        face_id = scene.add_face_from_loop([v0, v1, v2, v3])
+
+        # Place instance at +tx on X.
+        T = np.eye(4, dtype=np.float64)
+        T[0, 3] = tx
+        inst = model.new_instance(group_def, T)
+        model.root.children.append(inst)
+
+        # Enter the instance so active_world_transform == T.
+        model.enter(inst)
+
+        camera = MagicMock()
+        # The camera mock must return a WORLD-space ray.  ray_into_local will
+        # subtract tx from x, giving local origin (0.5, 0.5, 5) → hits face.
+        camera.ray_from_screen.return_value = (
+            np.array([tx + 0.5, 0.5, 5.0], dtype=np.float32),
+            np.array([0.0, 0.0, -1.0], dtype=np.float32),
+        )
+        tool = PushPullTool()
+        tool.activate(
+            ToolContext(
+                scene=scene,
+                command_stack=MagicMock(),
+                camera=camera,
+                widget_size_provider=lambda: (800, 600),
+                model=model,
+            )
+        )
+        return tool, scene, face_id, camera, model, tx
+
+    def test_hovering_polygon_is_lifted_to_world(self):
+        """HOVERING: the single polygon's x-coords must all be >= tx (world offset)."""
+        tool, scene, face_id, camera, model, tx = self._make_tool_inside_translated_group(tx=10.0)
+        # Hover over the face — ray_into_local converts the world ray to local,
+        # so the mock ray (local 0.5,0.5,5→-Z) hits the local face correctly.
+        tool.on_mouse_move(_make_event(), snap=None)
+        overlay = tool.overlay()
+        assert len(overlay.face_fill_polygons) == 1, "HOVERING must produce exactly one polygon"
+        poly = overlay.face_fill_polygons[0]
+        # Local face has x in [0,1]; world-lifted it must have x in [tx, tx+1].
+        np.testing.assert_array_less(
+            np.full(poly.shape[0], tx - 1e-4), poly[:, 0],
+            err_msg="All x-coords must be >= tx (polygon not lifted to world)",
+        )
+        np.testing.assert_array_less(
+            poly[:, 0], np.full(poly.shape[0], tx + 1.0 + 1e-4),
+            err_msg="All x-coords must be <= tx+1 (polygon not doubled-offset)",
+        )
+
+    def test_hovering_at_root_is_identity_noop(self):
+        """At root (no model / identity transform) coordinates must be unchanged."""
+        tool, scene, f, camera, _ = _make_tool_with_unit_rect()
+        tool.on_mouse_move(_make_event(), snap=None)
+        overlay = tool.overlay()
+        assert len(overlay.face_fill_polygons) == 1
+        poly = overlay.face_fill_polygons[0]
+        # Local face: x in [0,1], y in [0,1], z == 0.
+        assert poly[:, 0].max() <= 1.0 + 1e-5
+        assert poly[:, 0].min() >= 0.0 - 1e-5
+
+    def test_dragging_ghost_top_lifted_to_world(self):
+        """DRAGGING: ghost-top z == depth AND x-coords are world-offset by tx."""
+        tool, scene, face_id, camera, model, tx = self._make_tool_inside_translated_group(tx=10.0)
+        # Hover to arm.
+        tool.on_mouse_move(_make_event(), snap=None)
+        tool.on_mouse_press(
+            QMouseEvent(
+                QMouseEvent.Type.MouseButtonPress,
+                QPointF(100.0, 100.0),
+                QPointF(100.0, 100.0),
+                Qt.MouseButton.LeftButton,
+                Qt.MouseButton.LeftButton,
+                Qt.KeyboardModifier.NoModifier,
+            ),
+            snap=None,
+        )
+        depth = 3.0
+        # Horizontal world ray that, after ray_into_local (subtract tx from x),
+        # gives local origin (-3, 0.5, depth) → CPA yields depth=3.0.
+        camera.ray_from_screen.return_value = (
+            np.array([tx - 3.0, 0.5, depth], dtype=np.float32),
+            np.array([1.0, 0.0, 0.0], dtype=np.float32),
+        )
+        tool.on_mouse_move(_make_event(), snap=None)
+        overlay = tool.overlay()
+        assert len(overlay.face_fill_polygons) == 6, "4-vert face: 1+1+4 = 6 polygons"
+        ghost_top = overlay.face_fill_polygons[1]
+        # z must equal depth (unchanged by X translation).
+        np.testing.assert_allclose(ghost_top[:, 2], depth, atol=1e-4)
+        # x-coords must be in world space: [tx, tx+1].
+        assert ghost_top[:, 0].min() >= tx - 1e-4
+        assert ghost_top[:, 0].max() <= tx + 1.0 + 1e-4

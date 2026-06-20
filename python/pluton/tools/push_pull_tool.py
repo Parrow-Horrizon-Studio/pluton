@@ -165,6 +165,18 @@ class PushPullTool(Tool):
             polygons = self._build_ghost_polygons()
             color = _GHOST_FILL_COLOR
 
+        # Lift polygons from local (active-context) coords to WORLD so the
+        # renderer can draw them at identity (consistent with every other tool).
+        # At root the world transform is identity → this is a no-op.
+        if polygons:
+            from pluton.geometry.transforms import apply_mat, is_identity_transform
+            wt = self._world_transform()
+            if wt is not None and not is_identity_transform(wt):
+                polygons = [
+                    apply_mat(np.asarray(p, np.float64), wt).astype(np.float32)
+                    for p in polygons
+                ]
+
         return ToolOverlay(
             rubber_band_segments=np.zeros((0, 3), dtype=np.float32),
             rubber_band_color=(0.85, 0.85, 0.85),

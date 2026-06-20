@@ -474,11 +474,12 @@ class SceneRenderer:
             self._draw_tool_overlay(tool_overlay, view, projection)
 
         # 6. Face fills (M3b) — drawn last (on top of edges/markers).
+        # Tools emit face_fill_polygons in WORLD coords already (each tool lifts
+        # its own geometry), so we draw at identity — no world_transform here.
         if tool_overlay is not None and tool_overlay.face_fill_polygons:
             self.draw_face_fill_overlays(
                 polygons=tool_overlay.face_fill_polygons,
                 color=tool_overlay.face_fill_color,
-                world_transform=model.active_world_transform if model is not None else None,
             )
 
         # 7. Box-select rectangle (M4b) — screen space, on top.

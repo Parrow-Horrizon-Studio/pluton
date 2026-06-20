@@ -214,9 +214,20 @@ class SelectTool(Tool):
                     pass
             else:  # face
                 try:
+                    from pluton.geometry.transforms import apply_mat, is_identity_transform
+                    wt = self._world_transform()
+                    use_wt = wt is not None and not is_identity_transform(wt)
+                    wt_arr = np.asarray(wt, dtype=np.float64) if use_wt else None
+
+                    def _to_world_sel(local_pos: np.ndarray) -> np.ndarray:
+                        if not use_wt:
+                            return local_pos
+                        return apply_mat(local_pos.reshape(1, 3), wt_arr)[0]
+
                     loop = self._scene.face_loop(ent_id)
                     fills = [np.array(
-                        [self._scene.vertex(v).position for v in loop], dtype=np.float32
+                        [_to_world_sel(np.asarray(self._scene.vertex(v).position, dtype=np.float32)) for v in loop],
+                        dtype=np.float32,
                     )]
                 except KeyError:
                     pass
