@@ -27,6 +27,18 @@ def _point_segment_distance(px, py, ax, ay, bx, by) -> float:
 
 
 
+def ray_into_local(origin, direction, world_transform):  # noqa: ANN001
+    """Transform a world-space ray (origin point, direction vector) into the
+    local frame of `world_transform`. Returns (origin, direction) unchanged when
+    world_transform is None or identity (root context)."""
+    if is_identity_transform(world_transform):
+        return origin, direction
+    inv = mat_invert(np.asarray(world_transform, dtype=np.float64))
+    o = apply_mat(np.asarray(origin, dtype=np.float64).reshape(1, 3), inv)[0]
+    d = (inv[:3, :3] @ np.asarray(direction, dtype=np.float64)).astype(np.float32)
+    return o, d
+
+
 def pick_selectable(cursor_screen, viewport_size, camera, scene, world_transform=None):  # noqa: ANN001
     """Return ("edge", id) for the nearest edge within PICK_PIXEL_TOLERANCE of
     the cursor (screen-space); else ("face", id) under the cursor ray; else None.

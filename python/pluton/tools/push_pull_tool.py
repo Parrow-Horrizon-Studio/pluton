@@ -54,6 +54,7 @@ class PushPullTool(Tool):
         self._camera = None
         self._widget_size_provider = None
         self._units_provider = None
+        self._model = None
 
         self._state: _State = _State.IDLE
 
@@ -100,10 +101,14 @@ class PushPullTool(Tool):
         self._camera = ctx.camera
         self._widget_size_provider = ctx.widget_size_provider
         self._units_provider = ctx.units_provider
+        self._model = ctx.model
         self._reset_to_idle()
 
     def deactivate(self) -> None:
         self._reset_to_idle()
+
+    def _world_transform(self):
+        return self._model.active_world_transform if self._model is not None else None
 
     # ---- Event handlers -----------------------------------------------
 
@@ -181,6 +186,8 @@ class PushPullTool(Tool):
         origin, direction = self._camera.ray_from_screen(
             float(pos.x()), float(pos.y()), int(width), int(height)
         )
+        from pluton.viewport.picking import ray_into_local
+        origin, direction = ray_into_local(origin, direction, self._world_transform())
         return self._scene.ray_pick_face(origin, direction)
 
     def _loop_world_coords(self, face_id: int) -> np.ndarray:
@@ -217,6 +224,8 @@ class PushPullTool(Tool):
         origin, direction = self._camera.ray_from_screen(
             float(pos.x()), float(pos.y()), int(width), int(height)
         )
+        from pluton.viewport.picking import ray_into_local
+        origin, direction = ray_into_local(origin, direction, self._world_transform())
         d_norm = float(np.linalg.norm(direction))
         if d_norm < 1e-9:
             return
