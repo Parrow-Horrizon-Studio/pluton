@@ -257,6 +257,13 @@ class MainWindow(QMainWindow):
 
             ev = QKeyEvent(QKeyEvent.Type.KeyPress, Qt.Key.Key_Escape, Qt.KeyboardModifier.NoModifier)
             active.on_key_press(ev)
+        elif self._model.active_path:
+            # M4e: inside a group/component with no active gesture — Esc exits one
+            # level. Handled here (not in the tool) so Esc exits regardless of which
+            # tool is active and even when the selection is empty (entering clears it).
+            self._model.exit_one()
+            self._selection.clear()
+            self._on_active_context_changed()
         else:
             self._tool_manager.deactivate_current()
             self._status_bar.set_tool("")
