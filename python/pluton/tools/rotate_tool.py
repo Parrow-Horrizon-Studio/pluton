@@ -360,7 +360,12 @@ class RotateTool(Tool):
         if not self._orig:
             return 1.0
         pts = np.array(list(self._orig.values()), np.float32)
-        r = float(np.max(np.linalg.norm(pts - self._center, axis=1)))
+        # self._center is WORLD; pts are LOCAL → convert center to local before
+        # computing distances so the protractor radius is correct inside a
+        # translated/rotated group.
+        from pluton.viewport.picking import world_to_local_point
+        local_center = world_to_local_point(self._center, self._world_transform())
+        r = float(np.max(np.linalg.norm(pts - local_center, axis=1)))
         return max(r, 0.5)
 
     def _disk_loop(self, radius: float, segments: int = 48) -> np.ndarray:

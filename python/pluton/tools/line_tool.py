@@ -262,7 +262,14 @@ class LineTool(Tool):
         s = self._scene  # type: ignore[assignment]
         if self._state != _State.DRAWING or s is None or not self._gesture_vertex_ids:
             return None
-        return s.vertex(self._gesture_vertex_ids[-1]).position.copy()
+        anchor = np.asarray(
+            s.vertex(self._gesture_vertex_ids[-1]).position, np.float32
+        ).copy()
+        from pluton.geometry.transforms import apply_mat, is_identity_transform
+        wt = self._world_transform()
+        if is_identity_transform(wt):
+            return anchor
+        return apply_mat(anchor.astype(np.float64).reshape(1, 3), np.asarray(wt, dtype=np.float64))[0]
 
     # ---- internal -------------------------------------------------------
     def _vertex_for_snap(self, snap, scene):  # noqa: ANN001
