@@ -9,6 +9,13 @@ never mutated until release, so Esc/deactivate simply resets.
 Instance-mode (M4e §7.3): if ctx.selection.instances is non-empty at press,
 the tool composes the gesture delta into each instance's 4x4 transform and
 emits TransformInstanceCommand(s) instead of TransformVerticesCommand.
+
+Transform-awareness (M4e fix): snap quantities arrive in WORLD space.
+When editing INSIDE a moved group/component the active context has a
+non-identity world transform.  We must convert world vectors/points into
+the active context's LOCAL frame before applying them to local mesh vertices
+or local instance transforms.  At the root context (identity) every
+conversion is a no-op so existing behaviour is fully preserved.
 """
 
 from __future__ import annotations
@@ -18,9 +25,10 @@ from PySide6.QtCore import Qt
 from PySide6.QtGui import QKeyEvent, QMouseEvent
 
 from pluton.commands.scene_commands import TransformVerticesCommand
-from pluton.geometry.transforms import translate
+from pluton.geometry.transforms import apply_mat, is_identity_transform, mat_invert, translate
 from pluton.tools.tool import Tool, ToolContext, ToolOverlay
 from pluton.tools.transform_support import selection_vertices
+from pluton.viewport.picking import world_to_local_point
 
 _NEUTRAL = (0.85, 0.85, 0.85)
 _GHOST = (0.30, 0.65, 1.0)
@@ -49,6 +57,22 @@ class MoveTool(Tool):
         # instance-mode state
         self._instance_mode = False
         self._instances: list = []  # list of Instance objects
+
+    def _world_transform(self):
+        return self._model.active_world_transform if self._model is not None else None
+
+    def _world_vec_to_local(self, world_vec: np.ndarray) -> np.ndarray:
+        """Convert a world-space DIRECTION/VECTOR into the active context's local frame.
+
+        Translation has no effect on vectors — only the 3×3 rotation/scale block
+        of the inverse is applied.  Returns the vector unchanged when the active
+        transform is None or identity (root context).
+        """
+        wt = self._world_transform()
+        if is_identity_transform(wt):
+            return world_vec.astype(np.float32)
+        inv3 = mat_invert(np.asarray(wt, np.float64))[:3, :3]
+        return (inv3 @ np.asarray(world_vec, np.float64)).astype(np.float32)
 
     def activate(self, ctx: ToolContext) -> None:
         self._scene = ctx.scene
@@ -112,7 +136,9 @@ class MoveTool(Tool):
             ids = self._vertex_ids
             if ids:
                 pts = np.array([self._orig[v] for v in ids], np.float32)
-                new = translate(pts, self._delta)
+                # self._delta is a WORLD vector; local mesh vertices need a LOCAL delta.
+                local_delta = self._world_vec_to_local(self._delta)
+                new = translate(pts, local_delta)
                 moves = {v: (self._orig[v], new[i]) for i, v in enumerate(ids)}
                 cmd = TransformVerticesCommand(moves)
                 if not cmd.is_empty() and self._stack is not None:
@@ -141,10 +167,12 @@ class MoveTool(Tool):
             self._reset()
             return True
 
+        # typed_delta is a WORLD vector; convert to local before applying to mesh.
+        local_typed_delta = self._world_vec_to_local(typed_delta)
         moves = {}
         for v in self._vertex_ids:
             old = self._orig[v]
-            moves[v] = (old, (old + typed_delta).astype(np.float32))
+            moves[v] = (old, (old + local_typed_delta).astype(np.float32))
         from pluton.commands.scene_commands import TransformVerticesCommand
         cmd = TransformVerticesCommand(moves)
         if not cmd.is_empty() and self._stack is not None:
@@ -208,6 +236,12 @@ class MoveTool(Tool):
 
         If *move_copy* is True the originals stay put and new instances are created at the
         translated transform (Ctrl-during-Move behaviour).
+
+        `delta` arrives in WORLD space.  When the active context has a non-identity world
+        transform (i.e. we are editing INSIDE a moved group), instance transforms are
+        expressed in the ACTIVE CONTEXT's LOCAL frame, so we must convert the world delta
+        to that frame (inverse 3×3 block) before building the translation matrix.
+        At the root context (identity) the conversion is a no-op.
         """
         from pluton.commands.command import CompositeCommand
         from pluton.commands.instance_commands import (
@@ -216,7 +250,9 @@ class MoveTool(Tool):
         )
         from pluton.geometry.transforms import mat_translate
 
-        delta_mat = mat_translate(delta)
+        # Convert world delta → local frame of the active context.
+        local_delta = self._world_vec_to_local(delta)
+        delta_mat = mat_translate(local_delta)
 
         if move_copy:
             if self._model is None:
@@ -253,14 +289,28 @@ class MoveTool(Tool):
                 self._stack.execute(cmd, self._model)
 
     def _ghost_segments(self) -> np.ndarray:
-        """Selection edges + face loops as world segments, translated by delta."""
+        """Selection edges + face loops as world segments, translated by delta.
+
+        Local mesh vertices are transformed to world (via active_world_transform)
+        before adding the WORLD delta, so the ghost renders at the correct world
+        location even when editing inside a moved group/component.
+        """
         s = self._scene
         sel = self._selection
         pts: list[list[float]] = []
 
+        wt = self._world_transform()
+        use_wt = not is_identity_transform(wt)
+        wt_arr = np.asarray(wt, np.float64) if use_wt else None
+
+        def _to_world(local_pos):
+            if not use_wt:
+                return np.asarray(local_pos, np.float32)
+            return apply_mat(np.asarray(local_pos, np.float64).reshape(1, 3), wt_arr)[0]
+
         def seg(p0, p1):
-            q0 = np.asarray(p0, np.float32) + self._delta
-            q1 = np.asarray(p1, np.float32) + self._delta
+            q0 = _to_world(p0) + self._delta
+            q1 = _to_world(p1) + self._delta
             pts.append([float(q0[0]), float(q0[1]), float(q0[2])])
             pts.append([float(q1[0]), float(q1[1]), float(q1[2])])
 

@@ -8,6 +8,14 @@ normal. The swept angle snaps to 15 degrees. One TransformVerticesCommand on com
 Instance-mode (M4e §7.3): if ctx.selection.instances is non-empty when the center
 is placed, the tool composes the rotate delta into each instance's 4x4 transform and
 emits TransformInstanceCommand(s) instead of TransformVerticesCommand.
+
+Transform-awareness (M4e fix): snap/pick quantities arrive in WORLD space.
+When editing INSIDE a moved group/component the active context has a non-identity
+world transform.  The face-pick ray, rotation center, and rotation axis must all be
+converted from world to the LOCAL frame before operating on local mesh vertices.
+The OVERLAY (protractor) always renders in world space — it keeps the world-space
+center and normal and must NOT use the locally-converted values.
+At the root context (identity) every conversion is a no-op.
 """
 
 from __future__ import annotations
@@ -20,9 +28,10 @@ from PySide6.QtCore import Qt
 from PySide6.QtGui import QKeyEvent, QMouseEvent
 
 from pluton.commands.scene_commands import TransformVerticesCommand
-from pluton.geometry.transforms import rotate
+from pluton.geometry.transforms import is_identity_transform, mat_invert, rotate
 from pluton.tools.tool import Tool, ToolContext, ToolOverlay
 from pluton.tools.transform_support import selection_vertices
+from pluton.viewport.picking import ray_into_local, world_to_local_point
 
 _ANGLE_SNAP_RAD = math.radians(15.0)
 _DISK_COLOR_RGBA = (0.30, 0.55, 0.95, 0.18)
@@ -67,6 +76,21 @@ class RotateTool(Tool):
         # instance-mode state
         self._instance_mode = False
         self._instances: list = []
+
+    def _world_transform(self):
+        return self._model.active_world_transform if self._model is not None else None
+
+    def _world_vec_to_local(self, world_vec: np.ndarray) -> np.ndarray:
+        """Convert a world-space DIRECTION/VECTOR into the active context's local frame.
+
+        Only the inverse 3×3 block is applied (translation does not affect vectors).
+        Returns the vector unchanged at identity/None (root context).
+        """
+        wt = self._world_transform()
+        if is_identity_transform(wt):
+            return world_vec.astype(np.float32)
+        inv3 = mat_invert(np.asarray(wt, np.float64))[:3, :3]
+        return (inv3 @ np.asarray(world_vec, np.float64)).astype(np.float32)
 
     def activate(self, ctx: ToolContext) -> None:
         self._scene = ctx.scene
@@ -226,12 +250,23 @@ class RotateTool(Tool):
         ]
 
     def _commit_instance_rotate(self, angle: float) -> None:
-        """Emit TransformInstanceCommand(s) for the rotate gesture."""
+        """Emit TransformInstanceCommand(s) for the rotate gesture.
+
+        self._center and self._normal are in WORLD space.  Instance transforms live
+        in the ACTIVE CONTEXT's LOCAL frame, so convert center and normal before
+        building the matrix.  At identity (root context) this is a no-op.
+        """
         from pluton.commands.command import CompositeCommand
         from pluton.commands.instance_commands import TransformInstanceCommand
         from pluton.geometry.transforms import mat_rotate
+        from pluton.viewport.picking import world_to_local_point
 
-        delta_mat = mat_rotate(self._center, self._normal, angle)
+        local_center = world_to_local_point(self._center, self._world_transform())
+        local_normal = self._world_vec_to_local(self._normal)
+        ln = float(np.linalg.norm(local_normal))
+        if ln > 1e-9:
+            local_normal = local_normal / ln
+        delta_mat = mat_rotate(local_center, local_normal, angle)
         cmds = [
             TransformInstanceCommand(inst, delta_mat @ inst.transform)
             for inst in self._instances
@@ -246,17 +281,33 @@ class RotateTool(Tool):
             self._stack.execute(cmd, self._model)
 
     def _pick_plane_normal(self, event) -> np.ndarray:  # noqa: ANN001
-        """Normal of the face under the cursor, or +Z (ground) if none/no camera."""
+        """Normal of the face under the cursor (in WORLD space), or +Z if none/no camera.
+
+        The ray is converted to the active context's LOCAL frame before the face
+        pick (mirrors push_pull_tool.py).  The returned normal is always in WORLD
+        space so the caller can use it directly for the overlay protractor.
+        """
         if self._camera is None or self._size_provider is None or self._scene is None:
             return np.array([0, 0, 1], np.float32)
         w, h = self._size_provider()
         pos = event.position()
         origin, direction = self._camera.ray_from_screen(pos.x(), pos.y(), w, h)
-        hit = self._scene.ray_pick_face(origin, direction)
+        # Convert ray to local frame for the face-pick (scene mesh is in local coords).
+        local_origin, local_direction = ray_into_local(origin, direction, self._world_transform())
+        hit = self._scene.ray_pick_face(local_origin, local_direction)
         if hit is None:
             return np.array([0, 0, 1], np.float32)
         try:
-            return np.asarray(self._scene.face_normal(hit.face_id), np.float32)
+            # face_normal returns a vector in LOCAL space; lift it to world.
+            local_n = np.asarray(self._scene.face_normal(hit.face_id), np.float32)
+            wt = self._world_transform()
+            if is_identity_transform(wt):
+                return local_n
+            # Normals transform by the inverse-transpose of the 3×3 block.
+            inv3_T = mat_invert(np.asarray(wt, np.float64))[:3, :3].T
+            world_n = (inv3_T @ local_n.astype(np.float64)).astype(np.float32)
+            ln = float(np.linalg.norm(world_n))
+            return (world_n / ln) if ln > 1e-9 else np.array([0, 0, 1], np.float32)
         except (KeyError, ValueError):
             return np.array([0, 0, 1], np.float32)
 
@@ -284,9 +335,22 @@ class RotateTool(Tool):
         return round(ang / _ANGLE_SNAP_RAD) * _ANGLE_SNAP_RAD
 
     def _compute_moves(self, angle: float) -> dict:
+        """Compute new vertex positions for a rotation by `angle`.
+
+        self._center and self._normal are in WORLD space (used by the overlay).
+        The local mesh vertices need them converted to the active context's LOCAL
+        frame before the rotation math.  At identity this is a no-op.
+        """
         ids = self._vertex_ids
         pts = np.array([self._orig[v] for v in ids], np.float32)
-        new = rotate(pts, self._center, self._normal, angle)
+        # Convert world center → local point.
+        local_center = world_to_local_point(self._center, self._world_transform())
+        # Convert world normal → local vector (inverse 3×3, then renormalize).
+        local_normal = self._world_vec_to_local(self._normal)
+        ln = float(np.linalg.norm(local_normal))
+        if ln > 1e-9:
+            local_normal = local_normal / ln
+        new = rotate(pts, local_center, local_normal, angle)
         return {v: (self._orig[v], new[i]) for i, v in enumerate(ids)}
 
     def _disk_radius(self) -> float:
