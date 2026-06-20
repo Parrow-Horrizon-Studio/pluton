@@ -19,6 +19,7 @@ from pluton.commands.scene_commands import (
     AddVertexCommand,
 )
 from pluton.tools.tool import Tool, ToolContext, ToolOverlay
+from pluton.viewport.picking import world_to_local_point
 from pluton.viewport.snap_engine import MARKER_COLOR_BY_KIND
 
 
@@ -41,6 +42,7 @@ class RectangleTool(Tool):
 
     def __init__(self) -> None:
         self._scene = None
+        self._model = None
         self._state = _State.IDLE
         self._first_corner: np.ndarray | None = None
         self._preview_corner: np.ndarray | None = None
@@ -53,7 +55,11 @@ class RectangleTool(Tool):
     def activate(self, ctx: ToolContext) -> None:
         self._scene = ctx.scene  # type: ignore[assignment]
         self._command_stack = ctx.command_stack
+        self._model = ctx.model
         self._reset_gesture()
+
+    def _world_transform(self):  # noqa: ANN202
+        return self._model.active_world_transform if self._model is not None else None
 
     def deactivate(self) -> None:
         self._reset_gesture()
@@ -171,12 +177,14 @@ class RectangleTool(Tool):
 
         composite = CompositeCommand(name="Draw Rectangle")
         s = self._scene  # type: ignore[assignment]
-        v_cmds = [
-            AddVertexCommand(np.array([xlo, ylo, 0.0], dtype=np.float32)),
-            AddVertexCommand(np.array([xhi, ylo, 0.0], dtype=np.float32)),
-            AddVertexCommand(np.array([xhi, yhi, 0.0], dtype=np.float32)),
-            AddVertexCommand(np.array([xlo, yhi, 0.0], dtype=np.float32)),
+        wt = self._world_transform()
+        world_corners = [
+            np.array([xlo, ylo, 0.0], dtype=np.float32),
+            np.array([xhi, ylo, 0.0], dtype=np.float32),
+            np.array([xhi, yhi, 0.0], dtype=np.float32),
+            np.array([xlo, yhi, 0.0], dtype=np.float32),
         ]
+        v_cmds = [AddVertexCommand(world_to_local_point(p, wt)) for p in world_corners]
         for c in v_cmds:
             c.do(s)
             composite.children.append(c)

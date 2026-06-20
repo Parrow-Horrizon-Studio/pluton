@@ -24,6 +24,7 @@ from pluton.commands.scene_commands import (
     SplitEdgeCommand,
 )
 from pluton.tools.tool import Tool, ToolContext, ToolOverlay
+from pluton.viewport.picking import world_to_local_point
 from pluton.viewport.snap_engine import MARKER_COLOR_BY_KIND
 
 
@@ -51,6 +52,7 @@ class LineTool(Tool):
 
     def __init__(self) -> None:
         self._scene = None
+        self._model = None
         self._state = _State.IDLE
         self._gesture_vertex_ids: list[int] = []
         self._preview_tip: np.ndarray | None = None
@@ -64,7 +66,11 @@ class LineTool(Tool):
     def activate(self, ctx: ToolContext) -> None:
         self._scene = ctx.scene  # type: ignore[assignment]
         self._command_stack = ctx.command_stack
+        self._model = ctx.model
         self._reset_gesture()
+
+    def _world_transform(self):  # noqa: ANN202
+        return self._model.active_world_transform if self._model is not None else None
 
     def deactivate(self) -> None:
         self._reset_gesture()
@@ -149,15 +155,28 @@ class LineTool(Tool):
         if length is None or length <= 0:
             return False
         s = self._scene
-        anchor = s.vertex(self._gesture_vertex_ids[-1]).position
-        direction = np.asarray(self._preview_tip, np.float32) - anchor
+        # anchor_local is in the active context's local space.
+        # _preview_tip is always world. Convert anchor local→world to get the
+        # direction purely in world space, then convert the world target local.
+        anchor_local = np.asarray(s.vertex(self._gesture_vertex_ids[-1]).position, np.float32)
+        wt = self._world_transform()
+        from pluton.geometry.transforms import apply_mat, is_identity_transform
+        if is_identity_transform(wt):
+            anchor_world = anchor_local
+        else:
+            anchor_world = apply_mat(
+                anchor_local.astype(np.float64).reshape(1, 3),
+                np.asarray(wt, dtype=np.float64)
+            )[0].astype(np.float32)
+        direction = np.asarray(self._preview_tip, np.float32) - anchor_world
         norm = float(np.linalg.norm(direction))
         if norm < 1e-9:
             return False
-        target = (anchor + (direction / norm) * length).astype(np.float32)
+        target_world = (anchor_world + (direction / norm) * length).astype(np.float32)
+        target_local = world_to_local_point(target_world, wt)
         from pluton.commands.scene_commands import AddEdgeCommand, AddVertexCommand
         assert self._composite is not None
-        v_cmd = AddVertexCommand(target)
+        v_cmd = AddVertexCommand(target_local)
         v_cmd.do(s)
         self._composite.children.append(v_cmd)
         new_vid = v_cmd._vertex_id  # type: ignore[attr-defined]
@@ -165,7 +184,7 @@ class LineTool(Tool):
         e_cmd.do(s)
         self._composite.children.append(e_cmd)
         self._gesture_vertex_ids.append(new_vid)
-        self._preview_tip = target.copy()
+        self._preview_tip = target_world.copy()
         return True
 
     def on_key_press(self, event: QKeyEvent) -> None:
@@ -202,10 +221,19 @@ class LineTool(Tool):
             and self._preview_tip is not None
             and self._gesture_vertex_ids
         ):
-            anchor = s.vertex(self._gesture_vertex_ids[-1]).position
+            anchor_local = s.vertex(self._gesture_vertex_ids[-1]).position
+            wt = self._world_transform()
+            from pluton.geometry.transforms import apply_mat, is_identity_transform
+            if is_identity_transform(wt):
+                anchor_world = anchor_local
+            else:
+                anchor_world = apply_mat(
+                    np.asarray(anchor_local, dtype=np.float64).reshape(1, 3),
+                    np.asarray(wt, dtype=np.float64)
+                )[0]
             segments = np.array(
                 [
-                    [float(anchor[0]), float(anchor[1]), float(anchor[2])],
+                    [float(anchor_world[0]), float(anchor_world[1]), float(anchor_world[2])],
                     [
                         float(self._preview_tip[0]),
                         float(self._preview_tip[1]),
@@ -264,7 +292,8 @@ class LineTool(Tool):
                 else edge.v2_id
             )
             return nearest, None
-        cmd = AddVertexCommand(snap.world_position)
+        local = world_to_local_point(snap.world_position, self._world_transform())
+        cmd = AddVertexCommand(local)
         cmd.do(scene)
         return cmd._vertex_id, cmd  # type: ignore[attr-defined]
 

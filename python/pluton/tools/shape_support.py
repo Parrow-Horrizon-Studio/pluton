@@ -14,6 +14,7 @@ import numpy as np
 from pluton.commands import CompositeCommand
 from pluton.commands.scene_commands import AddEdgeCommand, AddFaceCommand, AddVertexCommand
 from pluton.geometry import DrawingPlane
+from pluton.viewport.picking import world_to_local_point
 
 # Reuse an existing vertex when a generated point lands within this distance of
 # it (world units / meters; ~10 µm at meter scale). Loose enough to absorb
@@ -62,10 +63,17 @@ def _resolve_ring(scene, composite, world_points):  # noqa: ANN001
     return vids
 
 
-def build_closed_face(scene, world_points, name: str = "Draw Shape"):  # noqa: ANN001
+def build_closed_face(scene, world_points, name: str = "Draw Shape", world_transform=None):  # noqa: ANN001
     """Closed ring of world points → vertices + boundary edges + one face.
     Returns the CompositeCommand (already executed), or None if degenerate
-    (fewer than 3 distinct vertices)."""
+    (fewer than 3 distinct vertices).
+
+    world_transform: when non-identity, each point is converted from world space
+    to the local frame before writing (so geometry lands at the correct position
+    when drawing inside a moved group/component)."""
+    from pluton.geometry.transforms import is_identity_transform
+    if not is_identity_transform(world_transform):
+        world_points = [world_to_local_point(p, world_transform) for p in world_points]
     composite = CompositeCommand(name=name)
     vids = _resolve_ring(scene, composite, world_points)
     if len(vids) >= 2 and vids[0] == vids[-1]:
@@ -93,10 +101,17 @@ def build_closed_face(scene, world_points, name: str = "Draw Shape"):  # noqa: A
     return composite
 
 
-def build_open_polyline(scene, world_points, name: str = "Draw Curve"):  # noqa: ANN001
+def build_open_polyline(scene, world_points, name: str = "Draw Curve", world_transform=None):  # noqa: ANN001
     """Open polyline of world points → vertices + connecting edges (no face).
     Returns the CompositeCommand (already executed), or None if degenerate
-    (fewer than 2 distinct vertices)."""
+    (fewer than 2 distinct vertices).
+
+    world_transform: when non-identity, each point is converted from world space
+    to the local frame before writing (so geometry lands at the correct position
+    when drawing inside a moved group/component)."""
+    from pluton.geometry.transforms import is_identity_transform
+    if not is_identity_transform(world_transform):
+        world_points = [world_to_local_point(p, world_transform) for p in world_points]
     composite = CompositeCommand(name=name)
     vids = _resolve_ring(scene, composite, world_points)
     if len(vids) < 2:

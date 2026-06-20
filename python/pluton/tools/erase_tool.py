@@ -36,6 +36,7 @@ class EraserTool(Tool):
         self._camera = None
         self._size_provider = None
         self._command_stack = None
+        self._model = None
         self._hovered_edge: int | None = None
         self._stroke: CompositeCommand | None = None
         self._erased: set[int] = set()
@@ -45,9 +46,13 @@ class EraserTool(Tool):
         self._camera = ctx.camera
         self._size_provider = ctx.widget_size_provider
         self._command_stack = ctx.command_stack
+        self._model = ctx.model
         self._hovered_edge = None
         self._stroke = None
         self._erased = set()
+
+    def _world_transform(self):  # noqa: ANN202
+        return self._model.active_world_transform if self._model is not None else None
 
     def deactivate(self) -> None:
         # Roll back any in-progress (un-committed) erase stroke so a mid-drag
@@ -66,7 +71,7 @@ class EraserTool(Tool):
         return (float(pos.x()), float(pos.y()))
 
     def _pick_edge(self, event: QMouseEvent) -> int | None:
-        hit = pick_selectable(self._cursor(event), self._viewport_size(), self._camera, self._scene)
+        hit = pick_selectable(self._cursor(event), self._viewport_size(), self._camera, self._scene, world_transform=self._world_transform())
         return hit[1] if hit is not None and hit[0] == "edge" else None
 
     def _erase_edge(self, e_id: int) -> None:
@@ -115,16 +120,27 @@ class EraserTool(Tool):
         fills: list[np.ndarray] = []
         if self._hovered_edge is not None and self._scene is not None:
             try:
+                from pluton.geometry.transforms import apply_mat, is_identity_transform
+                wt = self._world_transform()
+                use_wt = not is_identity_transform(wt)
+                wt_arr = np.asarray(wt, dtype=np.float64) if use_wt else None
+
+                def _to_world(local_pos: np.ndarray) -> np.ndarray:
+                    if not use_wt:
+                        return local_pos
+                    return apply_mat(local_pos.reshape(1, 3), wt_arr)[0]
+
                 e = self._scene.edge(self._hovered_edge)
-                p1 = np.asarray(self._scene.vertex(e.v1_id).position, dtype=np.float32)
-                p2 = np.asarray(self._scene.vertex(e.v2_id).position, dtype=np.float32)
+                p1 = _to_world(np.asarray(self._scene.vertex(e.v1_id).position, dtype=np.float32))
+                p2 = _to_world(np.asarray(self._scene.vertex(e.v2_id).position, dtype=np.float32))
                 segs = np.array([p1, p2], dtype=np.float32)
                 for f_id in self._scene.edge_faces(self._hovered_edge):
                     if f_id is None:
                         continue
                     loop = self._scene.face_loop(f_id)
                     fills.append(np.array(
-                        [self._scene.vertex(v).position for v in loop], dtype=np.float32
+                        [_to_world(np.asarray(self._scene.vertex(v).position, dtype=np.float32)) for v in loop],
+                        dtype=np.float32,
                     ))
             except KeyError:
                 pass

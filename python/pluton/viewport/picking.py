@@ -39,6 +39,16 @@ def ray_into_local(origin, direction, world_transform):  # noqa: ANN001
     return o, d
 
 
+def world_to_local_point(point, world_transform):  # noqa: ANN001
+    """Convert a single world-space point (3,) into the local frame of
+    world_transform. Returns the point unchanged when world_transform is None
+    or identity (root context)."""
+    from pluton.geometry.transforms import apply_mat, is_identity_transform, mat_invert
+    if is_identity_transform(world_transform):
+        return np.asarray(point, dtype=np.float32).reshape(3)
+    return apply_mat(np.asarray(point, dtype=np.float64).reshape(1, 3), mat_invert(world_transform))[0]
+
+
 def pick_selectable(cursor_screen, viewport_size, camera, scene, world_transform=None):  # noqa: ANN001
     """Return ("edge", id) for the nearest edge within PICK_PIXEL_TOLERANCE of
     the cursor (screen-space); else ("face", id) under the cursor ray; else None.
