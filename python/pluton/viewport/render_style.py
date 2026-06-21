@@ -100,3 +100,52 @@ def face_uniforms(
         )
     # FaceShading.FLAT_BG
     return FaceUniforms(bg, (0.0, 0.0, 0.0), (0.0, 0.0, 0.0), material.shininess, alpha)
+
+
+@dataclass(frozen=True)
+class ResolvedFacePass:
+    """Everything the renderer needs to draw (or skip) one definition's faces."""
+
+    draw_faces: bool
+    ambient: tuple[float, float, float]
+    diffuse: tuple[float, float, float]
+    specular: tuple[float, float, float]
+    shininess: float
+    alpha: float
+    blend: bool        # enable SRC_ALPHA blending (alpha < 1.0)
+    depth_write: bool  # False ⇒ glDepthMask(GL_FALSE) (X-Ray only)
+
+
+def resolve_face_pass(
+    style: RenderStyle,
+    *,
+    dimmed: bool,
+    bg: tuple[float, float, float],
+    material: Material,
+    dim_ambient: tuple[float, float, float],
+    dim_diffuse: tuple[float, float, float],
+    dim_alpha: float,
+) -> ResolvedFacePass:
+    """Compose face style + X-Ray + the M4e dim pass into one face-pass result.
+
+    Dim overrides ambient/diffuse to the desaturated dim colors (preserving the
+    M4e look at the Shaded default) and multiplies alpha; X-Ray sets alpha to
+    XRAY_ALPHA and turns depth writes off so geometry behind shows through.
+    """
+    desc = FACE_STYLE_TABLE[style.face_style]
+    if not desc.draw_faces:
+        return ResolvedFacePass(
+            draw_faces=False,
+            ambient=(0.0, 0.0, 0.0), diffuse=(0.0, 0.0, 0.0), specular=(0.0, 0.0, 0.0),
+            shininess=1.0, alpha=1.0, blend=False, depth_write=True,
+        )
+    fu = face_uniforms(desc.shading, bg=bg, material=material, xray=style.xray)
+    if dimmed:
+        ambient, diffuse, alpha = dim_ambient, dim_diffuse, fu.alpha * dim_alpha
+    else:
+        ambient, diffuse, alpha = fu.ambient, fu.diffuse, fu.alpha
+    return ResolvedFacePass(
+        draw_faces=True,
+        ambient=ambient, diffuse=diffuse, specular=fu.specular, shininess=fu.shininess,
+        alpha=alpha, blend=(alpha < 1.0), depth_write=(not style.xray),
+    )
