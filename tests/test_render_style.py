@@ -48,6 +48,7 @@ def test_face_uniforms_lit_uses_material_opaque():
     assert fu.diffuse == _MAT.diffuse
     assert fu.ambient == _MAT.ambient
     assert fu.specular == _MAT.specular
+    assert fu.shininess == _MAT.shininess
     assert fu.alpha == 1.0
 
 
@@ -55,6 +56,7 @@ def test_face_uniforms_uniform_uses_mono_diffuse():
     fu = face_uniforms(FaceShading.UNIFORM, bg=_BG, material=_MAT, xray=False)
     assert fu.diffuse == MONO_COLOR
     assert fu.ambient == _MAT.ambient        # keeps material ambient → still "lit"
+    assert fu.specular == _MAT.specular
     assert fu.alpha == 1.0
 
 
@@ -63,6 +65,7 @@ def test_face_uniforms_flat_bg_is_unlit_background_fill():
     assert fu.ambient == _BG                 # output == background (unlit)
     assert fu.diffuse == (0.0, 0.0, 0.0)
     assert fu.specular == (0.0, 0.0, 0.0)
+    assert fu.shininess == _MAT.shininess
     assert fu.alpha == 1.0
 
 

@@ -66,6 +66,8 @@ class Material:
 
 @dataclass(frozen=True)
 class FaceUniforms:
+    """Resolved per-draw-call phong material uniforms + alpha, ready for the shader."""
+
     ambient: tuple[float, float, float]
     diffuse: tuple[float, float, float]
     specular: tuple[float, float, float]
