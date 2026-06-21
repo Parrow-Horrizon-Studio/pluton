@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import ctypes
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from importlib.resources import files
 
 import numpy as np
@@ -421,7 +421,7 @@ class SceneRenderer:
 
     def set_render_style(self, style: RenderStyle) -> None:
         """Set the active display style (called by the viewport from the View menu)."""
-        self._render_style = style
+        self._render_style = replace(style)
 
     def render(self, camera: Camera, model=None, tool_overlay=None, selection=None) -> None:  # noqa: ANN001
         """Draw the full scene: grid + axes + user geometry (all definitions) + tool overlay.
