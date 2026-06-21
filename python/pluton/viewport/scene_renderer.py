@@ -27,7 +27,7 @@ from pluton.viewport.render_style import (
 from pluton.viewport.snap_engine import SnapKind
 
 
-def definition_is_dimmed(definition, model) -> bool:
+def definition_is_dimmed(definition, model) -> bool:  # noqa: ANN001
     """True when `definition` should render dimmed (recede) — i.e. you are
     inside a group (active_path is non-empty) and this definition is not the
     active editing context. At the root context, nothing is dimmed."""
@@ -260,7 +260,7 @@ def _snap_marker_vertices(kind: int, p) -> np.ndarray:
     )
 
 
-def _selection_face_polygons(scene, selection) -> list[np.ndarray]:
+def _selection_face_polygons(scene, selection) -> list[np.ndarray]:  # noqa: ANN001
     """World-space loops (N,3 float32) for each LIVE selected face."""
     polys: list[np.ndarray] = []
     for f_id in selection.faces:
@@ -273,7 +273,7 @@ def _selection_face_polygons(scene, selection) -> list[np.ndarray]:
     return polys
 
 
-def _selection_edge_segments(scene, selection) -> np.ndarray:
+def _selection_edge_segments(scene, selection) -> np.ndarray:  # noqa: ANN001
     """(2E,3) float32 endpoint pairs for each LIVE selected edge."""
     out: list[np.ndarray] = []
     for e_id in selection.edges:
@@ -423,7 +423,7 @@ class SceneRenderer:
         """Set the active display style (called by the viewport from the View menu)."""
         self._render_style = style
 
-    def render(self, camera: Camera, model=None, tool_overlay=None, selection=None) -> None:
+    def render(self, camera: Camera, model=None, tool_overlay=None, selection=None) -> None:  # noqa: ANN001
         """Draw the full scene: grid + axes + user geometry (all definitions) + tool overlay.
 
         Iterates model.traverse() to draw each definition's geometry with its
@@ -640,7 +640,7 @@ class SceneRenderer:
         GL.glBindVertexArray(0)
         GL.glUseProgram(0)
 
-    def _upload_definition(self, definition) -> _DefBuffers:
+    def _upload_definition(self, definition) -> _DefBuffers:  # noqa: ANN001
         """Build or update GL buffers for a single definition's mesh.
 
         Looks up (or allocates) a _DefBuffers entry for this definition,
@@ -781,7 +781,7 @@ class SceneRenderer:
 
     def _draw_tool_overlay(
         self,
-        overlay,
+        overlay,  # noqa: ANN001
         view: np.ndarray,
         projection: np.ndarray,
     ) -> None:
@@ -833,7 +833,7 @@ class SceneRenderer:
             GL.glEnable(GL.GL_DEPTH_TEST)
         GL.glUseProgram(0)
 
-    def _draw_world_segments(self, segs, color, width, view, projection) -> None:
+    def _draw_world_segments(self, segs, color, width, view, projection) -> None:  # noqa: ANN001
         """Draw (2N,3) world-space GL_LINES in a flat color, on top (depth off).
         Reuses the overlay line VBO."""
         if segs.shape[0] == 0:
@@ -858,7 +858,7 @@ class SceneRenderer:
             GL.glEnable(GL.GL_DEPTH_TEST)
         GL.glUseProgram(0)
 
-    def _draw_screen_space_lines(self, segs, color, width) -> None:
+    def _draw_screen_space_lines(self, segs, color, width) -> None:  # noqa: ANN001
         """Draw (2N,3) NDC GL_LINES with identity view/projection (NDC positions
         render directly); depth test off, line width restored to 1.0 afterward.
 
@@ -886,20 +886,20 @@ class SceneRenderer:
             GL.glEnable(GL.GL_DEPTH_TEST)
         GL.glUseProgram(0)
 
-    def _draw_box_rect(self, box_rect, color) -> None:
+    def _draw_box_rect(self, box_rect, color) -> None:  # noqa: ANN001
         """Draw the screen-space box-select outline using identity view/projection
         (NDC positions render directly); depth test off."""
         segs = _box_rect_ndc_segments(box_rect, self._viewport_w, self._viewport_h)
         self._draw_screen_space_lines(segs, color, 1.5)
 
-    def _draw_world_polylines(self, polylines, view, projection) -> None:
+    def _draw_world_polylines(self, polylines, view, projection) -> None:  # noqa: ANN001
         """Draw each (segments, color, width) as world-space line segments."""
         for segs, color, width in polylines:
             arr = np.asarray(segs, dtype=np.float32).reshape(-1, 3)
             if arr.shape[0] >= 2:
                 self._draw_world_segments(arr, color, float(width), view, projection)
 
-    def _draw_screen_markers(self, camera, markers, width, height) -> None:
+    def _draw_screen_markers(self, camera, markers, width, height) -> None:  # noqa: ANN001
         """Project each (world_pos, size_px, color) and draw an outlined square
         in screen space (identity matrices), like the box-select rectangle."""
         if not markers:
@@ -917,7 +917,7 @@ class SceneRenderer:
                 loop[2 * i + 1, 0:2] = quad[(i + 1) % 4]
             self._draw_screen_space_lines(loop, color, 1.5)
 
-    def _draw_selection(
+    def _draw_selection(  # noqa: ANN001
         self, scene, selection, view, projection, world_transform=None
     ) -> None:
         if selection is None:
