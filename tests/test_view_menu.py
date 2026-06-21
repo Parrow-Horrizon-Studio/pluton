@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import pytest
-
 from pluton.ui.main_window import MainWindow
 from pluton.viewport.render_style import FaceStyle
 
