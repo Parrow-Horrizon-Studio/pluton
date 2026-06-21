@@ -14,6 +14,7 @@ uniform vec3  u_material_ambient;
 uniform vec3  u_material_diffuse;
 uniform vec3  u_material_specular;
 uniform float u_material_shininess;
+uniform float u_alpha;            // M5a — face opacity (1.0 opaque; <1 for X-Ray / dim)
 
 void main() {
     vec3 N = normalize(v_world_normal);
@@ -31,5 +32,5 @@ void main() {
                + u_material_diffuse  * diff * u_light_color
                + u_material_specular * spec * u_light_color;
 
-    frag_color = vec4(color, 1.0);
+    frag_color = vec4(color, u_alpha);
 }

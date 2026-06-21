@@ -120,6 +120,7 @@ _PHONG_UNIFORMS = (
     "u_light_dir", "u_light_color",
     "u_material_ambient", "u_material_diffuse",
     "u_material_specular", "u_material_shininess",
+    "u_alpha",
 )
 _LINE_UNIFORMS = ("u_view", "u_projection")
 _GHOST_FILL_UNIFORMS = ("u_view", "u_projection", "u_color")
