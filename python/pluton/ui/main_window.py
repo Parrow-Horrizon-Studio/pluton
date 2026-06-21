@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QKeySequence, QShortcut
+from PySide6.QtGui import QAction, QActionGroup, QKeySequence, QShortcut
 from PySide6.QtWidgets import QMainWindow, QVBoxLayout, QWidget
 
 from pluton.commands import CommandStack
@@ -29,6 +29,7 @@ from pluton.tools import (
 )
 from pluton.ui.status_bar import StatusBar
 from pluton.ui.value_control_box import ValueControlBox
+from pluton.viewport.render_style import FaceStyle, RenderStyle
 from pluton.viewport.viewport_widget import ViewportWidget
 
 
@@ -48,6 +49,7 @@ class MainWindow(QMainWindow):
 
         # Scene graph + tool manager + command stack
         self._model = Model()
+        self._render_style = RenderStyle()
         self._selection = Selection()
         self._command_stack = CommandStack()
         self._tool_manager = ToolManager()
@@ -145,6 +147,28 @@ class MainWindow(QMainWindow):
             ("Imperial — architectural", self._set_units_imperial),
         ):
             self._units_menu.addAction(label, fn)
+
+        # View menu (M5a) — face-style radio group + independent X-Ray toggle.
+        self._view_menu = menubar.addMenu("View")
+        self._face_style_group = QActionGroup(self)
+        self._face_style_group.setExclusive(True)
+        self._face_style_actions: dict[FaceStyle, QAction] = {}
+        for label, style in (
+            ("Wireframe", FaceStyle.WIREFRAME),
+            ("Hidden Line", FaceStyle.HIDDEN_LINE),
+            ("Monochrome", FaceStyle.MONOCHROME),
+            ("Shaded", FaceStyle.SHADED),
+        ):
+            action = QAction(label, self, checkable=True)
+            action.setActionGroup(self._face_style_group)
+            action.triggered.connect(lambda _checked, s=style: self._on_set_face_style(s))
+            self._view_menu.addAction(action)
+            self._face_style_actions[style] = action
+        self._face_style_actions[self._render_style.face_style].setChecked(True)
+        self._view_menu.addSeparator()
+        self._xray_action = QAction("X-Ray", self, checkable=True)
+        self._xray_action.toggled.connect(self._on_toggle_xray)
+        self._view_menu.addAction(self._xray_action)
 
     # --- Scene graph back-compat property --------------------------------
 
@@ -501,6 +525,15 @@ class MainWindow(QMainWindow):
         self._model.revalidate_active_path()
         self._rebuild_tool_context()
         self._refresh_breadcrumb()
+
+    def _on_set_face_style(self, style: FaceStyle) -> None:
+        self._render_style.face_style = style
+        self._face_style_actions[style].setChecked(True)
+        self._viewport.set_render_style(self._render_style)
+
+    def _on_toggle_xray(self, checked: bool) -> None:
+        self._render_style.xray = bool(checked)
+        self._viewport.set_render_style(self._render_style)
 
     def _on_undo(self) -> None:
         if self._command_stack.undo():

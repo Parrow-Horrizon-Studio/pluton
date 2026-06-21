@@ -52,6 +52,11 @@ class ViewportWidget(QOpenGLWidget):
     def set_event_finished_callback(self, fn) -> None:  # noqa: ANN001
         self._on_event_finished = fn
 
+    def set_render_style(self, style) -> None:  # noqa: ANN001
+        """Set the viewport display style and repaint (called from the View menu)."""
+        self.scene_renderer.set_render_style(style)
+        self.update()
+
     # --- GL lifecycle -----------------------------------------------------
 
     def initializeGL(self) -> None:
