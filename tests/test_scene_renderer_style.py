@@ -1,0 +1,18 @@
+from __future__ import annotations
+
+from pluton.viewport.render_style import FaceStyle, RenderStyle
+from pluton.viewport.scene_renderer import SceneRenderer
+
+
+def test_renderer_defaults_to_shaded_no_xray():
+    r = SceneRenderer()
+    assert r._render_style == RenderStyle()
+    assert r._render_style.face_style is FaceStyle.SHADED
+    assert r._render_style.xray is False
+
+
+def test_set_render_style_stores_value():
+    r = SceneRenderer()
+    r.set_render_style(RenderStyle(FaceStyle.WIREFRAME, xray=True))
+    assert r._render_style.face_style is FaceStyle.WIREFRAME
+    assert r._render_style.xray is True

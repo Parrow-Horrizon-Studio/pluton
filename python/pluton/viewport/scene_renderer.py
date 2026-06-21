@@ -18,10 +18,16 @@ from OpenGL import GL
 
 from pluton.geometry.transforms import apply_mat, is_identity_transform
 from pluton.viewport.camera import Camera
+from pluton.viewport.render_style import (
+    Material,
+    RenderStyle,
+    ResolvedFacePass,
+    resolve_face_pass,
+)
 from pluton.viewport.snap_engine import SnapKind
 
 
-def definition_is_dimmed(definition, model) -> bool:  # noqa: ANN001
+def definition_is_dimmed(definition, model) -> bool:
     """True when `definition` should render dimmed (recede) — i.e. you are
     inside a group (active_path is non-empty) and this definition is not the
     active editing context. At the root context, nothing is dimmed."""
@@ -100,6 +106,12 @@ _MATERIAL_AMBIENT = (0.40, 0.40, 0.42)
 _MATERIAL_DIFFUSE = (0.65, 0.65, 0.70)
 _MATERIAL_SPECULAR = (0.10, 0.10, 0.10)
 _MATERIAL_SHININESS = 16.0
+_DEFAULT_MATERIAL = Material(
+    ambient=_MATERIAL_AMBIENT,
+    diffuse=_MATERIAL_DIFFUSE,
+    specular=_MATERIAL_SPECULAR,
+    shininess=_MATERIAL_SHININESS,
+)
 
 _BG_COLOR = (0.15, 0.15, 0.18, 1.0)
 
@@ -248,7 +260,7 @@ def _snap_marker_vertices(kind: int, p) -> np.ndarray:
     )
 
 
-def _selection_face_polygons(scene, selection) -> list[np.ndarray]:  # noqa: ANN001
+def _selection_face_polygons(scene, selection) -> list[np.ndarray]:
     """World-space loops (N,3 float32) for each LIVE selected face."""
     polys: list[np.ndarray] = []
     for f_id in selection.faces:
@@ -261,7 +273,7 @@ def _selection_face_polygons(scene, selection) -> list[np.ndarray]:  # noqa: ANN
     return polys
 
 
-def _selection_edge_segments(scene, selection) -> np.ndarray:  # noqa: ANN001
+def _selection_edge_segments(scene, selection) -> np.ndarray:
     """(2E,3) float32 endpoint pairs for each LIVE selected edge."""
     out: list[np.ndarray] = []
     for e_id in selection.edges:
@@ -358,6 +370,10 @@ class SceneRenderer:
         self._viewport_w: int = 1
         self._viewport_h: int = 1
 
+        # Active display style (Shaded/Wireframe/HiddenLine + X-Ray toggle).
+        # Updated by set_render_style(), called by the View menu via the viewport.
+        self._render_style = RenderStyle()
+
     # --- Lifecycle --------------------------------------------------------
 
     def initialize_gl(self) -> None:
@@ -403,7 +419,11 @@ class SceneRenderer:
             return
         GL.glViewport(0, 0, w, h)
 
-    def render(self, camera: Camera, model=None, tool_overlay=None, selection=None) -> None:  # noqa: ANN001
+    def set_render_style(self, style: RenderStyle) -> None:
+        """Set the active display style (called by the viewport from the View menu)."""
+        self._render_style = style
+
+    def render(self, camera: Camera, model=None, tool_overlay=None, selection=None) -> None:
         """Draw the full scene: grid + axes + user geometry (all definitions) + tool overlay.
 
         Iterates model.traverse() to draw each definition's geometry with its
@@ -414,7 +434,7 @@ class SceneRenderer:
         if not self._initialized:
             return
 
-        GL.glClearColor(0.15, 0.16, 0.18, 1.0)
+        GL.glClearColor(*_BG_COLOR)
         GL.glClear(GL.GL_COLOR_BUFFER_BIT | GL.GL_DEPTH_BUFFER_BIT)
         GL.glEnable(GL.GL_DEPTH_TEST)
 
@@ -440,9 +460,18 @@ class SceneRenderer:
                 # Task 15: dim pass — dim anything that is NOT the active context.
                 # At root (active_path is empty), nothing is dimmed.
                 dimmed = definition_is_dimmed(definition, model)
-                if buf.face_count > 0:
+                resolved = resolve_face_pass(
+                    self._render_style,
+                    dimmed=dimmed,
+                    bg=_BG_COLOR[:3],
+                    material=_DEFAULT_MATERIAL,
+                    dim_ambient=_DIM_AMBIENT,
+                    dim_diffuse=_DIM_DIFFUSE,
+                    dim_alpha=_DIM_ALPHA_BLEND,
+                )
+                if resolved.draw_faces and buf.face_count > 0:
                     self._draw_definition_faces(
-                        buf, view, projection, camera.position, model_mat, dimmed=dimmed
+                        buf, view, projection, camera.position, model_mat, resolved=resolved
                     )
                 if buf.edge_count > 0:
                     self._draw_definition_edges(buf, view, projection, model_mat, dimmed=dimmed)
@@ -611,7 +640,7 @@ class SceneRenderer:
         GL.glBindVertexArray(0)
         GL.glUseProgram(0)
 
-    def _upload_definition(self, definition) -> _DefBuffers:  # noqa: ANN001
+    def _upload_definition(self, definition) -> _DefBuffers:
         """Build or update GL buffers for a single definition's mesh.
 
         Looks up (or allocates) a _DefBuffers entry for this definition,
@@ -662,13 +691,15 @@ class SceneRenderer:
         camera_pos: np.ndarray,
         model_mat: np.ndarray,
         *,
-        dimmed: bool = False,
+        resolved: ResolvedFacePass,
     ) -> None:
-        """Draw a definition's face geometry with the given model matrix.
+        """Draw a definition's faces using a resolved face-pass (style + dim + X-Ray).
 
-        When ``dimmed`` is True (Task 15 — not the active editing context), the
-        material uses desaturated ambient/diffuse and alpha-blending is enabled
-        at a reduced opacity so the geometry recedes into the background.
+        ``resolved`` carries the material uniforms, alpha, and whether to blend /
+        write depth. X-Ray turns depth writes off so geometry behind shows through;
+        the dim pass and X-Ray both arrive here pre-composed as a reduced alpha.
+        State (blend, depth mask) is restored after the draw — see the M4e Task-15
+        blend-leak fix for why this hygiene is mandatory.
         """
         GL.glUseProgram(self._phong_program)
         locs = self._phong_locs
@@ -678,32 +709,27 @@ class SceneRenderer:
         _set_vec3(locs["u_camera_pos"], camera_pos)
         _set_vec3(locs["u_light_dir"], _LIGHT_DIR)
         _set_vec3(locs["u_light_color"], _LIGHT_COLOR)
-        if dimmed:
-            _set_vec3(locs["u_material_ambient"], _DIM_AMBIENT)
-            _set_vec3(locs["u_material_diffuse"], _DIM_DIFFUSE)
-        else:
-            _set_vec3(locs["u_material_ambient"], _MATERIAL_AMBIENT)
-            _set_vec3(locs["u_material_diffuse"], _MATERIAL_DIFFUSE)
-        _set_vec3(locs["u_material_specular"], _MATERIAL_SPECULAR)
-        _set_float(locs["u_material_shininess"], _MATERIAL_SHININESS)
+        _set_vec3(locs["u_material_ambient"], resolved.ambient)
+        _set_vec3(locs["u_material_diffuse"], resolved.diffuse)
+        _set_vec3(locs["u_material_specular"], resolved.specular)
+        _set_float(locs["u_material_shininess"], resolved.shininess)
+        _set_float(locs["u_alpha"], resolved.alpha)
 
-        if dimmed:
+        if resolved.blend:
             GL.glEnable(GL.GL_BLEND)
             GL.glBlendFunc(GL.GL_SRC_ALPHA, GL.GL_ONE_MINUS_SRC_ALPHA)
-            # Use the ghost-fill program's u_color alpha to fade out — but the
-            # Phong program doesn't have an alpha uniform, so we use the blend
-            # constant-alpha trick: glBlendColor + GL_CONSTANT_ALPHA.
-            GL.glBlendColor(0.0, 0.0, 0.0, _DIM_ALPHA_BLEND)
-            GL.glBlendFunc(GL.GL_CONSTANT_ALPHA, GL.GL_ONE_MINUS_CONSTANT_ALPHA)
+        if not resolved.depth_write:
+            GL.glDepthMask(GL.GL_FALSE)
 
         GL.glBindVertexArray(buf.face_vao)
         GL.glDrawArrays(GL.GL_TRIANGLES, 0, buf.face_count)
         GL.glBindVertexArray(0)
         GL.glUseProgram(0)
 
-        if dimmed:
+        if not resolved.depth_write:
+            GL.glDepthMask(GL.GL_TRUE)
+        if resolved.blend:
             GL.glDisable(GL.GL_BLEND)
-            GL.glBlendFunc(GL.GL_SRC_ALPHA, GL.GL_ONE_MINUS_SRC_ALPHA)
 
     def _draw_definition_edges(
         self,
@@ -755,7 +781,7 @@ class SceneRenderer:
 
     def _draw_tool_overlay(
         self,
-        overlay,  # noqa: ANN001
+        overlay,
         view: np.ndarray,
         projection: np.ndarray,
     ) -> None:
@@ -807,7 +833,7 @@ class SceneRenderer:
             GL.glEnable(GL.GL_DEPTH_TEST)
         GL.glUseProgram(0)
 
-    def _draw_world_segments(self, segs, color, width, view, projection) -> None:  # noqa: ANN001
+    def _draw_world_segments(self, segs, color, width, view, projection) -> None:
         """Draw (2N,3) world-space GL_LINES in a flat color, on top (depth off).
         Reuses the overlay line VBO."""
         if segs.shape[0] == 0:
@@ -832,7 +858,7 @@ class SceneRenderer:
             GL.glEnable(GL.GL_DEPTH_TEST)
         GL.glUseProgram(0)
 
-    def _draw_screen_space_lines(self, segs, color, width) -> None:  # noqa: ANN001
+    def _draw_screen_space_lines(self, segs, color, width) -> None:
         """Draw (2N,3) NDC GL_LINES with identity view/projection (NDC positions
         render directly); depth test off, line width restored to 1.0 afterward.
 
@@ -860,20 +886,20 @@ class SceneRenderer:
             GL.glEnable(GL.GL_DEPTH_TEST)
         GL.glUseProgram(0)
 
-    def _draw_box_rect(self, box_rect, color) -> None:  # noqa: ANN001
+    def _draw_box_rect(self, box_rect, color) -> None:
         """Draw the screen-space box-select outline using identity view/projection
         (NDC positions render directly); depth test off."""
         segs = _box_rect_ndc_segments(box_rect, self._viewport_w, self._viewport_h)
         self._draw_screen_space_lines(segs, color, 1.5)
 
-    def _draw_world_polylines(self, polylines, view, projection) -> None:  # noqa: ANN001
+    def _draw_world_polylines(self, polylines, view, projection) -> None:
         """Draw each (segments, color, width) as world-space line segments."""
         for segs, color, width in polylines:
             arr = np.asarray(segs, dtype=np.float32).reshape(-1, 3)
             if arr.shape[0] >= 2:
                 self._draw_world_segments(arr, color, float(width), view, projection)
 
-    def _draw_screen_markers(self, camera, markers, width, height) -> None:  # noqa: ANN001
+    def _draw_screen_markers(self, camera, markers, width, height) -> None:
         """Project each (world_pos, size_px, color) and draw an outlined square
         in screen space (identity matrices), like the box-select rectangle."""
         if not markers:
@@ -891,7 +917,7 @@ class SceneRenderer:
                 loop[2 * i + 1, 0:2] = quad[(i + 1) % 4]
             self._draw_screen_space_lines(loop, color, 1.5)
 
-    def _draw_selection(  # noqa: ANN001
+    def _draw_selection(
         self, scene, selection, view, projection, world_transform=None
     ) -> None:
         if selection is None:
