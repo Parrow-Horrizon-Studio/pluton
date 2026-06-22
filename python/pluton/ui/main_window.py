@@ -182,6 +182,13 @@ class MainWindow(QMainWindow):
         self._xray_action.toggled.connect(self._on_toggle_xray)
         self._view_menu.addAction(self._xray_action)
 
+        # Panel toggles — re-show a dock the user closed via its close button.
+        # toggleViewAction() is a ready-made checkable QAction that mirrors and
+        # controls the dock's visibility (text defaults to the dock title).
+        self._view_menu.addSeparator()
+        self._materials_dock_action = self._materials_dock.toggleViewAction()
+        self._view_menu.addAction(self._materials_dock_action)
+
     # --- Material slot ---------------------------------------------------
 
     def _on_active_material_changed(self, material) -> None:
