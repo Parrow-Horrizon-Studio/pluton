@@ -1,10 +1,10 @@
 from __future__ import annotations
 
 from pluton.viewport.render_style import (
-    PhongMaterial,
     _AMBIENT_FACTOR,
     _DEFAULT_SHININESS,
     _DEFAULT_SPECULAR,
+    PhongMaterial,
     phong_material_for,
 )
 
