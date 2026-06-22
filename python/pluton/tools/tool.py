@@ -27,6 +27,8 @@ class ToolContext:
     units_provider: object = None  # M4d — callable () -> pluton.units.Units (or None)
     model: object = None  # M4e — pluton.model.Model (the scene graph); used for active transform + enter/exit
     request_context_rebuild: object = None  # M4e — callable () -> None; rebuilds the tool context after the active editing context changes
+    active_material_provider: object = None  # M5b — callable () -> Material (active material)
+    set_active_material: object = None       # M5b — callable (int) -> None (eyedropper -> dock)
 
 
 @dataclass(frozen=True, slots=True)
