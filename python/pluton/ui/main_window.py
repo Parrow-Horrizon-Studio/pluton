@@ -27,6 +27,8 @@ from pluton.tools import (
     ToolContext,
     ToolManager,
 )
+from pluton.tools.paint_tool import PaintTool
+from pluton.ui.materials_dock import MaterialsDock
 from pluton.ui.status_bar import StatusBar
 from pluton.ui.value_control_box import ValueControlBox
 from pluton.viewport.render_style import FaceStyle, RenderStyle
@@ -61,6 +63,7 @@ class MainWindow(QMainWindow):
         self._tool_manager.register(ArcTool())
         self._tool_manager.register(SelectTool())
         self._tool_manager.register(EraserTool())
+        self._tool_manager.register(PaintTool())
         self._tool_manager.register(MoveTool())
         self._tool_manager.register(RotateTool())
         self._tool_manager.register(ScaleTool())
@@ -71,6 +74,14 @@ class MainWindow(QMainWindow):
         self._viewport = ViewportWidget(self._model, self._tool_manager, self)
         self._viewport.selection = self._selection
         self._status_bar = StatusBar()
+
+        # Materials dock — must exist BEFORE _rebuild_tool_context() so the
+        # lambda `set_active_material=self._materials_dock.set_active` captures
+        # a live reference.
+        self._active_material_id = self._model.materials.DEFAULT_ID
+        self._materials_dock = MaterialsDock(self._model.materials, self)
+        self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, self._materials_dock)
+        self._materials_dock.active_material_changed.connect(self._on_active_material_changed)
 
         # NOW we can build the ToolContext that includes the viewport refs.
         self._rebuild_tool_context()
@@ -101,6 +112,7 @@ class MainWindow(QMainWindow):
         QShortcut(QKeySequence("G"), self, activated=lambda: self._activate("G"))
         QShortcut(QKeySequence("A"), self, activated=lambda: self._activate("A"))
         QShortcut(QKeySequence(Qt.Key.Key_Space), self, activated=lambda: self._activate("Space"))
+        QShortcut(QKeySequence("B"), self, activated=lambda: self._activate("B"))
         QShortcut(QKeySequence("E"), self, activated=lambda: self._activate("E"))
         QShortcut(QKeySequence("M"), self, activated=lambda: self._activate("M"))
         QShortcut(QKeySequence("Q"), self, activated=lambda: self._activate("Q"))
@@ -170,6 +182,11 @@ class MainWindow(QMainWindow):
         self._xray_action.toggled.connect(self._on_toggle_xray)
         self._view_menu.addAction(self._xray_action)
 
+    # --- Material slot ---------------------------------------------------
+
+    def _on_active_material_changed(self, material) -> None:
+        self._active_material_id = material.id
+
     # --- Scene graph back-compat property --------------------------------
 
     @property
@@ -195,6 +212,8 @@ class MainWindow(QMainWindow):
             units_provider=lambda: self._doc.units,
             model=self._model,
             request_context_rebuild=self._on_active_context_changed,
+            active_material_provider=lambda: self._model.materials.get(self._active_material_id),
+            set_active_material=self._materials_dock.set_active,
         )
         self._tool_manager.set_context(ctx)
         # Re-activate the current tool so it picks up the new context/scene.

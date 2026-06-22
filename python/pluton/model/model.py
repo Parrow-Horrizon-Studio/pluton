@@ -4,6 +4,7 @@ import numpy as np
 
 from pluton.model.definition import Definition
 from pluton.model.instance import Instance
+from pluton.model.material import MaterialLibrary
 
 
 class Model:
@@ -14,6 +15,7 @@ class Model:
         self._next_inst_id = 0
         self.root = self.new_definition("Model", is_group=False)
         self.active_path: list[Instance] = []
+        self.materials = MaterialLibrary()
 
     # --- construction ---
     def new_definition(self, name: str, is_group: bool) -> Definition:
