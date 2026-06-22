@@ -30,6 +30,10 @@ from pluton.scene.vertex import Vertex
 
 SplitResult = namedtuple("SplitResult", "vertex edge_a edge_b face_a face_b")
 
+# Material id 0 == MaterialLibrary.DEFAULT_ID: the "unpainted / standard look"
+# sentinel. Kept as a literal to avoid a scene -> model import.
+_DEFAULT_MATERIAL_ID = 0
+
 
 def _project_loop_to_2d_for_earcut(positions_3d: np.ndarray) -> np.ndarray:
     """Project an (N, 3) loop onto its dominant axis-aligned plane.
@@ -64,6 +68,8 @@ class Scene:
 
     def __init__(self) -> None:
         self._mesh = HalfEdgeMesh()
+        self._face_materials: dict[int, int] = {}
+        self._render_dirty = False
 
     # --- Mutators ---------------------------------------------------------
 
@@ -192,6 +198,7 @@ class Scene:
 
     def mark_clean(self) -> None:
         self._mesh.mark_clean()
+        self._render_dirty = False
 
     # --- M3b picking + face geometry helpers ---------------------------------
 
@@ -355,7 +362,7 @@ class Scene:
 
     @property
     def dirty(self) -> bool:
-        return self._mesh.is_dirty()
+        return self._mesh.is_dirty() or self._render_dirty
 
     def vertex(self, v_id: int) -> Vertex:
         if not self._mesh.vertex_is_live(v_id):
@@ -416,6 +423,40 @@ class Scene:
                 best_id = v
             v = self._mesh.next_live_vertex(v + 1)
         return best_id
+
+    # --- Per-face material sidecar ----------------------------------------
+
+    def set_face_material(self, f_id: int, material_id: int) -> None:
+        """Paint a face. material_id 0 (Default) clears any existing paint."""
+        if material_id == _DEFAULT_MATERIAL_ID:
+            self.clear_face_material(f_id)
+            return
+        self._face_materials[f_id] = material_id
+        self._render_dirty = True
+
+    def clear_face_material(self, f_id: int) -> None:
+        """Remove any material from a face (return it to the default look)."""
+        if self._face_materials.pop(f_id, None) is not None:
+            self._render_dirty = True
+
+    def face_material(self, f_id: int) -> int:
+        """Return the material id painted on a face, or 0 (Default) if unpainted."""
+        return self._face_materials.get(f_id, _DEFAULT_MATERIAL_ID)
+
+    def face_triangle_materials(self) -> np.ndarray:
+        """Per-triangle material id, aligned 1:1 with face_triangle_buffer().
+
+        Walks live faces in next_live_face ascending order (the exact order the
+        C++ face_triangle_buffer uses) and repeats each face's material id by
+        its triangle count.
+        """
+        mats: list[int] = []
+        f = self._mesh.next_live_face(0)
+        while f != HalfEdgeMesh.INVALID_ID:
+            n_tris = len(self._mesh.face_triangles(f)) // 3
+            mats.extend([self._face_materials.get(f, _DEFAULT_MATERIAL_ID)] * n_tris)
+            f = self._mesh.next_live_face(f + 1)
+        return np.asarray(mats, dtype=np.int64)
 
     # --- Render-buffer projection -----------------------------------------
 
