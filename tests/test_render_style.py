@@ -7,7 +7,7 @@ from pluton.viewport.render_style import (
     FaceShading,
     FaceStyle,
     FaceUniforms,
-    Material,
+    PhongMaterial,
     RenderStyle,
     face_uniforms,
     resolve_face_pass,
@@ -35,7 +35,7 @@ def test_face_style_table_draw_faces_and_shading():
 
 
 _BG = (0.15, 0.15, 0.18)
-_MAT = Material(
+_MAT = PhongMaterial(
     ambient=(0.10, 0.10, 0.11),
     diffuse=(0.65, 0.65, 0.70),
     specular=(0.10, 0.10, 0.10),

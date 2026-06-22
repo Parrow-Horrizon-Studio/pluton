@@ -19,7 +19,7 @@ from OpenGL import GL
 from pluton.geometry.transforms import apply_mat, is_identity_transform
 from pluton.viewport.camera import Camera
 from pluton.viewport.render_style import (
-    Material,
+    PhongMaterial,
     RenderStyle,
     ResolvedFacePass,
     resolve_face_pass,
@@ -106,7 +106,7 @@ _MATERIAL_AMBIENT = (0.40, 0.40, 0.42)
 _MATERIAL_DIFFUSE = (0.65, 0.65, 0.70)
 _MATERIAL_SPECULAR = (0.10, 0.10, 0.10)
 _MATERIAL_SHININESS = 16.0
-_DEFAULT_MATERIAL = Material(
+_DEFAULT_MATERIAL = PhongMaterial(
     ambient=_MATERIAL_AMBIENT,
     diffuse=_MATERIAL_DIFFUSE,
     specular=_MATERIAL_SPECULAR,

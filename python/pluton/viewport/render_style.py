@@ -55,8 +55,8 @@ XRAY_ALPHA = 0.35                # face opacity when X-Ray is on
 
 
 @dataclass(frozen=True)
-class Material:
-    """A phong material's color terms (the renderer's current default material)."""
+class PhongMaterial:
+    """A phong material's color terms (ambient/diffuse/specular/shininess)."""
 
     ambient: tuple[float, float, float]
     diffuse: tuple[float, float, float]
@@ -79,7 +79,7 @@ def face_uniforms(
     shading: FaceShading,
     *,
     bg: tuple[float, float, float],
-    material: Material,
+    material: PhongMaterial,
     xray: bool,
 ) -> FaceUniforms:
     """Map a shading mode to concrete phong material uniforms + alpha.
@@ -121,7 +121,7 @@ def resolve_face_pass(
     *,
     dimmed: bool,
     bg: tuple[float, float, float],
-    material: Material,
+    material: PhongMaterial,
     dim_ambient: tuple[float, float, float],
     dim_diffuse: tuple[float, float, float],
     dim_alpha: float,
@@ -148,4 +148,30 @@ def resolve_face_pass(
         draw_faces=True,
         ambient=ambient, diffuse=diffuse, specular=fu.specular, shininess=fu.shininess,
         alpha=alpha, blend=(alpha < 1.0), depth_write=(not style.xray),
+    )
+
+
+# --- M5b: painted-material -> phong uniforms -------------------------------
+# These mirror scene_renderer._MATERIAL_SPECULAR / _MATERIAL_SHININESS so a
+# painted face gets the same highlight character as the default look; only the
+# hue varies. Duplicated here (not imported) to keep render_style import-free
+# of the GL renderer. A guard test asserts they stay in sync.
+_AMBIENT_FACTOR = 0.55
+_DEFAULT_SPECULAR = (0.10, 0.10, 0.10)
+_DEFAULT_SHININESS = 16.0
+
+
+def phong_material_for(color: tuple[float, float, float]) -> PhongMaterial:
+    """Map a painted base RGB to phong uniforms.
+
+    diffuse = color; ambient = color * _AMBIENT_FACTOR; specular/shininess are
+    the shared defaults. Does NOT reproduce _DEFAULT_MATERIAL (whose terms are
+    hand-tuned); unpainted faces keep using _DEFAULT_MATERIAL directly.
+    """
+    r, g, b = float(color[0]), float(color[1]), float(color[2])
+    return PhongMaterial(
+        ambient=(r * _AMBIENT_FACTOR, g * _AMBIENT_FACTOR, b * _AMBIENT_FACTOR),
+        diffuse=(r, g, b),
+        specular=_DEFAULT_SPECULAR,
+        shininess=_DEFAULT_SHININESS,
     )
