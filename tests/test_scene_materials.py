@@ -62,3 +62,14 @@ def test_face_triangle_materials_aligns_one_to_one_with_buffer():
     tri_mats = s.face_triangle_materials()
     assert tri_mats.shape[0] * 3 == positions.shape[0]
     assert tri_mats.tolist() == [0, 7]   # fa(default) then fb(7), ascending id order
+
+
+def test_clear_resets_face_materials():
+    s, fa, fb = _two_face_scene()
+    s.set_face_material(fa, 3)
+    s.set_face_material(fb, 7)
+    s.clear()
+    # sidecar is empty after clear; new faces (which reuse ids from 0) are unpainted
+    assert s.face_material(fa) == 0
+    assert s.face_material(fb) == 0
+    assert s.face_triangle_materials().tolist() == []

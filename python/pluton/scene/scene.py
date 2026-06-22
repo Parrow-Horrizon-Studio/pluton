@@ -193,6 +193,8 @@ class Scene:
     def clear(self) -> None:
         """Reset the scene to empty. Renderer will re-upload empty buffers."""
         self._mesh.clear()
+        self._face_materials.clear()
+        self._render_dirty = True
 
     # --- Lifecycle (renderer sync) ----------------------------------------
 
