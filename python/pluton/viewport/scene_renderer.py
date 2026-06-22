@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import ctypes
 from collections.abc import Sequence
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from importlib.resources import files
 
 import numpy as np
@@ -18,10 +18,12 @@ from OpenGL import GL
 
 from pluton.geometry.transforms import apply_mat, is_identity_transform
 from pluton.viewport.camera import Camera
+from pluton.viewport.face_batches import plan_face_batches
 from pluton.viewport.render_style import (
     PhongMaterial,
     RenderStyle,
     ResolvedFacePass,
+    phong_material_for,
     resolve_face_pass,
 )
 from pluton.viewport.snap_engine import SnapKind
@@ -147,6 +149,7 @@ class _DefBuffers:
     edge_vao: int = 0
     edge_vbo: int = 0
     edge_count: int = 0  # number of line-segment vertices
+    batches: list = field(default_factory=list)  # list[FaceBatch], one per material
 
 
 def _load_shader_source(name: str) -> str:
@@ -460,19 +463,26 @@ class SceneRenderer:
                 # Task 15: dim pass — dim anything that is NOT the active context.
                 # At root (active_path is empty), nothing is dimmed.
                 dimmed = definition_is_dimmed(definition, model)
-                resolved = resolve_face_pass(
-                    self._render_style,
-                    dimmed=dimmed,
-                    bg=_BG_COLOR[:3],
-                    material=_DEFAULT_MATERIAL,
-                    dim_ambient=_DIM_AMBIENT,
-                    dim_diffuse=_DIM_DIFFUSE,
-                    dim_alpha=_DIM_ALPHA_BLEND,
-                )
-                if resolved.draw_faces and buf.face_count > 0:
-                    self._draw_definition_faces(
-                        buf, view, projection, camera.position, model_mat, resolved=resolved
+                materials = getattr(model, "materials", None)
+                for batch in buf.batches:
+                    if batch.material_id != 0 and materials is not None:
+                        mat = phong_material_for(materials.get(batch.material_id).color)
+                    else:
+                        mat = _DEFAULT_MATERIAL
+                    resolved = resolve_face_pass(
+                        self._render_style,
+                        dimmed=dimmed,
+                        bg=_BG_COLOR[:3],
+                        material=mat,
+                        dim_ambient=_DIM_AMBIENT,
+                        dim_diffuse=_DIM_DIFFUSE,
+                        dim_alpha=_DIM_ALPHA_BLEND,
                     )
+                    if resolved.draw_faces and batch.count > 0:
+                        self._draw_definition_faces(
+                            buf, view, projection, camera.position, model_mat,
+                            resolved=resolved, first=batch.first, count=batch.count,
+                        )
                 if buf.edge_count > 0:
                     self._draw_definition_edges(buf, view, projection, model_mat, dimmed=dimmed)
 
@@ -655,16 +665,22 @@ class SceneRenderer:
 
         scene = definition.mesh
 
-        # Faces: (3*T, 3) positions + (3*T, 3) normals → interleaved (3*T, 6)
+        # Faces: (3*T, 3) positions + (3*T, 3) normals -> interleaved (3*T, 6)
         positions, normals = scene.face_triangle_buffer()
         if positions.shape[0] > 0:
             interleaved = np.concatenate([positions, normals], axis=1).astype(np.float32)
+            # Group triangles by material so each material draws as one contiguous batch.
+            tri_mats = scene.face_triangle_materials()
+            vertex_order, batches = plan_face_batches(tri_mats)
+            interleaved = interleaved[vertex_order]
             data = np.ascontiguousarray(interleaved)
             GL.glBindBuffer(GL.GL_ARRAY_BUFFER, buf.face_vbo)
             GL.glBufferData(GL.GL_ARRAY_BUFFER, data.nbytes, data, GL.GL_DYNAMIC_DRAW)
             buf.face_count = int(positions.shape[0])
+            buf.batches = batches
         else:
             buf.face_count = 0
+            buf.batches = []
 
         # Edges: (2*E, 3) positions — pack constant color per vertex so the
         # line shader's attribute 1 (in_color) is always satisfied.
@@ -692,6 +708,8 @@ class SceneRenderer:
         model_mat: np.ndarray,
         *,
         resolved: ResolvedFacePass,
+        first: int = 0,
+        count: int | None = None,
     ) -> None:
         """Draw a definition's faces using a resolved face-pass (style + dim + X-Ray).
 
@@ -722,7 +740,7 @@ class SceneRenderer:
             GL.glDepthMask(GL.GL_FALSE)
 
         GL.glBindVertexArray(buf.face_vao)
-        GL.glDrawArrays(GL.GL_TRIANGLES, 0, buf.face_count)
+        GL.glDrawArrays(GL.GL_TRIANGLES, first, buf.face_count if count is None else count)
         GL.glBindVertexArray(0)
         GL.glUseProgram(0)
 
