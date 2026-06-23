@@ -23,7 +23,7 @@ class TagsDock(QDockWidget):
     visibility_changed = Signal()
     assign_to_selection_requested = Signal()
 
-    def __init__(self, library: TagLibrary, parent=None) -> None:  # noqa: ANN001, RUF100
+    def __init__(self, library: TagLibrary, parent=None) -> None:
         super().__init__("Tags", parent)
         self._library = library
         self._active_id = TagLibrary.UNTAGGED_ID
@@ -73,7 +73,7 @@ class TagsDock(QDockWidget):
         self._library.set_visible(tid, visible)
         self.visibility_changed.emit()
 
-    def _on_current_changed(self, current, _previous) -> None:  # noqa: ANN001, RUF100
+    def _on_current_changed(self, current, _previous) -> None:
         if self._rebuilding or current is None:
             return
         self._active_id = int(current.data(Qt.ItemDataRole.UserRole))
