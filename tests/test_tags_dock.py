@@ -1,0 +1,55 @@
+# tests/test_tags_dock.py
+from __future__ import annotations
+
+import pytest
+from pluton.model.tag import TagLibrary
+from pluton.ui.tags_dock import TagsDock
+from PySide6.QtCore import Qt
+
+
+@pytest.fixture
+def lib():
+    return TagLibrary()
+
+
+def test_dock_lists_untagged_first(qtbot, lib):
+    lib.add("Walls")
+    dock = TagsDock(lib)
+    qtbot.addWidget(dock)
+    assert dock._list.count() == 2
+    assert dock._list.item(0).text() == "Untagged"
+
+
+def test_checkbox_toggles_visibility_and_emits(qtbot, lib):
+    walls = lib.add("Walls")
+    dock = TagsDock(lib)
+    qtbot.addWidget(dock)
+    item = dock._list.item(1)                       # the Walls row
+    with qtbot.waitSignal(dock.visibility_changed, timeout=500):
+        item.setCheckState(Qt.CheckState.Unchecked)
+    assert lib.is_visible(walls.id) is False
+
+
+def test_selecting_row_changes_active_and_emits(qtbot, lib):
+    walls = lib.add("Walls")
+    dock = TagsDock(lib)
+    qtbot.addWidget(dock)
+    with qtbot.waitSignal(dock.active_tag_changed, timeout=500) as blocker:
+        dock._list.setCurrentRow(1)
+    assert dock.active_tag_id == walls.id
+    assert blocker.args[0] == walls.id
+
+
+def test_add_tag_grows_list(qtbot, lib):
+    dock = TagsDock(lib)
+    qtbot.addWidget(dock)
+    n = dock._list.count()
+    dock._on_add()
+    assert dock._list.count() == n + 1
+
+
+def test_assign_emits(qtbot, lib):
+    dock = TagsDock(lib)
+    qtbot.addWidget(dock)
+    with qtbot.waitSignal(dock.assign_to_selection_requested, timeout=500):
+        dock._on_assign()
