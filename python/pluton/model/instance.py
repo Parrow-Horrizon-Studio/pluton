@@ -11,7 +11,7 @@ if TYPE_CHECKING:
 class Instance:
     """A placement: a 4x4 transform + a reference to a Definition. Non-destructive."""
 
-    __slots__ = ("id", "definition", "transform")
+    __slots__ = ("definition", "id", "tag_id", "transform")
 
     def __init__(
         self, instance_id: int, definition: Definition, transform: np.ndarray | None = None
@@ -22,3 +22,4 @@ class Instance:
             self.transform = np.eye(4, dtype=np.float64)
         else:
             self.transform = np.asarray(transform, dtype=np.float64).reshape(4, 4).copy()
+        self.tag_id = 0  # 0 == TagLibrary.UNTAGGED_ID; set by clone / MakeGroup / TagInstances

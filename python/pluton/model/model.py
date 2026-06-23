@@ -5,6 +5,7 @@ import numpy as np
 from pluton.model.definition import Definition
 from pluton.model.instance import Instance
 from pluton.model.material import MaterialLibrary
+from pluton.model.tag import TagLibrary
 
 
 class Model:
@@ -16,6 +17,7 @@ class Model:
         self.root = self.new_definition("Model", is_group=False)
         self.active_path: list[Instance] = []
         self.materials = MaterialLibrary()
+        self.tags = TagLibrary()
 
     # --- construction ---
     def new_definition(self, name: str, is_group: bool) -> Definition:
@@ -72,7 +74,9 @@ class Model:
         for f in definition.mesh.faces_iter():
             clone.mesh.add_face_from_loop([idmap[v] for v in f.loop_vertex_ids])
         for child in definition.children:
-            clone.children.append(self.new_instance(child.definition, child.transform))
+            new_child = self.new_instance(child.definition, child.transform)
+            new_child.tag_id = child.tag_id
+            clone.children.append(new_child)
         return clone
 
     def pick_instance(self, origin, direction):
