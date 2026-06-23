@@ -57,3 +57,37 @@ def test_new_group_inherits_active_tag(win):
     inst_id = next(iter(win._selection.instances))
     inst = next(i for i in win._model.active_context.children if i.id == inst_id)
     assert inst.tag_id == walls.id
+
+
+def test_selection_indicator_reflects_selected_object(win):
+    s = win._model.active_scene
+    v = [s.add_vertex(np.array([0.0, 0.0, 0.0])),
+         s.add_vertex(np.array([1.0, 0.0, 0.0])),
+         s.add_vertex(np.array([0.0, 1.0, 0.0]))]
+    f = s.add_face_from_loop(v)
+    walls = win._model.tags.add("Walls")
+    win._active_tag_id = walls.id
+    win._selection.replace(faces=[f])
+    win._on_make_group()                      # new group inherits Walls; selects the instance
+    win._update_selection_tag_indicator()
+    assert win._tags_dock._selection_label.text() == "Selection: Walls"
+
+
+def test_selection_indicator_empty_when_no_instance(win):
+    win._selection.replace()                  # clear selection
+    win._update_selection_tag_indicator()
+    assert win._tags_dock._selection_label.text() == "Selection: —"
+
+
+def test_assign_updates_selection_indicator(win):
+    s = win._model.active_scene
+    v = [s.add_vertex(np.array([0.0, 0.0, 0.0])),
+         s.add_vertex(np.array([1.0, 0.0, 0.0])),
+         s.add_vertex(np.array([0.0, 1.0, 0.0]))]
+    f = s.add_face_from_loop(v)
+    win._selection.replace(faces=[f])
+    win._on_make_group()                      # untagged group, selected
+    walls = win._model.tags.add("Walls")
+    win._active_tag_id = walls.id
+    win._on_assign_tag()
+    assert win._tags_dock._selection_label.text() == "Selection: Walls"

@@ -213,6 +213,18 @@ class MainWindow(QMainWindow):
     def _on_active_tag_changed(self, tag_id: int) -> None:
         self._active_tag_id = tag_id
 
+    def _update_selection_tag_indicator(self) -> None:
+        insts = [i for i in self._model.active_context.children
+                 if i.id in self._selection.instances]
+        if not insts:
+            self._tags_dock.set_selection_tag(None)
+            return
+        tids = {i.tag_id for i in insts}
+        if len(tids) == 1:
+            self._tags_dock.set_selection_tag(self._model.tags.get(next(iter(tids))).name)
+        else:
+            self._tags_dock.set_selection_tag("(multiple)")
+
     def _on_assign_tag(self) -> None:
         from pluton.commands.tag_commands import TagInstancesCommand
 
@@ -224,6 +236,9 @@ class MainWindow(QMainWindow):
             return
         cmd = TagInstancesCommand(selected, self._active_tag_id)
         self._command_stack.execute(cmd, self._model)
+        name = self._model.tags.get(self._active_tag_id).name
+        self._status_bar.set_status(f"Assigned tag '{name}' to {len(selected)} object(s).")
+        self._update_selection_tag_indicator()
         self._viewport.update()
 
     # --- Scene graph back-compat property --------------------------------
@@ -272,6 +287,7 @@ class MainWindow(QMainWindow):
         else:
             self._status_bar.set_status(active.status_text or "")
         self._refresh_selection_status()
+        self._update_selection_tag_indicator()
 
     def _vcb_handle_key(self, event) -> bool:
         """Pure VCB key logic. Returns True if the key was consumed."""

@@ -76,3 +76,12 @@ def test_empty_rename_is_restored(qtbot, lib):
     dock._list.item(1).setText("")
     assert lib.get(walls.id).name == "Walls"
     assert dock._list.item(1).text() == "Walls"
+
+
+def test_set_selection_tag_label(qtbot, lib):
+    dock = TagsDock(lib)
+    qtbot.addWidget(dock)
+    dock.set_selection_tag("Walls")
+    assert dock._selection_label.text() == "Selection: Walls"
+    dock.set_selection_tag(None)
+    assert dock._selection_label.text() == "Selection: —"

@@ -7,6 +7,7 @@ from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QDockWidget,
+    QLabel,
     QListWidget,
     QListWidgetItem,
     QPushButton,
@@ -32,6 +33,8 @@ class TagsDock(QDockWidget):
 
         container = QWidget(self)
         layout = QVBoxLayout(container)
+        self._selection_label = QLabel("Selection: —", container)
+        layout.addWidget(self._selection_label)
         self._list = QListWidget(container)
         self._list.setEditTriggers(QAbstractItemView.EditTrigger.DoubleClicked)
         self._list.itemChanged.connect(self._on_item_changed)
@@ -102,6 +105,10 @@ class TagsDock(QDockWidget):
 
     def _on_assign(self) -> None:
         self.assign_to_selection_requested.emit()
+
+    def set_selection_tag(self, name: str | None) -> None:
+        """Show the tag of the current selection (None -> em-dash placeholder)."""
+        self._selection_label.setText(f"Selection: {name}" if name else "Selection: —")
 
     def set_active(self, tag_id: int) -> None:
         """Select the row for `tag_id` (used to set the active tag programmatically)."""
