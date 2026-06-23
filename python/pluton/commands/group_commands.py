@@ -9,13 +9,14 @@ class MakeGroupCommand(Command):
     name = "Make Group"
 
     def __init__(self, parent_definition, vertex_ids, edge_ids, face_ids,
-                 *, is_group: bool = True, name: str | None = None) -> None:
+                 *, is_group: bool = True, name: str | None = None, tag_id: int = 0) -> None:
         self._parent = parent_definition
         self._vids = list(vertex_ids)
         self._eids = list(edge_ids)
         self._fids = list(face_ids)
         self._is_group = is_group
         self._name = name
+        self._tag_id = int(tag_id)
         self.created_instance = None
         self._captured = None  # (verts, edges, faces) descriptors for undo
 
@@ -70,6 +71,7 @@ class MakeGroupCommand(Command):
 
         # 4. Create one instance in the parent.
         inst = model.new_instance(defn)
+        inst.tag_id = self._tag_id
         self._parent.children.append(inst)
         self.created_instance = inst
 
@@ -114,6 +116,7 @@ class MakeGroupCommand(Command):
 class MakeComponentCommand(MakeGroupCommand):
     name = "Make Component"
 
-    def __init__(self, parent_definition, vertex_ids, edge_ids, face_ids, *, name: str) -> None:
+    def __init__(self, parent_definition, vertex_ids, edge_ids, face_ids,
+                 *, name: str, tag_id: int = 0) -> None:
         super().__init__(parent_definition, vertex_ids, edge_ids, face_ids,
-                         is_group=False, name=name)
+                         is_group=False, name=name, tag_id=tag_id)
