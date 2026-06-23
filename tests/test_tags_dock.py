@@ -53,3 +53,26 @@ def test_assign_emits(qtbot, lib):
     qtbot.addWidget(dock)
     with qtbot.waitSignal(dock.assign_to_selection_requested, timeout=500):
         dock._on_assign()
+
+
+def test_rename_via_item_edit_updates_library(qtbot, lib):
+    walls = lib.add("Walls")
+    dock = TagsDock(lib)
+    qtbot.addWidget(dock)
+    dock._list.item(1).setText("Exterior")
+    assert lib.get(walls.id).name == "Exterior"
+
+
+def test_untagged_item_not_editable(qtbot, lib):
+    dock = TagsDock(lib)
+    qtbot.addWidget(dock)
+    assert not (dock._list.item(0).flags() & Qt.ItemFlag.ItemIsEditable)
+
+
+def test_empty_rename_is_restored(qtbot, lib):
+    walls = lib.add("Walls")
+    dock = TagsDock(lib)
+    qtbot.addWidget(dock)
+    dock._list.item(1).setText("")
+    assert lib.get(walls.id).name == "Walls"
+    assert dock._list.item(1).text() == "Walls"

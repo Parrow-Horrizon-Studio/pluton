@@ -55,6 +55,14 @@ class TagLibrary:
         if tag is not None:
             tag.visible = bool(visible)
 
+    def rename(self, tid: int, name: str) -> None:
+        """Rename a user tag. No-op for Untagged or an empty name."""
+        if tid == self.UNTAGGED_ID:
+            return
+        tag = self._tags.get(tid)
+        if tag is not None and name:
+            tag.name = str(name)
+
     def is_visible(self, tid: int) -> bool:
         """Whether entities on this tag should be drawn (Untagged always True)."""
         return self.get(tid).visible

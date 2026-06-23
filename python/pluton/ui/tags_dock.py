@@ -5,6 +5,7 @@ from __future__ import annotations
 
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
+    QAbstractItemView,
     QDockWidget,
     QListWidget,
     QListWidgetItem,
@@ -32,6 +33,7 @@ class TagsDock(QDockWidget):
         container = QWidget(self)
         layout = QVBoxLayout(container)
         self._list = QListWidget(container)
+        self._list.setEditTriggers(QAbstractItemView.EditTrigger.DoubleClicked)
         self._list.itemChanged.connect(self._on_item_changed)
         self._list.currentItemChanged.connect(self._on_current_changed)
         layout.addWidget(self._list)
@@ -56,7 +58,9 @@ class TagsDock(QDockWidget):
                 item.setFlags(Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable)
                 item.setCheckState(Qt.CheckState.Checked)
             else:
-                item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
+                item.setFlags(
+                    item.flags() | Qt.ItemFlag.ItemIsUserCheckable | Qt.ItemFlag.ItemIsEditable
+                )
                 item.setCheckState(
                     Qt.CheckState.Checked if tag.visible else Qt.CheckState.Unchecked
                 )
@@ -69,9 +73,21 @@ class TagsDock(QDockWidget):
         if self._rebuilding:
             return
         tid = int(item.data(Qt.ItemDataRole.UserRole))
+        tag = self._library.get(tid)
+        # Visibility (checkbox). Untagged stays always-visible.
         visible = item.checkState() == Qt.CheckState.Checked
-        self._library.set_visible(tid, visible)
-        self.visibility_changed.emit()
+        if self._library.is_visible(tid) != visible:
+            self._library.set_visible(tid, visible)
+            self.visibility_changed.emit()
+        # Rename (inline text edit). Untagged is not renamable; empty is rejected.
+        new_name = item.text().strip()
+        if tid != TagLibrary.UNTAGGED_ID and new_name and new_name != tag.name:
+            self._library.rename(tid, new_name)
+        elif item.text() != tag.name:
+            # Reject empty/invalid edit -> restore display without re-triggering.
+            self._list.blockSignals(True)
+            item.setText(tag.name)
+            self._list.blockSignals(False)
 
     def _on_current_changed(self, current, _previous) -> None:
         if self._rebuilding or current is None:

@@ -50,3 +50,23 @@ def test_tag_is_mutable():
     t = Tag(1, "X", True)
     t.visible = False
     assert t.visible is False
+
+
+def test_rename_changes_name():
+    lib = TagLibrary()
+    w = lib.add("Walls")
+    lib.rename(w.id, "Exterior Walls")
+    assert lib.get(w.id).name == "Exterior Walls"
+
+
+def test_rename_untagged_is_noop():
+    lib = TagLibrary()
+    lib.rename(TagLibrary.UNTAGGED_ID, "Nope")
+    assert lib.get(TagLibrary.UNTAGGED_ID).name == "Untagged"
+
+
+def test_rename_empty_is_noop():
+    lib = TagLibrary()
+    w = lib.add("Walls")
+    lib.rename(w.id, "")
+    assert lib.get(w.id).name == "Walls"
