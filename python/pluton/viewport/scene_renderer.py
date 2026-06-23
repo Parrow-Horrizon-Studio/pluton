@@ -453,7 +453,7 @@ class SceneRenderer:
 
         # 3 & 4. Draw all definitions in the scene graph with their world transforms.
         if model is not None:
-            for definition, world in model.traverse():
+            for definition, world in model.traverse_visible():
                 buf = self._def_buffers.get(id(definition))
                 if buf is None or definition.mesh.dirty:
                     buf = self._upload_definition(definition)
@@ -499,7 +499,7 @@ class SceneRenderer:
             if selection is not None and selection.instances:
                 active_world = model.active_world_transform
                 for inst in model.active_context.children:
-                    if inst.id in selection.instances:
+                    if inst.id in selection.instances and model.tags.is_visible(inst.tag_id):
                         aabb = inst.definition.local_aabb()
                         if aabb is not None:
                             lo, hi = aabb
