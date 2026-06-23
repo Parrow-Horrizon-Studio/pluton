@@ -63,6 +63,20 @@ class Model:
         for inst in definition.children:
             yield from self._traverse(inst.definition, world @ inst.transform)
 
+    def traverse_visible(self):
+        """Like traverse(), but prunes any instance on a hidden tag — and its whole
+        subtree (hiding an object hides its contents). Instances on the active
+        editing path are always kept (you're editing inside them)."""
+        active_ids = {inst.id for inst in self.active_path}
+        yield from self._traverse_visible(self.root, np.eye(4, dtype=np.float64), active_ids)
+
+    def _traverse_visible(self, definition, world, active_ids):  # noqa: ANN001
+        yield definition, world
+        for inst in definition.children:
+            if inst.id not in active_ids and not self.tags.is_visible(inst.tag_id):
+                continue
+            yield from self._traverse_visible(inst.definition, world @ inst.transform, active_ids)
+
     def clone_definition(self, definition):
         """Deep-copy a definition's geometry + child instances into a fresh def."""
         clone = self.new_definition(definition.name, definition.is_group)
@@ -90,6 +104,8 @@ class Model:
         best, best_t = None, float("inf")
         world0 = self.active_world_transform
         for inst in self.active_context.children:
+            if not self.tags.is_visible(inst.tag_id):
+                continue
             world = world0 @ inst.transform
             inv = mat_invert(world)
             o = (inv @ np.append(origin, 1.0))[:3]
