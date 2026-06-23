@@ -10,6 +10,7 @@ from pluton.commands import CommandStack
 from pluton.commands.scene_commands import ClearSceneCommand
 from pluton.document import DocumentSettings
 from pluton.model import Model
+from pluton.model.tag import TagLibrary
 from pluton.selection import Selection
 from pluton.tools import (
     ArcTool,
@@ -30,6 +31,7 @@ from pluton.tools import (
 from pluton.tools.paint_tool import PaintTool
 from pluton.ui.materials_dock import MaterialsDock
 from pluton.ui.status_bar import StatusBar
+from pluton.ui.tags_dock import TagsDock
 from pluton.ui.value_control_box import ValueControlBox
 from pluton.viewport.render_style import FaceStyle, RenderStyle
 from pluton.viewport.viewport_widget import ViewportWidget
@@ -82,6 +84,16 @@ class MainWindow(QMainWindow):
         self._materials_dock = MaterialsDock(self._model.materials, self)
         self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, self._materials_dock)
         self._materials_dock.active_material_changed.connect(self._on_active_material_changed)
+
+        # Tags dock — tabbed with Materials on the right. Not referenced by the
+        # ToolContext (tag assignment uses the existing Select tool + Selection).
+        self._active_tag_id = TagLibrary.UNTAGGED_ID
+        self._tags_dock = TagsDock(self._model.tags, self)
+        self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, self._tags_dock)
+        self.tabifyDockWidget(self._materials_dock, self._tags_dock)
+        self._tags_dock.active_tag_changed.connect(self._on_active_tag_changed)
+        self._tags_dock.visibility_changed.connect(self._viewport.update)
+        self._tags_dock.assign_to_selection_requested.connect(self._on_assign_tag)
 
         # NOW we can build the ToolContext that includes the viewport refs.
         self._rebuild_tool_context()
@@ -188,11 +200,31 @@ class MainWindow(QMainWindow):
         self._view_menu.addSeparator()
         self._materials_dock_action = self._materials_dock.toggleViewAction()
         self._view_menu.addAction(self._materials_dock_action)
+        self._tags_dock_action = self._tags_dock.toggleViewAction()
+        self._view_menu.addAction(self._tags_dock_action)
 
     # --- Material slot ---------------------------------------------------
 
     def _on_active_material_changed(self, material) -> None:
         self._active_material_id = material.id
+
+    # --- Tag slots -------------------------------------------------------
+
+    def _on_active_tag_changed(self, tag_id: int) -> None:
+        self._active_tag_id = tag_id
+
+    def _on_assign_tag(self) -> None:
+        from pluton.commands.tag_commands import TagInstancesCommand
+
+        sel = self._selection
+        selected = [inst for inst in self._model.active_context.children
+                    if inst.id in sel.instances]
+        if not selected:
+            self._status_bar.set_status("Select objects to assign a tag.")
+            return
+        cmd = TagInstancesCommand(selected, self._active_tag_id)
+        self._command_stack.execute(cmd, self._model)
+        self._viewport.update()
 
     # --- Scene graph back-compat property --------------------------------
 
@@ -363,7 +395,8 @@ class MainWindow(QMainWindow):
         vertex_ids = selection_vertices(self._model.active_scene, sel)
         edge_ids = list(sel.edges)
         face_ids = list(sel.faces)
-        cmd = MakeGroupCommand(self._model.active_context, vertex_ids, edge_ids, face_ids)
+        cmd = MakeGroupCommand(self._model.active_context, vertex_ids, edge_ids, face_ids,
+                               tag_id=self._active_tag_id)
         self._command_stack.execute(cmd, self._model)
         sel.replace(instances=[cmd.created_instance.id])
         self._refresh_selection_status()
@@ -392,7 +425,7 @@ class MainWindow(QMainWindow):
         edge_ids = list(sel.edges)
         face_ids = list(sel.faces)
         cmd = MakeComponentCommand(self._model.active_context, vertex_ids, edge_ids, face_ids,
-                                   name=name)
+                                   name=name, tag_id=self._active_tag_id)
         self._command_stack.execute(cmd, self._model)
         sel.replace(instances=[cmd.created_instance.id])
         self._refresh_selection_status()
