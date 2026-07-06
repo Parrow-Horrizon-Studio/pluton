@@ -279,3 +279,45 @@ def test_listener_fire_counts_across_full_undo_redo_cycle():
     assert s.undo() is False
     assert undo_fired == [1, 1], "listener must not fire a third time on an empty stack"
     assert redo_fired == [1], "redo listener must still be at exactly 1"
+
+
+# ---------------------------------------------------------------------------
+# M6a Task 7 — change-listener + clear
+# ---------------------------------------------------------------------------
+
+
+class _NoOpCmd:
+    def do(self, target):  # noqa: ANN001
+        pass
+
+    def undo(self, target):  # noqa: ANN001
+        pass
+
+
+def test_change_listener_fires_on_every_mutation():
+    from pluton.commands.command_stack import CommandStack
+
+    stack = CommandStack()
+    calls = []
+    stack.add_change_listener(lambda: calls.append(1))
+
+    stack.execute(_NoOpCmd(), object())
+    assert len(calls) == 1
+    stack.push_executed(_NoOpCmd(), object())
+    assert len(calls) == 2
+    stack.undo()
+    assert len(calls) == 3
+    stack.redo()
+    assert len(calls) == 4
+
+
+def test_clear_empties_both_stacks():
+    from pluton.commands.command_stack import CommandStack
+
+    stack = CommandStack()
+    stack.execute(_NoOpCmd(), object())
+    stack.undo()
+    assert stack.can_redo
+    stack.clear()
+    assert not stack.can_undo
+    assert not stack.can_redo

@@ -13,6 +13,7 @@ class CommandStack:
         self._redo: list[tuple] = []
         self._on_after_undo: list = []  # list[Callable[[], None]]
         self._on_after_redo: list = []  # list[Callable[[], None]]
+        self._on_change: list = []  # list[Callable[[], None]]
 
     def add_undo_listener(self, fn) -> None:  # noqa: ANN001
         """Register a zero-arg callable to invoke after each successful undo."""
@@ -22,11 +23,25 @@ class CommandStack:
         """Register a zero-arg callable to invoke after each successful redo."""
         self._on_after_redo.append(fn)
 
+    def add_change_listener(self, fn) -> None:  # noqa: ANN001
+        """Register a zero-arg callable fired after every stack mutation."""
+        self._on_change.append(fn)
+
+    def _fire_change(self) -> None:
+        for fn in self._on_change:
+            fn()
+
+    def clear(self) -> None:
+        """Empty both stacks (used when switching documents). Fires no listeners."""
+        self._undo.clear()
+        self._redo.clear()
+
     def execute(self, cmd: Command, target) -> None:  # noqa: ANN001
         """Run cmd.do(target), push (cmd, target) to undo stack, clear redo stack."""
         cmd.do(target)
         self._undo.append((cmd, target))
         self._redo.clear()
+        self._fire_change()
 
     def push_executed(self, cmd: Command, target) -> None:  # noqa: ANN001
         """Append a command whose do() was already called incrementally.
@@ -38,6 +53,7 @@ class CommandStack:
         """
         self._undo.append((cmd, target))
         self._redo.clear()
+        self._fire_change()
 
     def undo(self) -> bool:
         if not self._undo:
@@ -47,6 +63,7 @@ class CommandStack:
         self._redo.append((cmd, target))
         for fn in self._on_after_undo:
             fn()
+        self._fire_change()
         return True
 
     def redo(self) -> bool:
@@ -57,6 +74,7 @@ class CommandStack:
         self._undo.append((cmd, target))
         for fn in self._on_after_redo:
             fn()
+        self._fire_change()
         return True
 
     @property
