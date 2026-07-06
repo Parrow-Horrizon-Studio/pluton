@@ -1,6 +1,10 @@
 import numpy as np
 import pytest
+from pluton.document import DocumentSettings
 from pluton.io.document_codec import (
+    CameraState,
+    document_from_dict,
+    document_to_dict,
     geometry_from_dict,
     geometry_to_dict,
     model_from_dict,
@@ -9,6 +13,8 @@ from pluton.io.document_codec import (
 from pluton.io.errors import PlutonFormatError
 from pluton.model.model import Model
 from pluton.scene.scene import Scene
+from pluton.units import Units, UnitSystem
+from pluton.viewport.camera import Camera
 
 
 def _square(scene: Scene) -> list[int]:
@@ -111,3 +117,45 @@ def test_model_from_dict_rejects_dangling_definition_ref():
     }
     with pytest.raises(PlutonFormatError):
         model_from_dict(data)
+
+
+def test_document_roundtrip_camera_units_materials_tags():
+    model = Model()
+    _add_box(model.root.mesh)
+    fid = next(iter(model.root.mesh.faces_iter())).id
+    teal = model.materials.add_custom("Teal", (0.1, 0.6, 0.6))
+    model.root.mesh.set_face_material(fid, teal.id)
+    walls = model.tags.add("Walls")
+    model.tags.set_visible(walls.id, False)
+
+    cam = Camera()
+    cam.position = np.array([3, -4, 5], dtype=np.float32)
+    doc = DocumentSettings()
+    doc.set_units(Units(system=UnitSystem.IMPERIAL, imperial_denominator=8))
+
+    data = document_to_dict(model, cam, doc)
+    loaded = document_from_dict(data)
+
+    assert loaded.units.system is UnitSystem.IMPERIAL
+    assert loaded.units.imperial_denominator == 8
+    assert tuple(round(x, 3) for x in loaded.camera_state.position) == (3.0, -4.0, 5.0)
+    assert loaded.model.materials.get(teal.id).name == "Teal"
+    assert loaded.model.tags.is_visible(walls.id) is False
+    new_fid = next(iter(loaded.model.root.mesh.faces_iter())).id
+    assert loaded.model.root.mesh.face_material(new_fid) == teal.id
+
+
+def test_camera_state_apply_to_roundtrip():
+    cam = Camera()
+    cam.position = np.array([1, 2, 3], dtype=np.float32)
+    cam.fov_y_deg = 33.0
+    state = CameraState.from_dict(CameraState.from_camera(cam).to_dict())
+    target = Camera()
+    state.apply_to(target)
+    assert tuple(round(float(x), 3) for x in target.position) == (1.0, 2.0, 3.0)
+    assert round(target.fov_y_deg, 3) == 33.0
+
+
+def test_document_from_dict_wraps_structural_errors():
+    with pytest.raises(PlutonFormatError):
+        document_from_dict({"model": {}})  # missing keys everywhere

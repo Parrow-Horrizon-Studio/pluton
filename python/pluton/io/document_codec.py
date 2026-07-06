@@ -8,13 +8,19 @@ compacts id gaps and lets load replay add_vertex/add_edge/add_face_from_loop.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+from typing import NamedTuple
+
 import numpy as np
 
 from pluton.io.errors import PlutonFormatError
 from pluton.model.definition import Definition
 from pluton.model.instance import Instance
+from pluton.model.material import MaterialLibrary
 from pluton.model.model import Model
+from pluton.model.tag import TagLibrary
 from pluton.scene.scene import Scene
+from pluton.units import Units, units_from_dict, units_to_dict
 
 _DEFAULT_MATERIAL_ID = 0  # mirrors MaterialLibrary.DEFAULT_ID
 
@@ -138,3 +144,79 @@ def model_from_dict(data: dict) -> Model:
     model._next_def_id = int(data["next_def_id"])
     model._next_inst_id = int(data["next_inst_id"])
     return model
+
+
+@dataclass(frozen=True)
+class CameraState:
+    """Snapshot of the viewport Camera's user-facing state (not aspect/near/far,
+    which are re-derived from the viewport on load)."""
+
+    position: tuple
+    target: tuple
+    up: tuple
+    fov_y_deg: float
+
+    @classmethod
+    def from_camera(cls, cam) -> CameraState:
+        return cls(
+            position=tuple(float(x) for x in cam.position),
+            target=tuple(float(x) for x in cam.target),
+            up=tuple(float(x) for x in cam.up),
+            fov_y_deg=float(cam.fov_y_deg),
+        )
+
+    def to_dict(self) -> dict:
+        return {"position": list(self.position), "target": list(self.target),
+                "up": list(self.up), "fov_y_deg": self.fov_y_deg}
+
+    @classmethod
+    def from_dict(cls, d: dict) -> CameraState:
+        return cls(
+            position=tuple(float(x) for x in d["position"]),
+            target=tuple(float(x) for x in d["target"]),
+            up=tuple(float(x) for x in d["up"]),
+            fov_y_deg=float(d["fov_y_deg"]),
+        )
+
+    def apply_to(self, cam) -> None:
+        cam.position = np.array(self.position, dtype=np.float32)
+        cam.target = np.array(self.target, dtype=np.float32)
+        cam.up = np.array(self.up, dtype=np.float32)
+        cam.fov_y_deg = float(self.fov_y_deg)
+
+
+class LoadedDocument(NamedTuple):
+    """Result of loading a .pluton document: model + camera + units."""
+
+    model: Model
+    camera_state: CameraState
+    units: Units
+
+
+def document_to_dict(model: Model, camera, doc) -> dict:
+    """Serialize the top-level document: units, camera, libraries, model."""
+    return {
+        "units": units_to_dict(doc.units),
+        "camera": CameraState.from_camera(camera).to_dict(),
+        "materials": {"next_id": model.materials.next_id,
+                      "items": model.materials.to_records()},
+        "tags": {"next_id": model.tags.next_id, "items": model.tags.to_records()},
+        "model": model_to_dict(model),
+    }
+
+
+def document_from_dict(data: dict) -> LoadedDocument:
+    """Rebuild a LoadedDocument. Any structural malformation anywhere in the
+    document (including in nested geometry/model data) is normalized into
+    PlutonFormatError — the only exception callers need to catch."""
+    try:
+        model = model_from_dict(data["model"])
+        model.materials = MaterialLibrary.from_records(
+            data["materials"]["items"], data["materials"]["next_id"])
+        model.tags = TagLibrary.from_records(
+            data["tags"]["items"], data["tags"]["next_id"])
+        camera_state = CameraState.from_dict(data["camera"])
+        units = units_from_dict(data["units"])
+    except (KeyError, TypeError, ValueError, IndexError) as e:
+        raise PlutonFormatError(f"malformed document: {e}") from e
+    return LoadedDocument(model=model, camera_state=camera_state, units=units)
