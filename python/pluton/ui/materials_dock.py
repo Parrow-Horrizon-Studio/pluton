@@ -30,6 +30,7 @@ class MaterialsDock(QDockWidget):
     """Swatch grid + custom-color button. Emits active_material_changed(Material)."""
 
     active_material_changed = Signal(object)  # emits a Material
+    library_changed = Signal()
 
     def __init__(self, library: MaterialLibrary, parent=None) -> None:
         super().__init__("Materials", parent)
@@ -81,6 +82,7 @@ class MaterialsDock(QDockWidget):
         color = (qc.redF(), qc.greenF(), qc.blueF())
         mat = self._library.add_custom(qc.name(), color)  # name == hex "#rrggbb"
         self._rebuild_swatches()
+        self.library_changed.emit()
         self._on_pick(mat.id)
 
     def set_active(self, material_id: int) -> None:
@@ -88,6 +90,12 @@ class MaterialsDock(QDockWidget):
         self._active_id = material_id
         self._restyle()
         self.active_material_changed.emit(self._library.get(material_id))
+
+    def set_library(self, library: MaterialLibrary) -> None:
+        """Rebind to a new library (after file Open / New) and rebuild swatches."""
+        self._library = library
+        self._active_id = MaterialLibrary.DEFAULT_ID
+        self._rebuild_swatches()
 
     @property
     def active_material_id(self) -> int:

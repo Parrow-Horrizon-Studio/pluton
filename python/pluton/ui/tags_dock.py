@@ -24,6 +24,7 @@ class TagsDock(QDockWidget):
     active_tag_changed = Signal(int)
     visibility_changed = Signal()
     assign_to_selection_requested = Signal()
+    library_changed = Signal()
 
     def __init__(self, library: TagLibrary, parent=None) -> None:
         super().__init__("Tags", parent)
@@ -86,6 +87,7 @@ class TagsDock(QDockWidget):
         new_name = item.text().strip()
         if tid != TagLibrary.UNTAGGED_ID and new_name and new_name != tag.name:
             self._library.rename(tid, new_name)
+            self.library_changed.emit()
         elif item.text() != tag.name:
             # Reject empty/invalid edit -> restore display without re-triggering.
             self._list.blockSignals(True)
@@ -100,6 +102,7 @@ class TagsDock(QDockWidget):
 
     def _on_add(self) -> None:
         tag = self._library.add(f"Tag {len(self._library.tags())}")
+        self.library_changed.emit()
         self._rebuild()
         self.set_active(tag.id)
 
@@ -118,6 +121,12 @@ class TagsDock(QDockWidget):
             if int(item.data(Qt.ItemDataRole.UserRole)) == tag_id:
                 self._list.setCurrentItem(item)
                 break
+
+    def set_library(self, library: TagLibrary) -> None:
+        """Rebind to a new library (after file Open / New) and rebuild the list."""
+        self._library = library
+        self._active_id = TagLibrary.UNTAGGED_ID
+        self._rebuild()
 
     @property
     def active_tag_id(self) -> int:

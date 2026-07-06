@@ -115,6 +115,19 @@ class Model:
                 best, best_t = inst, hit.t
         return best
 
+    def load_from(self, other: "Model") -> None:
+        """Replace this model's contents with another's, in place (keeps identity).
+
+        Lets the viewport / tool context keep their existing Model reference while
+        the whole document is swapped underneath (file Open / New).
+        """
+        self.root = other.root
+        self.active_path = []
+        self._next_def_id = other._next_def_id
+        self._next_inst_id = other._next_inst_id
+        self.materials = other.materials
+        self.tags = other.tags
+
     def revalidate_active_path(self) -> None:
         """Pop the active path to the nearest still-reachable instance.
 
