@@ -1,1 +1,13 @@
-"""Native .pluton file I/O (M6a). Re-exports added in pluton_file (Task 6)."""
+"""Native .pluton file I/O (M6a)."""
+
+from pluton.io.errors import PlutonFormatError, PlutonIOError, PlutonVersionError
+from pluton.io.pluton_file import SCHEMA_VERSION, load_document, save_document
+
+__all__ = [
+    "SCHEMA_VERSION",
+    "PlutonFormatError",
+    "PlutonIOError",
+    "PlutonVersionError",
+    "load_document",
+    "save_document",
+]
