@@ -28,6 +28,24 @@ class Units:
     imperial_denominator: int = 16  # smallest fraction denominator (…/16")
 
 
+def units_to_dict(units: Units) -> dict:
+    return {
+        "system": units.system.value,
+        "metric_unit": units.metric_unit,
+        "metric_precision": units.metric_precision,
+        "imperial_denominator": units.imperial_denominator,
+    }
+
+
+def units_from_dict(data: dict) -> Units:
+    return Units(
+        system=UnitSystem(data["system"]),
+        metric_unit=str(data["metric_unit"]),
+        metric_precision=int(data["metric_precision"]),
+        imperial_denominator=int(data["imperial_denominator"]),
+    )
+
+
 _METRIC_RE = re.compile(r"^\s*(\d+(?:\.\d+)?)\s*(mm|cm|m)?\s*$", re.IGNORECASE)
 
 

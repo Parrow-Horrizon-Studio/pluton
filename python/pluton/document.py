@@ -31,3 +31,7 @@ class DocumentSettings:
             metric_unit=self._units.metric_unit,
             metric_precision=self._units.metric_precision,
         )
+
+    def set_units(self, units: Units) -> None:
+        """Replace the active units wholesale (used by file load / New)."""
+        self._units = units

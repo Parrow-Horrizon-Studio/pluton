@@ -71,3 +71,27 @@ class MaterialLibrary:
     def materials(self) -> list[Material]:
         """All materials in display order (Default first)."""
         return [self._materials[i] for i in self._order]
+
+    @property
+    def next_id(self) -> int:
+        return self._next_id
+
+    def to_records(self) -> list[dict]:
+        """Serialize all materials in display order (Default first)."""
+        return [{"id": m.id, "name": m.name, "color": list(m.color)} for m in self.materials()]
+
+    @classmethod
+    def from_records(cls, records: list[dict], next_id: int) -> "MaterialLibrary":
+        """Rebuild a library authoritatively from saved records (no auto-seed)."""
+        lib = cls()  # seeds default + builtins, then we overwrite
+        lib._materials = {}
+        lib._order = []
+        for r in records:
+            color = r["color"]
+            mat = Material(int(r["id"]), str(r["name"]),
+                           (float(color[0]), float(color[1]), float(color[2])))
+            lib._materials[mat.id] = mat
+            lib._order.append(mat.id)
+        lib._default = lib._materials.get(cls.DEFAULT_ID, lib._default)
+        lib._next_id = int(next_id)
+        return lib

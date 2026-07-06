@@ -66,3 +66,25 @@ class TagLibrary:
     def is_visible(self, tid: int) -> bool:
         """Whether entities on this tag should be drawn (Untagged always True)."""
         return self.get(tid).visible
+
+    @property
+    def next_id(self) -> int:
+        return self._next_id
+
+    def to_records(self) -> list[dict]:
+        """Serialize all tags in display order (Untagged first)."""
+        return [{"id": t.id, "name": t.name, "visible": t.visible} for t in self.tags()]
+
+    @classmethod
+    def from_records(cls, records: list[dict], next_id: int) -> "TagLibrary":
+        """Rebuild a library authoritatively from saved records (no auto-seed)."""
+        lib = cls()  # seeds Untagged, then we overwrite
+        lib._tags = {}
+        lib._order = []
+        for r in records:
+            tag = Tag(int(r["id"]), str(r["name"]), bool(r["visible"]))
+            lib._tags[tag.id] = tag
+            lib._order.append(tag.id)
+        lib._untagged = lib._tags.get(cls.UNTAGGED_ID, lib._untagged)
+        lib._next_id = int(next_id)
+        return lib
