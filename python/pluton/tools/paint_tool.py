@@ -135,6 +135,7 @@ class PaintTool(Tool):
     def anchor_or_none(self) -> np.ndarray | None:
         return None
 
+    @property
     def status_text(self) -> str | None:
         mat = self._active_material()
         name = mat.name if mat is not None else "Default"

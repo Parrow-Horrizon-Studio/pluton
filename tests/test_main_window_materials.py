@@ -35,6 +35,23 @@ def test_dock_selection_updates_active_material_id(win):
     assert win._active_material_id == brick.id
 
 
+def test_paint_tool_status_text_refreshes_without_error(win):
+    # Regression (M5b): PaintTool.status_text was missing its @property, so
+    # `active.status_text or ""` stored the *bound method* in the status bar,
+    # raising "sequence item …: expected str instance, method found" from the
+    # status-bar join on every mouse move. It must resolve to a plain string.
+    import inspect
+
+    from pluton.tools.paint_tool import PaintTool
+
+    assert isinstance(inspect.getattr_static(PaintTool, "status_text"), property)
+    win._activate("B")  # activates Paint AND sets the status-bar tool name
+    win._refresh_status_text()  # would raise TypeError before the fix
+    text = win._status_bar.text()
+    assert isinstance(text, str)
+    assert "Paint" in text
+
+
 def test_view_menu_has_materials_dock_toggle(win):
     # The toggle action is registered in the View menu and controls the dock.
     assert win._materials_dock_action in win._view_menu.actions()
