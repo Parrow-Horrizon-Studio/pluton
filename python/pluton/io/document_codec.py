@@ -75,6 +75,9 @@ def geometry_from_dict(scene: Scene, data: dict) -> None:
 
 def model_to_dict(model: Model) -> dict:
     """Serialize the scene graph. Definitions reachable from root are emitted once."""
+    # Walks only definitions reachable from root via placed instances — an unplaced
+    # / orphan definition would not persist. Fine today (every definition is placed);
+    # relevant once a future component browser (M7+) allows library-only definitions.
     defs_by_id: dict[int, Definition] = {}
     stack = [model.root]
     while stack:

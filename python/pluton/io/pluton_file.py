@@ -50,6 +50,8 @@ def load_document(path) -> LoadedDocument:
             if manifest.get("format") != "pluton":
                 raise PlutonFormatError("not a Pluton file (bad 'format' in manifest)")
             ver = manifest.get("schema_version")
+            # Equal-or-older than SCHEMA_VERSION is intentionally the accept path (no
+            # migration branch needed until a v2 format lands); only newer is rejected.
             if not isinstance(ver, int) or ver > SCHEMA_VERSION:
                 raise PlutonVersionError(
                     f"file schema_version {ver} is newer than supported ({SCHEMA_VERSION})")

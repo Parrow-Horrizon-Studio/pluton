@@ -276,8 +276,10 @@ def load_document(path) -> LoadedDocument: ...
    - `format != "pluton"` → `PlutonFormatError`.
    - `schema_version > CURRENT_SCHEMA` → `PlutonVersionError` ("made with a newer
      Pluton") — refuse rather than guess.
-   - `schema_version < CURRENT_SCHEMA` → reserved migration hook; unreachable at
-     v1 (the floor), but the branch exists for the future.
+   - `schema_version < CURRENT_SCHEMA` → reserved for a future migration path;
+     unreachable at v1 (the floor, so this case cannot occur yet). No migration
+     branch exists in code today — just a comment marking where one would go
+     once a v2 format lands.
 3. Read `document.json` → `document_from_dict(data)` → return `LoadedDocument`.
 
 ### 5.4 Error taxonomy — `pluton/io/errors.py`
