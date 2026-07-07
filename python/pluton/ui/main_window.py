@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QAction, QActionGroup, QKeySequence, QShortcut
 from PySide6.QtWidgets import QMainWindow, QVBoxLayout, QWidget
@@ -9,9 +11,11 @@ from PySide6.QtWidgets import QMainWindow, QVBoxLayout, QWidget
 from pluton.commands import CommandStack
 from pluton.commands.scene_commands import ClearSceneCommand
 from pluton.document import DocumentSettings
+from pluton.io import PlutonIOError, load_document, save_document
 from pluton.model import Model
 from pluton.model.tag import TagLibrary
 from pluton.selection import Selection
+from pluton.ui.document_controller import DocumentController
 from pluton.tools import (
     ArcTool,
     CircleTool,
@@ -95,6 +99,13 @@ class MainWindow(QMainWindow):
         self._tags_dock.visibility_changed.connect(self._viewport.update)
         self._tags_dock.assign_to_selection_requested.connect(self._on_assign_tag)
 
+        # Document session state (path / dirty / title) + dirty signal sources.
+        self._doc_controller = DocumentController()
+        self._command_stack.add_change_listener(self._on_document_changed)
+        self._materials_dock.library_changed.connect(self._on_document_changed)
+        self._tags_dock.library_changed.connect(self._on_document_changed)
+        self._tags_dock.visibility_changed.connect(self._on_document_changed)
+
         # NOW we can build the ToolContext that includes the viewport refs.
         self._rebuild_tool_context()
         # Task 15: initialize breadcrumb (clears it since we start at root).
@@ -137,7 +148,10 @@ class MainWindow(QMainWindow):
         QShortcut(QKeySequence("Esc"), self, activated=self._on_escape)
         QShortcut(QKeySequence(Qt.Key.Key_Return), self, activated=self._on_finish_gesture)
         QShortcut(QKeySequence(Qt.Key.Key_Enter), self, activated=self._on_finish_gesture)
-        QShortcut(QKeySequence("Ctrl+N"), self, activated=self._on_clear_scene)
+        QShortcut(QKeySequence("Ctrl+N"), self, activated=self._on_file_new)
+        QShortcut(QKeySequence("Ctrl+O"), self, activated=self._on_file_open)
+        QShortcut(QKeySequence("Ctrl+S"), self, activated=self._on_file_save)
+        QShortcut(QKeySequence("Ctrl+Shift+S"), self, activated=self._on_file_save_as)
         QShortcut(QKeySequence("Ctrl+Z"), self, activated=self._on_undo)
         QShortcut(QKeySequence("Ctrl+Y"), self, activated=self._on_redo)
         QShortcut(QKeySequence("Ctrl+Shift+Z"), self, activated=self._on_redo)
@@ -153,14 +167,24 @@ class MainWindow(QMainWindow):
         if _app is not None:
             _app.installEventFilter(self)
 
-        # Edit menu
+        # File menu (M6a) — leftmost.
         menubar = self.menuBar()
+        self._file_menu = menubar.addMenu("File")
+        self._file_menu.addAction("New\tCtrl+N", self._on_file_new)
+        self._file_menu.addAction("Open…\tCtrl+O", self._on_file_open)
+        self._file_menu.addSeparator()
+        self._file_menu.addAction("Save\tCtrl+S", self._on_file_save)
+        self._file_menu.addAction("Save As…\tCtrl+Shift+S", self._on_file_save_as)
+
+        # Edit menu
         self._edit_menu = menubar.addMenu("Edit")
         self._edit_menu.addAction("Make Group\tCtrl+G", self._on_make_group)
         self._edit_menu.addAction("Make Component…\tCtrl+Shift+G", self._on_make_component)
         self._edit_menu.addSeparator()
         self._edit_menu.addAction("Explode\tCtrl+Shift+E", self._on_explode)
         self._edit_menu.addAction("Make Unique", self._on_make_unique)
+        self._edit_menu.addSeparator()
+        self._edit_menu.addAction("Clear Active Context", self._on_clear_scene)
 
         # Units menu
         self._units_menu = menubar.addMenu("Units")
@@ -202,6 +226,8 @@ class MainWindow(QMainWindow):
         self._view_menu.addAction(self._materials_dock_action)
         self._tags_dock_action = self._tags_dock.toggleViewAction()
         self._view_menu.addAction(self._tags_dock_action)
+
+        self._update_window_title()
 
     # --- Material slot ---------------------------------------------------
 
@@ -624,8 +650,96 @@ class MainWindow(QMainWindow):
         self._doc.set_metric(unit)
         self._refresh_status_text()
         self._viewport.update()
+        self._on_document_changed()
 
     def _set_units_imperial(self) -> None:
         self._doc.set_imperial()
         self._refresh_status_text()
         self._viewport.update()
+        self._on_document_changed()
+
+    # --- File I/O --------------------------------------------------------
+
+    def _on_document_changed(self) -> None:
+        self._doc_controller.mark_dirty()
+        self._update_window_title()
+
+    def _update_window_title(self) -> None:
+        self.setWindowTitle(self._doc_controller.display_title())
+
+    def _prompt_save_path(self) -> str | None:
+        """Return a chosen save path (or None). Overridable for testing."""
+        from PySide6.QtWidgets import QFileDialog
+        path, _ = QFileDialog.getSaveFileName(self, "Save As", "", "Pluton files (*.pluton)")
+        return path or None
+
+    def _save_to(self, path) -> bool:  # noqa: ANN001
+        path = str(path)
+        if not path.endswith(".pluton"):
+            path += ".pluton"
+        try:
+            save_document(path, self._model, self._viewport.camera, self._doc)
+        except OSError as e:
+            from PySide6.QtWidgets import QMessageBox
+            QMessageBox.critical(self, "Save failed", str(e))
+            return False
+        self._doc_controller.set_path(path)
+        self._doc_controller.mark_clean()
+        self._update_window_title()
+        self._status_bar.set_status(f"Saved {Path(path).name}")
+        return True
+
+    def _on_file_save(self) -> bool:
+        if self._doc_controller.current_path is None:
+            return self._on_file_save_as()
+        return self._save_to(self._doc_controller.current_path)
+
+    def _on_file_save_as(self) -> bool:
+        path = self._prompt_save_path()
+        if not path:
+            return False
+        return self._save_to(path)
+
+    def _prompt_discard(self) -> str:
+        """Return 'save' | 'discard' | 'cancel'. Overridable for testing."""
+        from PySide6.QtWidgets import QMessageBox
+        name = (self._doc_controller.current_path.name
+                if self._doc_controller.current_path else "Untitled")
+        box = QMessageBox(self)
+        box.setWindowTitle("Unsaved changes")
+        box.setText(f"Save changes to {name}?")
+        box.setStandardButtons(QMessageBox.StandardButton.Save
+                               | QMessageBox.StandardButton.Discard
+                               | QMessageBox.StandardButton.Cancel)
+        box.setDefaultButton(QMessageBox.StandardButton.Save)
+        choice = box.exec()
+        if choice == QMessageBox.StandardButton.Save:
+            return "save"
+        if choice == QMessageBox.StandardButton.Discard:
+            return "discard"
+        return "cancel"
+
+    def _confirm_discard_if_dirty(self) -> bool:
+        """True if it's safe to proceed (discard a New/Open/close)."""
+        if not self._doc_controller.dirty:
+            return True
+        choice = self._prompt_discard()
+        if choice == "save":
+            return self._on_file_save()
+        if choice == "discard":
+            return True
+        return False
+
+    def closeEvent(self, event):  # noqa: N802, ANN001
+        if self._confirm_discard_if_dirty():
+            event.accept()
+        else:
+            event.ignore()
+
+    # --- Temporary stubs (Task 10 supplies real New/Open behavior) --------
+
+    def _on_file_new(self) -> None:
+        pass
+
+    def _on_file_open(self) -> None:
+        pass

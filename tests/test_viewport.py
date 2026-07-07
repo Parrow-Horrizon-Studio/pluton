@@ -19,7 +19,7 @@ def test_main_window_constructs(qtbot):
 
     window = MainWindow()
     qtbot.addWidget(window)
-    assert window.windowTitle() == "Pluton"
+    assert window.windowTitle() == "Untitled — Pluton"  # M6a: filename + dirty-state title
 
 
 def test_viewport_widget_constructs(qtbot):
@@ -191,18 +191,17 @@ def test_esc_two_stage_cancel_then_deactivate(qtbot):
     assert window._tool_manager.active is None      # no active tool
 
 
-def test_ctrl_n_clears_scene(qtbot):
+def test_clear_active_context_clears_scene(qtbot):
+    # Ctrl+N is now File ▸ New (M6a); the old clear-scene behavior moved to
+    # Edit ▸ "Clear Active Context" (_on_clear_scene), still undoable.
     from pluton.ui.main_window import MainWindow
 
     window = MainWindow()
     qtbot.addWidget(window)
-    window.show()
-    qtbot.waitExposed(window)
-    qtbot.wait(50)
     # Seed the scene with a vertex.
     window.scene.add_vertex(np.array([1.0, 2.0, 0.0], dtype=np.float32))
     assert len(list(window.scene.vertices_iter())) == 1
-    qtbot.keyClick(window, Qt.Key.Key_N, modifier=Qt.KeyboardModifier.ControlModifier)
+    window._on_clear_scene()
     assert len(list(window.scene.vertices_iter())) == 0
 
 
@@ -240,24 +239,22 @@ def test_ctrl_z_undoes_completed_rectangle(qtbot):
     assert len(list(window.scene.faces_iter())) == 1
 
 
-def test_ctrl_n_is_undoable(qtbot):
+def test_clear_active_context_is_undoable(qtbot):
+    # Clear Active Context (formerly Ctrl+N, now on the Edit menu) stays undoable.
     from pluton.ui.main_window import MainWindow
 
     window = MainWindow()
     qtbot.addWidget(window)
-    window.show()
-    qtbot.waitExposed(window)
-    qtbot.wait(50)
 
     # Seed the scene with two vertices.
     window.scene.add_vertex(np.array([1.0, 2.0, 0.0], dtype=np.float32))
     window.scene.add_vertex(np.array([3.0, 4.0, 0.0], dtype=np.float32))
     assert len(list(window.scene.vertices_iter())) == 2
 
-    qtbot.keyClick(window, Qt.Key.Key_N, modifier=Qt.KeyboardModifier.ControlModifier)
+    window._on_clear_scene()
     assert len(list(window.scene.vertices_iter())) == 0
 
-    qtbot.keyClick(window, Qt.Key.Key_Z, modifier=Qt.KeyboardModifier.ControlModifier)
+    window._on_undo()
     assert len(list(window.scene.vertices_iter())) == 2
 
 
