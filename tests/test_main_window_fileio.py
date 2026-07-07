@@ -83,3 +83,55 @@ def test_close_event_accepted_when_clean(app):
     event = QCloseEvent()
     win.closeEvent(event)
     assert event.isAccepted()  # nothing to lose, closes without prompting
+
+
+def test_new_resets_to_clean_untitled(app, tmp_path):
+    win = MainWindow()
+    _draw_something(win)
+    win._command_stack.execute(ClearSceneCommand(), win._model.active_scene)
+    win._prompt_discard = lambda: "discard"
+    win._on_file_new()
+    assert win._doc_controller.current_path is None
+    assert win._doc_controller.dirty is False
+    assert win.windowTitle() == "Untitled — Pluton"
+    assert not win._command_stack.can_undo  # history cleared
+
+
+def test_open_success_swaps_model_and_clears_history(app, tmp_path, monkeypatch):
+    # First, save a file with a known box.
+    saver = MainWindow()
+    _draw_something(saver)
+    target = tmp_path / "doc.pluton"
+    saver._prompt_save_path = lambda: str(target)
+    assert saver._on_file_save_as() is True
+
+    # Now open it in a fresh window with a dirty scratch doc.
+    win = MainWindow()
+    win._command_stack.execute(ClearSceneCommand(), win._model.active_scene)
+    win._prompt_discard = lambda: "discard"
+    win._prompt_open_path = lambda: str(target)
+    win._on_file_open()
+    assert win._doc_controller.current_path == target
+    assert win._doc_controller.dirty is False
+    assert len(list(win._model.root.mesh.faces_iter())) == 1
+    assert not win._command_stack.can_undo
+
+
+def test_open_failure_keeps_current_model(app, monkeypatch):
+    from pluton.io import PlutonFormatError
+    win = MainWindow()
+    _draw_something(win)
+    before_root = win._model.root
+    win._prompt_open_path = lambda: "/whatever.pluton"
+
+    import pluton.ui.main_window as mw
+    monkeypatch.setattr(mw, "load_document",
+                        lambda p: (_ for _ in ()).throw(PlutonFormatError("bad")))
+    # Suppress + record the error dialog.
+    shown = {}
+    from PySide6.QtWidgets import QMessageBox
+    monkeypatch.setattr(QMessageBox, "critical",
+                        lambda *a, **k: shown.setdefault("called", True))
+    win._on_file_open()
+    assert win._model.root is before_root      # unchanged
+    assert shown.get("called") is True         # error surfaced

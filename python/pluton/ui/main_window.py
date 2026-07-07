@@ -12,6 +12,7 @@ from pluton.commands import CommandStack
 from pluton.commands.scene_commands import ClearSceneCommand
 from pluton.document import DocumentSettings
 from pluton.io import PlutonIOError, load_document, save_document
+from pluton.io.document_codec import CameraState
 from pluton.model import Model
 from pluton.model.tag import TagLibrary
 from pluton.selection import Selection
@@ -736,10 +737,48 @@ class MainWindow(QMainWindow):
         else:
             event.ignore()
 
-    # --- Temporary stubs (Task 10 supplies real New/Open behavior) --------
+    def _reset_document(self, model, camera_state, units, path) -> None:  # noqa: ANN001
+        """Adopt a (model, camera, units) into the live window, in place."""
+        self._model.load_from(model)
+        self._materials_dock.set_library(self._model.materials)
+        self._tags_dock.set_library(self._model.tags)
+        camera_state.apply_to(self._viewport.camera)
+        self._doc.set_units(units)
+        self._active_material_id = self._model.materials.DEFAULT_ID
+        self._active_tag_id = self._model.tags.UNTAGGED_ID
+        self._selection.clear()
+        self._command_stack.clear()
+        self._doc_controller.set_path(path)
+        self._doc_controller.mark_clean()
+        self._rebuild_tool_context()
+        self._refresh_breadcrumb()
+        self._refresh_status_text()
+        self._update_window_title()
+        self._viewport.update()
 
     def _on_file_new(self) -> None:
-        pass
+        if not self._confirm_discard_if_dirty():
+            return
+        from pluton.units import Units
+        from pluton.viewport.camera import Camera
+        self._reset_document(Model(), CameraState.from_camera(Camera()), Units(), None)
+
+    def _prompt_open_path(self) -> str | None:
+        """Return a chosen open path (or None). Overridable for testing."""
+        from PySide6.QtWidgets import QFileDialog
+        path, _ = QFileDialog.getOpenFileName(self, "Open", "", "Pluton files (*.pluton)")
+        return path or None
 
     def _on_file_open(self) -> None:
-        pass
+        if not self._confirm_discard_if_dirty():
+            return
+        path = self._prompt_open_path()
+        if not path:
+            return
+        try:
+            loaded = load_document(path)
+        except (PlutonIOError, OSError) as e:
+            from PySide6.QtWidgets import QMessageBox
+            QMessageBox.critical(self, "Open failed", str(e))
+            return
+        self._reset_document(loaded.model, loaded.camera_state, loaded.units, path)
