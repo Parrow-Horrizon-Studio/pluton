@@ -10,6 +10,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
+from pluton.io.errors import PlutonFormatError
+
 
 @dataclass(frozen=True)
 class ObjFace:
@@ -68,3 +70,83 @@ def write_obj(doc: ObjDocument, mtl_filename: str = "model.mtl") -> tuple[str, s
             m.append("d 1.000000")
         mtl_text = "\n".join(m) + "\n"
     return obj_text, mtl_text
+
+
+def _parse_mtl(mtl_text: str) -> dict[str, tuple[float, float, float]]:
+    materials: dict[str, tuple[float, float, float]] = {}
+    current: str | None = None
+    for raw in mtl_text.splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#"):
+            continue
+        parts = line.split()
+        if parts[0] == "newmtl":
+            current = " ".join(parts[1:]) if len(parts) > 1 else "material"
+            materials.setdefault(current, (0.8, 0.8, 0.8))
+        elif parts[0] == "Kd" and current is not None:
+            try:
+                materials[current] = (float(parts[1]), float(parts[2]), float(parts[3]))
+            except (IndexError, ValueError):
+                pass  # keep the default grey
+    return materials
+
+
+def parse_obj(obj_text: str, mtl_text: str | None) -> ObjDocument:
+    """Parse OBJ (+ optional MTL) text to an ObjDocument. Raises PlutonFormatError
+    on a structurally invalid face index."""
+    materials = _parse_mtl(mtl_text) if mtl_text else {}
+    vertices: list[tuple[float, float, float]] = []
+    objects: list[ObjObject] = []
+    has_object_tags = False
+    current_name: str | None = None
+    current_faces: list[ObjFace] = []
+    current_material: str | None = None
+
+    def flush() -> None:
+        nonlocal current_faces
+        if current_faces or current_name is not None:
+            name = current_name if current_name is not None else "default"
+            objects.append(ObjObject(name=name, faces=tuple(current_faces)))
+            current_faces = []
+
+    for raw in obj_text.splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#"):
+            continue
+        parts = line.split()
+        tag = parts[0]
+        if tag == "v":
+            try:
+                vertices.append((float(parts[1]), float(parts[2]), float(parts[3])))
+            except (IndexError, ValueError) as e:
+                raise PlutonFormatError(f"bad vertex line: {line!r}") from e
+        elif tag in ("o", "g"):
+            flush()
+            has_object_tags = True
+            current_name = " ".join(parts[1:]) if len(parts) > 1 else "object"
+            current_material = None
+        elif tag == "usemtl":
+            current_material = parts[1] if len(parts) > 1 else None
+        elif tag == "f":
+            idx: list[int] = []
+            for token in parts[1:]:
+                vtok = token.split("/")[0]
+                try:
+                    vi = int(vtok)
+                except ValueError as e:
+                    raise PlutonFormatError(f"bad face index {token!r}") from e
+                vi = len(vertices) + vi if vi < 0 else vi - 1  # relative or 1-based
+                if not (0 <= vi < len(vertices)):
+                    raise PlutonFormatError(f"face index out of range: {token!r}")
+                idx.append(vi)
+            current_faces.append(ObjFace(vertex_indices=tuple(idx), material=current_material))
+        # mtllib / vn / vt / s / everything else: ignored
+    flush()
+    if not objects:
+        objects.append(ObjObject(name="default", faces=()))
+    return ObjDocument(
+        vertices=tuple(vertices),
+        objects=tuple(objects),
+        materials=materials,
+        has_object_tags=has_object_tags,
+    )
