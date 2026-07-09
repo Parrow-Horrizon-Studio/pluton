@@ -7,9 +7,12 @@ the only OBJ module that knows about Model/Scene.
 
 from __future__ import annotations
 
+import os
+from pathlib import Path
+
 import numpy as np
 
-from pluton.io.obj_codec import ObjDocument, ObjFace, ObjObject, sanitize_material_name
+from pluton.io.obj_codec import ObjDocument, ObjFace, ObjObject, sanitize_material_name, write_obj
 
 
 def _unique_name(base: str, used: set[str]) -> str:
@@ -62,3 +65,25 @@ def model_to_objdoc(model) -> ObjDocument:  # noqa: ANN001
         materials=materials,
         has_object_tags=bool(objects),
     )
+
+
+def _atomic_write_text(path: Path, text: str) -> None:
+    tmp = path.with_name(path.name + ".tmp")
+    try:
+        tmp.write_text(text, encoding="utf-8")
+        os.replace(tmp, path)
+    finally:
+        if tmp.exists():
+            tmp.unlink()
+
+
+def export_obj(path, model) -> None:  # noqa: ANN001
+    """Write the model to `path` as OBJ, with a sibling `<stem>.mtl` if it has
+    painted materials. Each file is written atomically (temp + os.replace)."""
+    path = Path(path)
+    doc = model_to_objdoc(model)
+    mtl_name = path.stem + ".mtl"
+    obj_text, mtl_text = write_obj(doc, mtl_name)
+    _atomic_write_text(path, obj_text)
+    if mtl_text is not None:
+        _atomic_write_text(path.with_name(mtl_name), mtl_text)
