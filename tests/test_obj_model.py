@@ -38,3 +38,22 @@ def test_model_to_objdoc_paints_and_world_transforms_and_dedups_names():
     assert "My_Teal" in doc.materials
     assert doc.materials["My_Teal"] == (0.1, 0.6, 0.6)
     assert doc.has_object_tags is True
+
+    # find objects by name (robust to traversal order), not by list position
+    by_name = {o.name: o for o in doc.objects}
+    root_obj = by_name["Model"]
+    chair_obj = by_name["Chair"]
+
+    # the root's single face is preserved as a 4-vertex n-gon (not triangulated),
+    # its remapped indices are all valid into the shared vertex pool, and the
+    # painted material is attached to that face.
+    (root_face,) = root_obj.faces
+    assert len(root_face.vertex_indices) == 4
+    assert all(0 <= i < len(doc.vertices) for i in root_face.vertex_indices)
+    assert root_face.material == "My_Teal"
+
+    # an unpainted Chair face carries no material
+    (chair_face,) = chair_obj.faces
+    assert chair_face.material is None
+    assert len(chair_face.vertex_indices) == 4
+    assert all(0 <= i < len(doc.vertices) for i in chair_face.vertex_indices)
