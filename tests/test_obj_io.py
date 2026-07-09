@@ -1,5 +1,7 @@
 import numpy as np
-from pluton.io import export_obj
+import pytest
+from pluton.io import export_obj, read_obj_document
+from pluton.io.errors import PlutonFormatError
 from pluton.model.model import Model
 
 
@@ -51,3 +53,25 @@ def test_export_obj_atomic_old_file_survives_failure(tmp_path, monkeypatch):
         export_obj(path, _painted_model())
     assert path.read_bytes() == original
     assert not (tmp_path / "keep.obj.tmp").exists()
+
+
+def test_read_obj_document_reads_sidecar_mtl(tmp_path):
+    (tmp_path / "m.mtl").write_text("newmtl Red\nKd 0.7 0.2 0.2\n")
+    (tmp_path / "m.obj").write_text(
+        "mtllib m.mtl\nv 0 0 0\nv 1 0 0\nv 0 1 0\nusemtl Red\nf 1 2 3\n")
+    doc = read_obj_document(tmp_path / "m.obj")
+    assert doc.materials["Red"] == (0.7, 0.2, 0.2)
+    assert doc.objects[0].faces[0].material == "Red"
+
+
+def test_read_obj_document_missing_mtl_is_non_fatal(tmp_path):
+    (tmp_path / "m.obj").write_text("mtllib nope.mtl\nv 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n")
+    doc = read_obj_document(tmp_path / "m.obj")   # no exception
+    assert doc.materials == {}
+    assert len(doc.objects[0].faces) == 1
+
+
+def test_read_obj_document_corrupt_raises(tmp_path):
+    (tmp_path / "bad.obj").write_text("v 0 0 0\nv 1 0 0\nf 1 2 9\n")
+    with pytest.raises(PlutonFormatError):
+        read_obj_document(tmp_path / "bad.obj")

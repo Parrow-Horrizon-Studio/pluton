@@ -12,7 +12,14 @@ from pathlib import Path
 
 import numpy as np
 
-from pluton.io.obj_codec import ObjDocument, ObjFace, ObjObject, sanitize_material_name, write_obj
+from pluton.io.obj_codec import (
+    ObjDocument,
+    ObjFace,
+    ObjObject,
+    parse_obj,
+    sanitize_material_name,
+    write_obj,
+)
 
 
 def _unique_name(base: str, used: set[str]) -> str:
@@ -87,3 +94,22 @@ def export_obj(path, model) -> None:  # noqa: ANN001
     _atomic_write_text(path, obj_text)
     if mtl_text is not None:
         _atomic_write_text(path.with_name(mtl_name), mtl_text)
+
+
+def read_obj_document(path) -> ObjDocument:  # noqa: ANN001
+    """Read a .obj (and its `mtllib` sidecar, if present next to it) and parse to
+    an ObjDocument. Raises PlutonFormatError on malformed content; OSError on a
+    missing/unreadable .obj propagates. A missing sidecar .mtl is non-fatal."""
+    path = Path(path)
+    obj_text = path.read_text(encoding="utf-8")
+    mtl_text: str | None = None
+    for raw in obj_text.splitlines():
+        s = raw.strip()
+        if s.startswith("mtllib"):
+            parts = s.split()
+            if len(parts) > 1:
+                mtl_path = path.with_name(parts[1])
+                if mtl_path.exists():
+                    mtl_text = mtl_path.read_text(encoding="utf-8")
+            break
+    return parse_obj(obj_text, mtl_text)
