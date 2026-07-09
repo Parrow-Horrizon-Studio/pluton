@@ -1,0 +1,40 @@
+import numpy as np
+from pluton.io.obj_io import model_to_objdoc
+from pluton.model.model import Model
+
+
+def _add_quad(scene):
+    vids = [scene.add_vertex(np.array(p, dtype=np.float32))
+            for p in ((0, 0, 0), (1, 0, 0), (1, 1, 0), (0, 1, 0))]
+    scene.add_face_from_loop(vids)
+    return next(iter(scene.faces_iter())).id
+
+
+def test_model_to_objdoc_paints_and_world_transforms_and_dedups_names():
+    model = Model()
+    # root geometry, one face painted
+    fid = _add_quad(model.root.mesh)
+    teal = model.materials.add_custom("My Teal", (0.1, 0.6, 0.6))
+    model.root.mesh.set_face_material(fid, teal.id)
+
+    # a component placed twice at different transforms
+    comp = model.new_definition("Chair", is_group=False)
+    _add_quad(comp.mesh)
+    for tx in (5.0, 9.0):
+        t = np.eye(4, dtype=np.float64)
+        t[0, 3] = tx
+        model.root.children.append(model.new_instance(comp, t))
+
+    doc = model_to_objdoc(model)
+
+    # one object per traversed node with geometry: root + 2 chairs
+    names = [o.name for o in doc.objects]
+    assert names[0] == "Model"
+    assert "Chair" in names and "Chair.001" in names          # de-duplicated
+    # world transform applied: the two chairs' vertices are offset by tx
+    xs = sorted({round(v[0], 3) for v in doc.vertices})
+    assert 5.0 in xs and 9.0 in xs
+    # painted material captured (name sanitized)
+    assert "My_Teal" in doc.materials
+    assert doc.materials["My_Teal"] == (0.1, 0.6, 0.6)
+    assert doc.has_object_tags is True
