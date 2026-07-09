@@ -77,6 +77,7 @@ def test_build_grouped_creates_one_group_per_object():
     assert result.summary.faces_imported == 2
     assert len(model.active_context.children) == 2      # two groups
     assert len(result.created_instances) == 2
+    assert result.created_geometry == ([], [], [])      # group case records instances, not geom
 
 
 def test_build_merged_adds_to_active_scene_no_group():
@@ -91,6 +92,22 @@ def test_build_merged_adds_to_active_scene_no_group():
     assert result.summary.objects == 0
     assert len(model.active_context.children) == 0                      # no group
     assert len(list(model.active_context.mesh.faces_iter())) == 1       # merged in place
+    # single triangle: created_geometry records exactly its 3 vertices + 1 face for undo
+    assert len(result.created_geometry[0]) == 3
+    assert len(result.created_geometry[2]) == 1
+
+
+def test_build_best_effort_skips_out_of_range_index():
+    model = Model()
+    doc = ObjDocument(
+        vertices=((0, 0, 0), (1, 0, 0), (0, 1, 0)),
+        objects=(ObjObject("default", (_tri(0, 1, 2), _tri(0, 1, 99))),),  # 99 out of range
+        materials={},
+        has_object_tags=False,
+    )
+    result = build_obj_into_model(doc, model, model.active_context)
+    assert result.summary.faces_imported == 1
+    assert result.summary.faces_skipped == 1
 
 
 def test_build_best_effort_skips_degenerate_face():

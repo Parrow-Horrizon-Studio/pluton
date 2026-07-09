@@ -147,14 +147,15 @@ def _ensure_materials(materials, model) -> dict:  # noqa: ANN001
 
 
 def _add_faces(mesh, faces, localmap, name_to_id) -> tuple[int, int]:  # noqa: ANN001
-    """Best-effort: build each face, skipping+counting any the kernel rejects."""
+    """Best-effort: build each face, skipping+counting any the kernel rejects
+    or any that references an unknown/out-of-range vertex index."""
     imported = skipped = 0
     for face in faces:
-        loop = [localmap[gi] for gi in face.vertex_indices]
-        if len(set(loop)) < 3:                       # degenerate: < 3 unique verts
-            skipped += 1
-            continue
         try:
+            loop = [localmap[gi] for gi in face.vertex_indices]
+            if len(set(loop)) < 3:                       # degenerate: < 3 unique verts
+                skipped += 1
+                continue
             fid = mesh.add_face_from_loop(loop)
         except (KeyError, ValueError, IndexError, RuntimeError):
             skipped += 1
