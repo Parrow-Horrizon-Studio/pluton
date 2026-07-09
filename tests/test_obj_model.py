@@ -1,5 +1,6 @@
 import numpy as np
-from pluton.io.obj_io import model_to_objdoc
+from pluton.io.obj_codec import ObjDocument, ObjFace, ObjObject
+from pluton.io.obj_io import build_obj_into_model, model_to_objdoc
 from pluton.model.model import Model
 
 
@@ -57,3 +58,65 @@ def test_model_to_objdoc_paints_and_world_transforms_and_dedups_names():
     assert chair_face.material is None
     assert len(chair_face.vertex_indices) == 4
     assert all(0 <= i < len(doc.vertices) for i in chair_face.vertex_indices)
+
+
+def _tri(a, b, c, mat=None):
+    return ObjFace((a, b, c), mat)
+
+
+def test_build_grouped_creates_one_group_per_object():
+    model = Model()
+    doc = ObjDocument(
+        vertices=((0, 0, 0), (1, 0, 0), (0, 1, 0), (2, 0, 0), (3, 0, 0), (2, 1, 0)),
+        objects=(ObjObject("A", (_tri(0, 1, 2),)), ObjObject("B", (_tri(3, 4, 5),))),
+        materials={},
+        has_object_tags=True,
+    )
+    result = build_obj_into_model(doc, model, model.active_context)
+    assert result.summary.objects == 2
+    assert result.summary.faces_imported == 2
+    assert len(model.active_context.children) == 2      # two groups
+    assert len(result.created_instances) == 2
+
+
+def test_build_merged_adds_to_active_scene_no_group():
+    model = Model()
+    doc = ObjDocument(
+        vertices=((0, 0, 0), (1, 0, 0), (0, 1, 0)),
+        objects=(ObjObject("default", (_tri(0, 1, 2),)),),
+        materials={},
+        has_object_tags=False,
+    )
+    result = build_obj_into_model(doc, model, model.active_context)
+    assert result.summary.objects == 0
+    assert len(model.active_context.children) == 0                      # no group
+    assert len(list(model.active_context.mesh.faces_iter())) == 1       # merged in place
+
+
+def test_build_best_effort_skips_degenerate_face():
+    model = Model()
+    doc = ObjDocument(
+        vertices=((0, 0, 0), (1, 0, 0), (0, 1, 0)),
+        objects=(ObjObject("default", (_tri(0, 1, 2), _tri(0, 0, 1))),),   # 2nd is degenerate
+        materials={},
+        has_object_tags=False,
+    )
+    result = build_obj_into_model(doc, model, model.active_context)
+    assert result.summary.faces_imported == 1
+    assert result.summary.faces_skipped == 1
+
+
+def test_build_dedups_materials_by_name_and_color():
+    model = Model()
+    before = len(model.materials.materials())
+    doc = ObjDocument(
+        vertices=((0, 0, 0), (1, 0, 0), (0, 1, 0)),
+        objects=(ObjObject("default", (_tri(0, 1, 2, "Red"),)),),
+        materials={"Red": (0.7, 0.2, 0.2)},
+        has_object_tags=False,
+    )
+    build_obj_into_model(doc, model, model.active_context)
+    build_obj_into_model(doc, model, model.active_context)   # again
+    reds = [m for m in model.materials.materials() if m.name == "Red"]
+    assert len(reds) == 1                                    # no duplicate
+    assert len(model.materials.materials()) == before + 1

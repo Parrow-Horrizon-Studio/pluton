@@ -8,6 +8,7 @@ the only OBJ module that knows about Model/Scene.
 from __future__ import annotations
 
 import os
+from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
@@ -113,3 +114,100 @@ def read_obj_document(path) -> ObjDocument:  # noqa: ANN001
                     mtl_text = mtl_path.read_text(encoding="utf-8")
             break
     return parse_obj(obj_text, mtl_text)
+
+
+@dataclass(frozen=True)
+class ImportSummary:
+    objects: int          # groups created (0 for the merge case)
+    faces_imported: int
+    faces_skipped: int
+
+
+@dataclass
+class BuildResult:
+    summary: ImportSummary
+    created_instances: list          # Instances added to target_context (group case)
+    created_geometry: tuple          # (vertex_ids, edge_ids, face_ids) added to the scene (merge)
+
+
+def _ensure_materials(materials, model) -> dict:  # noqa: ANN001
+    """Add each OBJ material to the library, reusing an existing one when name AND
+    color already match. Returns name -> material_id."""
+    name_to_id: dict[str, int] = {}
+    existing = {m.name: m for m in model.materials.materials()}
+    for name, color in materials.items():
+        m = existing.get(name)
+        if m is not None and tuple(m.color) == tuple(color):
+            name_to_id[name] = m.id
+        else:
+            new = model.materials.add_custom(name, color)
+            name_to_id[name] = new.id
+            existing[new.name] = new
+    return name_to_id
+
+
+def _add_faces(mesh, faces, localmap, name_to_id) -> tuple[int, int]:  # noqa: ANN001
+    """Best-effort: build each face, skipping+counting any the kernel rejects."""
+    imported = skipped = 0
+    for face in faces:
+        loop = [localmap[gi] for gi in face.vertex_indices]
+        if len(set(loop)) < 3:                       # degenerate: < 3 unique verts
+            skipped += 1
+            continue
+        try:
+            fid = mesh.add_face_from_loop(loop)
+        except (KeyError, ValueError, IndexError, RuntimeError):
+            skipped += 1
+            continue
+        if face.material is not None:
+            mid = name_to_id.get(face.material)
+            if mid is not None:
+                mesh.set_face_material(fid, mid)
+        imported += 1
+    return imported, skipped
+
+
+def _snapshot_ids(mesh):  # noqa: ANN001
+    return (
+        {v.id for v in mesh.vertices_iter()},
+        {e.id for e in mesh.edges_iter()},
+        {f.id for f in mesh.faces_iter()},
+    )
+
+
+def build_obj_into_model(doc: ObjDocument, model, target_context) -> BuildResult:  # noqa: ANN001
+    """Build an ObjDocument into the model. Adaptive: has_object_tags -> one group
+    per object in target_context; else merge into target_context.mesh. Best-effort
+    face building. Returns the created ids for undo."""
+    name_to_id = _ensure_materials(doc.materials, model)
+
+    if doc.has_object_tags:
+        created_instances: list = []
+        imported = skipped = 0
+        for obj in doc.objects:
+            used = sorted({gi for f in obj.faces for gi in f.vertex_indices})
+            defn = model.new_definition(obj.name or "Imported", is_group=True)
+            localmap = {}
+            for gi in used:
+                x, y, z = doc.vertices[gi]
+                localmap[gi] = defn.mesh.add_vertex(np.array([x, y, z], dtype=np.float32))
+            i, s = _add_faces(defn.mesh, obj.faces, localmap, name_to_id)
+            imported += i
+            skipped += s
+            inst = model.new_instance(defn)
+            target_context.children.append(inst)
+            created_instances.append(inst)
+        summary = ImportSummary(len(doc.objects), imported, skipped)
+        return BuildResult(summary, created_instances, ([], [], []))
+
+    # merge case
+    mesh = target_context.mesh
+    before = _snapshot_ids(mesh)
+    localmap = {}
+    for gi, (x, y, z) in enumerate(doc.vertices):
+        localmap[gi] = mesh.add_vertex(np.array([x, y, z], dtype=np.float32))
+    all_faces = [f for o in doc.objects for f in o.faces]
+    imported, skipped = _add_faces(mesh, all_faces, localmap, name_to_id)
+    after = _snapshot_ids(mesh)
+    created = tuple(sorted(after[i] - before[i]) for i in range(3))  # (vids, eids, fids)
+    return BuildResult(ImportSummary(0, imported, skipped), [], created)

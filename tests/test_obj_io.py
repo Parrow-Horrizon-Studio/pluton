@@ -75,3 +75,20 @@ def test_read_obj_document_corrupt_raises(tmp_path):
     (tmp_path / "bad.obj").write_text("v 0 0 0\nv 1 0 0\nf 1 2 9\n")
     with pytest.raises(PlutonFormatError):
         read_obj_document(tmp_path / "bad.obj")
+
+
+def test_export_then_import_round_trip(tmp_path):
+    from pluton.io.obj_io import build_obj_into_model
+    src = _painted_model()
+    path = tmp_path / "rt.obj"
+    export_obj(path, src)
+
+    doc = read_obj_document(path)
+    dst = Model()
+    build_obj_into_model(doc, dst, dst.active_context)
+
+    # the painted quad round-trips: one group (root exported as `o Model`) with one face
+    total_faces = sum(len(list(d.mesh.faces_iter()))
+                      for d, _ in dst.traverse())
+    assert total_faces == 1
+    assert any(m.name == "Brick_Red" for m in dst.materials.materials())
