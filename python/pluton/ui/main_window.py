@@ -11,7 +11,7 @@ from PySide6.QtWidgets import QMainWindow, QVBoxLayout, QWidget
 from pluton.commands import CommandStack
 from pluton.commands.scene_commands import ClearSceneCommand
 from pluton.document import DocumentSettings
-from pluton.io import PlutonIOError, load_document, save_document
+from pluton.io import PlutonIOError, export_obj, load_document, read_obj_document, save_document
 from pluton.io.document_codec import CameraState
 from pluton.model import Model
 from pluton.model.tag import TagLibrary
@@ -176,6 +176,9 @@ class MainWindow(QMainWindow):
         self._file_menu.addSeparator()
         self._file_menu.addAction("Save\tCtrl+S", self._on_file_save)
         self._file_menu.addAction("Save As…\tCtrl+Shift+S", self._on_file_save_as)
+        self._file_menu.addSeparator()
+        self._file_menu.addAction("Import OBJ…", self._on_import_obj)
+        self._file_menu.addAction("Export OBJ…", self._on_export_obj)
 
         # Edit menu
         self._edit_menu = menubar.addMenu("Edit")
@@ -668,10 +671,49 @@ class MainWindow(QMainWindow):
     def _update_window_title(self) -> None:
         self.setWindowTitle(self._doc_controller.display_title())
 
-    def _prompt_save_path(self) -> str | None:
+    def _on_export_obj(self) -> None:
+        path = self._prompt_save_path("OBJ files (*.obj)", "Export OBJ")
+        if not path:
+            return
+        path = str(path)
+        if not path.endswith(".obj"):
+            path += ".obj"
+        try:
+            export_obj(path, self._model)
+        except OSError as e:
+            from PySide6.QtWidgets import QMessageBox
+            QMessageBox.critical(self, "Export failed", str(e))
+            return
+        self._status_bar.set_status(f"Exported {Path(path).name}")
+
+    def _on_import_obj(self) -> None:
+        path = self._prompt_open_path("OBJ files (*.obj)", "Import OBJ")
+        if not path:
+            return
+        try:
+            doc = read_obj_document(path)
+        except (PlutonIOError, OSError) as e:
+            from PySide6.QtWidgets import QMessageBox
+            QMessageBox.critical(self, "Import failed", str(e))
+            return
+        from pluton.commands.obj_commands import ImportObjCommand
+        cmd = ImportObjCommand(doc, self._model.active_context)
+        self._command_stack.execute(cmd, self._model)
+        s = cmd.summary
+        msg = f"Imported {s.faces_imported} faces"
+        if s.objects:
+            msg += f" in {s.objects} object(s)"
+        if s.faces_skipped:
+            msg += f" (skipped {s.faces_skipped} non-manifold)"
+        self._status_bar.set_status(msg)
+        self._refresh_breadcrumb()
+        self._viewport.update()
+
+    def _prompt_save_path(self, file_filter: str = "Pluton files (*.pluton)",
+                          title: str = "Save As") -> str | None:
         """Return a chosen save path (or None). Overridable for testing."""
         from PySide6.QtWidgets import QFileDialog
-        path, _ = QFileDialog.getSaveFileName(self, "Save As", "", "Pluton files (*.pluton)")
+        path, _ = QFileDialog.getSaveFileName(self, title, "", file_filter)
         return path or None
 
     def _save_to(self, path) -> bool:  # noqa: ANN001
@@ -763,10 +805,11 @@ class MainWindow(QMainWindow):
         from pluton.viewport.camera import Camera
         self._reset_document(Model(), CameraState.from_camera(Camera()), Units(), None)
 
-    def _prompt_open_path(self) -> str | None:
+    def _prompt_open_path(self, file_filter: str = "Pluton files (*.pluton)",
+                          title: str = "Open") -> str | None:
         """Return a chosen open path (or None). Overridable for testing."""
         from PySide6.QtWidgets import QFileDialog
-        path, _ = QFileDialog.getOpenFileName(self, "Open", "", "Pluton files (*.pluton)")
+        path, _ = QFileDialog.getOpenFileName(self, title, "", file_filter)
         return path or None
 
     def _on_file_open(self) -> None:
