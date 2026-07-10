@@ -109,9 +109,12 @@ def read_obj_document(path) -> ObjDocument:  # noqa: ANN001
         if s.startswith("mtllib"):
             parts = s.split()
             if len(parts) > 1:
-                mtl_path = path.with_name(parts[1])
-                if mtl_path.exists():
-                    mtl_text = mtl_path.read_text(encoding="utf-8")
+                try:
+                    mtl_path = path.with_name(parts[1])
+                    if mtl_path.exists():
+                        mtl_text = mtl_path.read_text(encoding="utf-8")
+                except (ValueError, OSError):
+                    mtl_text = None
             break
     return parse_obj(obj_text, mtl_text)
 
@@ -186,7 +189,8 @@ def build_obj_into_model(doc: ObjDocument, model, target_context) -> BuildResult
         created_instances: list = []
         imported = skipped = 0
         for obj in doc.objects:
-            used = sorted({gi for f in obj.faces for gi in f.vertex_indices})
+            used = sorted({gi for f in obj.faces for gi in f.vertex_indices
+                           if 0 <= gi < len(doc.vertices)})
             defn = model.new_definition(obj.name or "Imported", is_group=True)
             localmap = {}
             for gi in used:

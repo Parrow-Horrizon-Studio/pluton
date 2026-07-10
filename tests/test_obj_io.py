@@ -71,6 +71,16 @@ def test_read_obj_document_missing_mtl_is_non_fatal(tmp_path):
     assert len(doc.objects[0].faces) == 1
 
 
+def test_read_obj_document_subdir_mtllib_is_non_fatal(tmp_path):
+    # an external OBJ referencing a materials subdirectory must not crash;
+    # the sidecar simply can't be resolved as a sibling -> no materials.
+    (tmp_path / "m.obj").write_text(
+        "mtllib textures/wall.mtl\nv 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n")
+    doc = read_obj_document(tmp_path / "m.obj")   # no exception
+    assert doc.materials == {}
+    assert len(doc.objects[0].faces) == 1
+
+
 def test_read_obj_document_corrupt_raises(tmp_path):
     (tmp_path / "bad.obj").write_text("v 0 0 0\nv 1 0 0\nf 1 2 9\n")
     with pytest.raises(PlutonFormatError):

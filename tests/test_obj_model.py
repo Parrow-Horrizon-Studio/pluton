@@ -110,6 +110,19 @@ def test_build_best_effort_skips_out_of_range_index():
     assert result.summary.faces_skipped == 1
 
 
+def test_build_grouped_best_effort_skips_out_of_range_index():
+    model = Model()
+    doc = ObjDocument(
+        vertices=((0, 0, 0), (1, 0, 0), (0, 1, 0)),
+        objects=(ObjObject("A", (_tri(0, 1, 2), _tri(0, 1, 99))),),  # 99 out of range
+        materials={},
+        has_object_tags=True,
+    )
+    result = build_obj_into_model(doc, model, model.active_context)   # no exception
+    assert result.summary.faces_imported == 1
+    assert result.summary.faces_skipped == 1
+
+
 def test_build_best_effort_skips_degenerate_face():
     model = Model()
     doc = ObjDocument(

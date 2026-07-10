@@ -704,7 +704,7 @@ class MainWindow(QMainWindow):
         if s.objects:
             msg += f" in {s.objects} object(s)"
         if s.faces_skipped:
-            msg += f" (skipped {s.faces_skipped} non-manifold)"
+            msg += f" (skipped {s.faces_skipped} faces)"
         self._status_bar.set_status(msg)
         self._refresh_breadcrumb()
         self._viewport.update()
