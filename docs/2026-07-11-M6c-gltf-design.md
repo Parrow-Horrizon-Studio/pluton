@@ -85,7 +85,7 @@ Each direction uses the tool it is best at, and both sides reuse M6b's proven
 | D2 | Engine | **Assimp** import bridge (C++) + **pure-Python** export (Approach B, hybrid) |
 | D3 | Import bridge surface | Assimp → **neutral plain data** (nanobind structs) → pure-Python IR (`gltf_scene.py`); Assimp types never reach Python |
 | D4 | Axis / units | **Y-up ↔ Z-up** conversion (Rx ±90°); **1:1** meters, no scaling |
-| D5 | Hierarchy | **Preserve** node tree → nested groups; **shared mesh → shared Component** (instancing) both directions; keep empty grouping nodes |
+| D5 | Hierarchy | **Preserve** node tree; **each node → one object** (single-mesh childless node collapses to a direct Component instance; multi-mesh/parent/empty node → a group); **shared mesh → shared Component** (instancing) both directions; keep empty grouping nodes |
 | D6 | Import placement | One top-level group named after the file, added to the **active context**; a single **undoable** `ImportGltfCommand` |
 | D7 | Robustness | **Best-effort** — triangulate + weld; skip + count faces the kernel rejects; never hard-fail |
 | D8 | Materials | glTF `baseColorFactor` ↔ Pluton color; export metallic 0 / roughness 1; **textures/UVs deferred** |
@@ -278,34 +278,60 @@ meshdef[i] = model.new_definition(name_or("Mesh"), is_group=False)   # a Compone
 Because a mesh is built once and referenced by many nodes, **instancing is
 preserved**: N nodes referencing mesh i → N Instances of `meshdef[i]`.
 
-### 6.3 Nodes → nested group hierarchy
-Process nodes in parent-before-child order, building a group Definition per node:
+### 6.3 Nodes → hierarchy (each node → one object)
+This mirrors how reference glTF importers (Blender) map a scene: **a node
+becomes exactly one object**, not an object-wrapped-in-a-group. This preserves
+instancing *and* keeps the scene graph clean, and it avoids a correctness trap
+(see below).
+
+Precompute which nodes have children (a node is a **container** iff it has any
+child node): `has_children = {n.parent for n in scene.nodes if n.parent >= 0}`.
+Then process nodes in **parent-before-child** order:
+
 ```
-nodedef[n] = model.new_definition(node.name or "Node", is_group=True)
-for mi in node.mesh_indices:                      # attach this node's meshes
-    nodedef[n].children.append(model.new_instance(meshdef[mi]))   # identity transform
-# child nodes are attached when they are processed:
-inst = model.new_instance(nodedef[n], transform=<this node's local 4x4>)
-parent_def = wrapper_def if node.parent == -1 else nodedef[node.parent]
-parent_def.children.append(inst)
+collapsible = (len(node.mesh_indices) == 1) and (n not in has_children)
+
+if collapsible:                                   # common leaf case
+    inst = model.new_instance(meshdef[node.mesh_indices[0]], transform=A4x4)
+    # no container: a collapsed node can have no children by definition
+else:
+    g = model.new_definition(node.name or "Node", is_group=True)
+    for mi in node.mesh_indices:                  # this node's own geometry
+        g.children.append(model.new_instance(meshdef[mi]))   # identity transform
+    inst = model.new_instance(g, transform=A4x4)
+    container_def[n] = g                          # children append here
+
+parent_container = wrapper_def if node.parent == -1 else container_def[node.parent]
+parent_container.children.append(inst)            # parent is always a container
 ```
-- **Empty grouping nodes** (no meshes, transform only) become empty groups —
-  hierarchy is preserved honestly (D5).
+`A4x4` = the node's local transform (Assimp row-major → transposed to Pluton).
+A node's parent is guaranteed to be a container (it has this node as a child), so
+`container_def[parent]` always exists.
+
+- **The correctness trap the collapse avoids:** a node with *both* a mesh and
+  children must get its own group — if such a node instead pointed its Instance
+  directly at a shared mesh Component, its children would become children of that
+  Component and leak into **every** other instance of the same mesh. Only
+  single-mesh **childless** nodes are collapsed, so this can't happen.
+- **Empty grouping nodes** (no meshes, transform only) → empty groups; hierarchy
+  preserved honestly (D5).
+- **Instancing is preserved regardless of collapse:** the shared unit is always
+  the mesh `meshdef[i]` Component; N nodes referencing mesh i → N Instances of
+  it, collapsed or grouped.
+- A collapsed leaf inherits the Component's (mesh) name; the node's own name is
+  not separately modeled (Instances are unnamed) — the standard trade-off, and
+  what Blender does.
 - The **file wrapper**: `wrapper_def = model.new_definition(<file stem>,
   is_group=True)`; its Instance carries the Y-up→Z-up matrix `A` and is the
   single node appended to `target_context.children`. Root glTF nodes hang under
   `wrapper_def`.
 
-*(Optional, non-required simplification the implementer may apply: a node with
-exactly one mesh and no children may reference `meshdef` directly instead of via
-an intermediate group. The uniform rule above is the baseline and is correct.)*
-
 ### 6.4 Result & summary
 ```python
 @dataclass(frozen=True)
 class GltfImportSummary:
-    nodes: int          # group nodes created
-    meshes: int         # distinct meshes built
+    nodes: int          # glTF nodes mapped (one object each — collapsed or grouped)
+    meshes: int         # distinct meshes built (shared Components)
     faces_imported: int
     faces_skipped: int
 
@@ -444,9 +470,13 @@ Layered; most of it headless (no compiled kernel needed):
    redo (`do` again) rebuilds.
 4. **Bridge integration (needs kernel):** small **self-authored** files in
    `tests/data/` — a single triangle `.glb`, a `.gltf`+`.bin` pair, a two-node
-   hierarchy, a shared-mesh instanced file — plus **one vendored CC0 Draco
-   sample** (Khronos `Box`, license verified) — exercising `_core.import_gltf`
-   and the full `read_gltf_scene → build` path.
+   hierarchy, a shared-mesh instanced file (asserts collapse + one Component /
+   two Instances) — plus **one vendored CC0 Draco sample** (Khronos `Box`,
+   license verified) — exercising `_core.import_gltf` and the full
+   `read_gltf_scene → build` path. **The Draco decode test is a permanent,
+   non-skippable CI gate on both platforms** — it is the guard that the Assimp
+   dependency still provides the capability that justified taking it on (a future
+   vcpkg `assimp` bump that drops Draco must fail CI here, not degrade silently).
 5. **Export round-trip:** build a Model (a painted, grouped scene) → `export_gltf`
    (`.glb` and `.gltf`) → re-read via `_core.import_gltf` → assert geometry,
    material colors, and hierarchy/instancing survive.
@@ -475,7 +505,8 @@ export, then integration/release (~14 tasks — final count set by writing-plans
 2. nanobind binding (`_core.import_gltf` + structs) + smoke test.
 3. `gltf_scene.py` IR + `read_gltf_scene` adapter (bridge → IR, error mapping).
 4. `build_gltf_into_model` meshes → shared Components (instancing + best-effort).
-5. `build_gltf_into_model` nodes → nested groups + axis + wrapper + summary.
+5. `build_gltf_into_model` nodes → hierarchy (each node → one object: leaf
+   collapse vs group) + axis + wrapper + summary.
 6. `ImportGltfCommand` (undo cleanliness) + pytests.
 7. `gltf_codec.py` pure buffer/`.glb`/`.gltf` assembly + tests.
 8. `gltf_export.py` mapping (hierarchy, triangulation, materials, axis) + atomic write.
