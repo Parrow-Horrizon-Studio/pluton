@@ -12,7 +12,7 @@ endif()
 
 # Project metadata
 project(pluton
-    VERSION 0.1.9
+    VERSION 0.2.0
     DESCRIPTION "Polygonal 3D modeler for architecture"
     LANGUAGES CXX
 )
