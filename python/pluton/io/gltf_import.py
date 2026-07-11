@@ -20,7 +20,7 @@ def read_gltf_scene(path) -> GltfSceneData:
 
     try:
         raw = core.import_gltf(str(path))
-    except Exception as e:  # bridge raises std::runtime_error -> RuntimeError
+    except RuntimeError as e:  # bridge raises std::runtime_error -> RuntimeError
         raise PlutonFormatError(f"Could not import glTF: {e}") from e
 
     materials = tuple(
