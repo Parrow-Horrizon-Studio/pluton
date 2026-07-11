@@ -6,7 +6,11 @@ add_executable(pluton_tests
     test_primitives.cpp
     test_halfedge.cpp
     test_ray_intersect.cpp
+    test_gltf_import.cpp
 )
+
+target_compile_definitions(pluton_tests PRIVATE
+    PLUTON_TEST_DATA="${CMAKE_SOURCE_DIR}/tests/data")
 
 target_link_libraries(pluton_tests PRIVATE
     pluton_core
