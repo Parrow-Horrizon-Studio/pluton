@@ -11,7 +11,15 @@ from PySide6.QtWidgets import QMainWindow, QVBoxLayout, QWidget
 from pluton.commands import CommandStack
 from pluton.commands.scene_commands import ClearSceneCommand
 from pluton.document import DocumentSettings
-from pluton.io import PlutonIOError, export_obj, load_document, read_obj_document, save_document
+from pluton.io import (
+    PlutonIOError,
+    export_gltf,
+    export_obj,
+    load_document,
+    read_gltf_scene,
+    read_obj_document,
+    save_document,
+)
 from pluton.io.document_codec import CameraState
 from pluton.model import Model
 from pluton.model.tag import TagLibrary
@@ -179,6 +187,8 @@ class MainWindow(QMainWindow):
         self._file_menu.addSeparator()
         self._file_menu.addAction("Import OBJ…", self._on_import_obj)
         self._file_menu.addAction("Export OBJ…", self._on_export_obj)
+        self._file_menu.addAction("Import glTF…", self._on_import_gltf)
+        self._file_menu.addAction("Export glTF…", self._on_export_gltf)
 
         # Edit menu
         self._edit_menu = menubar.addMenu("Edit")
@@ -703,6 +713,42 @@ class MainWindow(QMainWindow):
         msg = f"Imported {s.faces_imported} faces"
         if s.objects:
             msg += f" in {s.objects} object(s)"
+        if s.faces_skipped:
+            msg += f" (skipped {s.faces_skipped} faces)"
+        self._status_bar.set_status(msg)
+        self._refresh_breadcrumb()
+        self._viewport.update()
+
+    def _on_export_gltf(self) -> None:
+        path = self._prompt_save_path("glTF Binary (*.glb);;glTF (*.gltf)", "Export glTF")
+        if not path:
+            return
+        path = str(path)
+        if not (path.endswith(".glb") or path.endswith(".gltf")):
+            path += ".glb"
+        try:
+            export_gltf(self._model, path)
+        except OSError as e:
+            from PySide6.QtWidgets import QMessageBox
+            QMessageBox.critical(self, "Export failed", str(e))
+            return
+        self._status_bar.set_status(f"Exported {Path(path).name}")
+
+    def _on_import_gltf(self) -> None:
+        path = self._prompt_open_path("glTF (*.glb *.gltf)", "Import glTF")
+        if not path:
+            return
+        try:
+            scene = read_gltf_scene(path)
+        except (PlutonIOError, OSError) as e:
+            from PySide6.QtWidgets import QMessageBox
+            QMessageBox.critical(self, "Import failed", str(e))
+            return
+        from pluton.commands.gltf_commands import ImportGltfCommand
+        cmd = ImportGltfCommand(scene, self._model.active_context, root_name=Path(path).stem)
+        self._command_stack.execute(cmd, self._model)
+        s = cmd.summary
+        msg = f"Imported {s.faces_imported} faces in {s.nodes} object(s)"
         if s.faces_skipped:
             msg += f" (skipped {s.faces_skipped} faces)"
         self._status_bar.set_status(msg)
