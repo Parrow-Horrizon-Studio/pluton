@@ -1,5 +1,15 @@
 cmake_minimum_required(VERSION 3.27)
 
+# On Windows, use a STATIC vcpkg triplet so Assimp (M6c) and its transitive
+# deps (Draco, zlib, ...) link into the _core module — no runtime DLLs to
+# bundle next to the installed .pyd (which broke editable installs + CI).
+# static-md = static libs with the dynamic CRT (/MD), matching CPython.
+# Set before project() so the vcpkg toolchain picks it up. Linux's default
+# x64-linux triplet is already static, so this is Windows-only.
+if(CMAKE_HOST_WIN32 AND NOT DEFINED VCPKG_TARGET_TRIPLET)
+    set(VCPKG_TARGET_TRIPLET "x64-windows-static-md" CACHE STRING "vcpkg triplet")
+endif()
+
 # Project metadata
 project(pluton
     VERSION 0.1.9
@@ -27,6 +37,9 @@ find_package(Python 3.13 COMPONENTS Interpreter Development.Module REQUIRED)
 
 # Find nanobind (installed via pip as a build dep — scikit-build-core handles this)
 find_package(nanobind CONFIG REQUIRED)
+
+# Find Assimp (glTF/GLB import — vcpkg, M6c)
+find_package(assimp CONFIG REQUIRED)
 
 # Add C++ source tree
 add_subdirectory(cpp)

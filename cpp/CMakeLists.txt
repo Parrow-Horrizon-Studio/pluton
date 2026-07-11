@@ -5,11 +5,16 @@ add_library(pluton_core STATIC
     src/primitives.cpp
     src/halfedge.cpp
     src/ray_intersect.cpp
+    src/gltf_import.cpp
 )
 
 target_include_directories(pluton_core PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/include
 )
+
+# Assimp — glTF/GLB import (M6c). PRIVATE: the public header exposes only
+# neutral structs, so consumers of pluton_core don't need Assimp headers.
+target_link_libraries(pluton_core PRIVATE assimp::assimp)
 
 # Position-independent code required when linking into a Python module
 set_target_properties(pluton_core PROPERTIES

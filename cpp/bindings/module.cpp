@@ -8,6 +8,7 @@
 #include <nanobind/stl/string.h>
 #include <nanobind/stl/vector.h>
 
+#include "pluton/gltf_import.h"
 #include "pluton/halfedge.h"
 #include "pluton/mesh.h"
 #include "pluton/primitives.h"
@@ -162,4 +163,24 @@ NB_MODULE(_core, m) {
     m.def("ray_intersect_mesh", &ray_intersect_mesh,
           nb::arg("mesh"), nb::arg("origin"), nb::arg("direction"),
           "Brute-force ray-mesh face picking. Returns RayMeshHit or None.");
+
+    // M6c: glTF/GLB import bridge (Assimp) — neutral plain-data structs.
+    nb::class_<pluton::ImportedMaterial>(m, "ImportedMaterial")
+        .def_ro("name", &pluton::ImportedMaterial::name)
+        .def_ro("base_color", &pluton::ImportedMaterial::base_color);
+    nb::class_<pluton::ImportedMesh>(m, "ImportedMesh")
+        .def_ro("positions", &pluton::ImportedMesh::positions)
+        .def_ro("triangles", &pluton::ImportedMesh::triangles)
+        .def_ro("material_index", &pluton::ImportedMesh::material_index);
+    nb::class_<pluton::ImportedNode>(m, "ImportedNode")
+        .def_ro("name", &pluton::ImportedNode::name)
+        .def_ro("parent", &pluton::ImportedNode::parent)
+        .def_ro("transform", &pluton::ImportedNode::transform)
+        .def_ro("mesh_indices", &pluton::ImportedNode::mesh_indices);
+    nb::class_<pluton::ImportedScene>(m, "ImportedScene")
+        .def_ro("nodes", &pluton::ImportedScene::nodes)
+        .def_ro("meshes", &pluton::ImportedScene::meshes)
+        .def_ro("materials", &pluton::ImportedScene::materials);
+    m.def("import_gltf", &pluton::import_gltf, nb::arg("path"),
+          "Load a glTF/GLB file into a neutral ImportedScene (M6c import bridge).");
 }
