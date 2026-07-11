@@ -48,3 +48,41 @@ def test_import_gltf_runs_command(qtbot, monkeypatch, tmp_path):
     before = len(w._model.active_context.children)
     w._on_import_gltf()
     assert len(w._model.active_context.children) == before + 1
+
+
+def test_export_gltf_appends_glb_extension(qtbot, monkeypatch, tmp_path):
+    w = _win(qtbot)
+    w._prompt_save_path = lambda *a, **k: str(tmp_path / "model")
+    called = {}
+    monkeypatch.setattr(mw_mod, "export_gltf",
+                        lambda model, path: called.setdefault("path", path))
+    w._on_export_gltf()
+    assert called["path"].endswith(".glb")
+
+
+def test_export_gltf_cancelled_is_noop(qtbot, monkeypatch):
+    w = _win(qtbot)
+    w._prompt_save_path = lambda *a, **k: None
+    called = {}
+    monkeypatch.setattr(mw_mod, "export_gltf",
+                        lambda model, path: called.setdefault("path", path))
+    w._on_export_gltf()   # must not raise
+    assert "path" not in called
+
+
+def test_import_gltf_bad_file_shows_dialog(qtbot, monkeypatch, tmp_path):
+    from pluton.io.errors import PlutonFormatError
+
+    def _raise(path):
+        raise PlutonFormatError("bad")
+
+    w = _win(qtbot)
+    w._prompt_open_path = lambda *a, **k: str(tmp_path / "bad.glb")
+    monkeypatch.setattr(mw_mod, "read_gltf_scene", _raise)
+    shown = {}
+    from PySide6.QtWidgets import QMessageBox
+    monkeypatch.setattr(QMessageBox, "critical", lambda *a, **k: shown.setdefault("called", True))
+    before = len(w._model.active_context.children)
+    w._on_import_gltf()   # must not raise
+    assert shown.get("called") is True
+    assert len(w._model.active_context.children) == before
