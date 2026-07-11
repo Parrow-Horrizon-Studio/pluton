@@ -55,3 +55,41 @@ def test_export_gltf_writes_sidecar_bin(tmp_path):
     export_gltf(_painted_quad_model(), str(p))
     assert p.exists()
     assert (tmp_path / "out.bin").exists()
+
+
+def test_shared_definition_exports_one_mesh():
+    """Mesh-level instancing: a Definition instanced twice -> one glTF mesh."""
+    model = Model()
+    comp = model.new_definition("Widget", is_group=False)
+    ids = [
+        comp.mesh.add_vertex(np.array([0.0, 0.0, 0.0], dtype=np.float32)),
+        comp.mesh.add_vertex(np.array([1.0, 0.0, 0.0], dtype=np.float32)),
+        comp.mesh.add_vertex(np.array([0.0, 1.0, 0.0], dtype=np.float32)),
+    ]
+    comp.mesh.add_face_from_loop(ids)
+    model.root.children.append(model.new_instance(comp))
+    model.root.children.append(model.new_instance(comp, transform=np.eye(4, dtype=np.float64)))
+    asset = model_to_gltf(model)
+    assert len(asset.meshes) == 1
+
+
+def test_child_instance_matrix_is_column_major():
+    """A non-identity child-instance transform round-trips via an order='F' reshape."""
+    model = Model()
+    comp = model.new_definition("Widget", is_group=False)
+    ids = [
+        comp.mesh.add_vertex(np.array([0.0, 0.0, 0.0], dtype=np.float32)),
+        comp.mesh.add_vertex(np.array([1.0, 0.0, 0.0], dtype=np.float32)),
+        comp.mesh.add_vertex(np.array([0.0, 1.0, 0.0], dtype=np.float32)),
+    ]
+    comp.mesh.add_face_from_loop(ids)
+    transform_mat = np.array([[1.0, 0.0, 0.0, 5.0],
+                             [0.0, 1.0, 0.0, 2.0],
+                             [0.0, 0.0, 1.0, 0.0],
+                             [0.0, 0.0, 0.0, 1.0]], dtype=np.float64)
+    model.root.children.append(model.new_instance(comp, transform=transform_mat))
+    asset = model_to_gltf(model)
+    root_node = asset.nodes[asset.scene_roots[0]]
+    child = asset.nodes[root_node["children"][0]]
+    m = np.array(child["matrix"], dtype=np.float64).reshape(4, 4, order="F")
+    assert np.allclose(m, transform_mat)
