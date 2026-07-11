@@ -2,9 +2,10 @@
 
 Mirrors the import mapping: shared Definitions -> one shared glTF mesh
 (mesh-level instancing), each Instance -> a glTF node with its transform,
-n-gon faces fan-triangulated and grouped by material into primitives, and a
-Z-up -> Y-up conversion baked at the export root. This is the only glTF export
-module that knows about Model/Scene.
+n-gon faces triangulated (via the kernel's earcut, concave-safe) and grouped
+by material into primitives, and a Z-up -> Y-up conversion baked at the
+export root. This is the only glTF export module that knows about
+Model/Scene.
 """
 from __future__ import annotations
 
@@ -29,8 +30,9 @@ def _zup_to_yup() -> np.ndarray:
 
 
 def _definition_primitives(defn, gltf_material_for):
-    """Fan-triangulate the definition's faces, grouped by material into
-    (positions, indices, gltf_material_index|None) primitives."""
+    """Triangulate the definition's faces (kernel earcut, concave-safe),
+    grouped by material into (positions, indices, gltf_material_index|None)
+    primitives."""
     mesh = defn.mesh
     verts = list(mesh.vertices_iter())
     if not verts:
@@ -42,12 +44,9 @@ def _definition_primitives(defn, gltf_material_for):
         positions.append((float(v.position[0]), float(v.position[1]), float(v.position[2])))
     by_mat: dict = defaultdict(list)
     for f in mesh.faces_iter():
-        loop = [idmap[vid] for vid in f.loop_vertex_ids]
-        if len(loop) < 3:
-            continue
         gmat = gltf_material_for(mesh.face_material(f.id))
-        for k in range(1, len(loop) - 1):        # fan
-            by_mat[gmat].extend([loop[0], loop[k], loop[k + 1]])
+        for a, b, c in f.triangles:            # kernel earcut triangulation (concave-safe)
+            by_mat[gmat].extend([idmap[int(a)], idmap[int(b)], idmap[int(c)]])
     return [(positions, indices, gmat) for gmat, indices in by_mat.items()]
 
 

@@ -93,3 +93,24 @@ def test_child_instance_matrix_is_column_major():
     child = asset.nodes[root_node["children"][0]]
     m = np.array(child["matrix"], dtype=np.float64).reshape(4, 4, order="F")
     assert np.allclose(m, transform_mat)
+
+
+def test_export_uses_kernel_triangulation_for_concave_face():
+    from pluton.io.gltf_export import _definition_primitives
+    model = Model()
+    mesh = model.root.mesh
+    # A concave U-shape in the z=0 plane (a fan from vertex 0 would triangulate it differently).
+    pts = [(0, 0, 0), (3, 0, 0), (3, 2, 0), (2, 2, 0),
+           (2, 1, 0), (1, 1, 0), (1, 2, 0), (0, 2, 0)]
+    ids = [mesh.add_vertex(np.array(p, dtype=np.float32)) for p in pts]
+    fid = mesh.add_face_from_loop(ids)
+    vpos = {v.id: tuple(round(float(c), 3) for c in v.position) for v in mesh.vertices_iter()}
+    face = next(f for f in mesh.faces_iter() if f.id == fid)
+    kernel_tris = {frozenset(vpos[int(v)] for v in tri) for tri in face.triangles}
+    positions, indices, _ = _definition_primitives(model.root, lambda mid: None)[0]
+    export_tris = set()
+    for i in range(0, len(indices), 3):
+        export_tris.add(frozenset(
+            tuple(round(float(c), 3) for c in positions[indices[i + k]]) for k in range(3)))
+    assert export_tris == kernel_tris                 # exporter uses the kernel triangulation
+    assert len(export_tris) == len(pts) - 2           # n-2 triangles for a simple polygon
