@@ -65,11 +65,17 @@ class WallTool(Tool):
     def _commit(self, endpoint_world) -> None:
         start = self._to_local_ground(self._anchor)
         end = self._to_local_ground(endpoint_world)
+        if float(np.linalg.norm(end - start)) < 1e-9:
+            # Degenerate in the active context's ground plane (e.g. the two
+            # points differ only in height): wall_box would return empty, so
+            # skip rather than push a no-op command onto the undo stack.
+            return
         cmd = CreateWallCommand(
             start, end, self.thickness, self.height, self._model.active_context
         )
         self._command_stack.execute(cmd, self._model)
         self._anchor = np.asarray(endpoint_world, np.float32).copy()
+        self._preview_tip = np.asarray(endpoint_world, np.float32).copy()
 
     def on_mouse_move(self, event: QMouseEvent, snap) -> None:
         if snap.kind == SnapKind.NONE:
