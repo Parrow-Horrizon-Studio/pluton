@@ -42,10 +42,12 @@ from pluton.tools import (
     ToolManager,
 )
 from pluton.tools.paint_tool import PaintTool
+from pluton.tools.wall_tool import WallTool
 from pluton.ui.materials_dock import MaterialsDock
 from pluton.ui.status_bar import StatusBar
 from pluton.ui.tags_dock import TagsDock
 from pluton.ui.value_control_box import ValueControlBox
+from pluton.ui.wall_options_bar import WallOptionsBar
 from pluton.viewport.render_style import FaceStyle, RenderStyle
 from pluton.viewport.viewport_widget import ViewportWidget
 
@@ -83,6 +85,8 @@ class MainWindow(QMainWindow):
         self._tool_manager.register(RotateTool())
         self._tool_manager.register(ScaleTool())
         self._tool_manager.register(TapeMeasureTool())
+        self._wall_tool = WallTool()
+        self._tool_manager.register(self._wall_tool)
 
         # Viewport + status bar (created BEFORE setting ToolContext so we can
         # wire the camera + widget_size_provider into the context).
@@ -121,11 +125,19 @@ class MainWindow(QMainWindow):
         # _status_bar exists — it was created just above.
         self._refresh_breadcrumb()
 
+        # Wall options bar (M7a, Task 5) — thickness/height fields for the Wall
+        # tool; shown only while the Wall tool is active (see _refresh_tool_options).
+        self._wall_options_bar = WallOptionsBar(
+            self._wall_tool, units_provider=lambda: self._doc.units
+        )
+        self._wall_options_bar.hide()
+
         container = QWidget(self)
         layout = QVBoxLayout(container)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
         layout.addWidget(self._viewport, stretch=1)
+        layout.addWidget(self._wall_options_bar, stretch=0)
         layout.addWidget(self._status_bar, stretch=0)
         self.setCentralWidget(container)
 
@@ -150,6 +162,7 @@ class MainWindow(QMainWindow):
         QShortcut(QKeySequence("Q"), self, activated=lambda: self._activate("Q"))
         QShortcut(QKeySequence("S"), self, activated=lambda: self._activate("S"))
         QShortcut(QKeySequence("T"), self, activated=lambda: self._activate("T"))
+        QShortcut(QKeySequence("W"), self, activated=lambda: self._activate("W"))
         QShortcut(QKeySequence(Qt.Key.Key_Delete), self, activated=self._on_delete_selection)
         QShortcut(QKeySequence(Qt.Key.Key_Backspace), self, activated=self._on_delete_selection)
         QShortcut(QKeySequence(Qt.Key.Key_Up), self, activated=lambda: self._on_tool_key(Qt.Key.Key_Up))
@@ -209,6 +222,11 @@ class MainWindow(QMainWindow):
             ("Imperial — architectural", self._set_units_imperial),
         ):
             self._units_menu.addAction(label, fn)
+
+        # Tools menu (M7a, Task 5) — the tool roster is otherwise shortcut-driven
+        # with no per-tool menu items; Wall gets one entry mirroring that idiom.
+        self._tools_menu = menubar.addMenu("Tools")
+        self._tools_menu.addAction("Wall\tW", lambda: self._activate("W"))
 
         # View menu (M5a) — face-style radio group + independent X-Ray toggle.
         self._view_menu = menubar.addMenu("View")
@@ -384,7 +402,19 @@ class MainWindow(QMainWindow):
             self._status_bar.set_tool(active.name if active else "")
             self._status_bar.set_snap("")
             self._refresh_status_text()
+            self._refresh_tool_options()
             self._viewport.update()
+
+    def _refresh_tool_options(self) -> None:
+        """Show the Wall options bar iff the Wall tool is active (M7a, Task 5).
+
+        Called wherever the active tool changes: after a successful
+        activate_by_shortcut and after any programmatic tool switch.
+        """
+        is_wall = isinstance(self._tool_manager.active, WallTool)
+        if is_wall:
+            self._wall_options_bar.refresh()
+        self._wall_options_bar.setVisible(is_wall)
 
     def _on_escape(self) -> None:
         active = self._tool_manager.active
@@ -406,6 +436,7 @@ class MainWindow(QMainWindow):
             self._tool_manager.deactivate_current()
             self._status_bar.set_tool("")
             self._status_bar.set_snap("")
+            self._refresh_tool_options()
         self._refresh_status_text()
         self._viewport.update()
 
