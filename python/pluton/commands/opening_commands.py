@@ -51,14 +51,17 @@ class PlaceOpeningCommand(Command):
         if defn is None:
             self._instance = None
             return
-        inst = model.new_instance(defn, self._transform)
-        self._target.children.append(inst)
-        self._instance = inst
+        if self._instance is None:
+            self._instance = model.new_instance(defn, self._transform)
+        elif self._instance not in defn.instances:
+            defn.instances.append(self._instance)  # redo: re-register the same object
+        self._target.children.append(self._instance)
 
     def undo(self, model) -> None:
         if self._instance is None:
             return
         if self._instance in self._target.children:
             self._target.children.remove(self._instance)
+        if self._instance in self._instance.definition.instances:
+            self._instance.definition.instances.remove(self._instance)
         model.revalidate_active_path()
-        self._instance = None

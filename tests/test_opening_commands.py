@@ -57,3 +57,33 @@ def test_degenerate_opening_adds_nothing():
     model = Model()
     PlaceOpeningCommand("door", 0.05, 2.1, 0.1, np.eye(4), model.active_context).do(model)
     assert len(model.active_context.children) == 0
+
+
+def test_undo_redo_keeps_definition_instances_in_sync():
+    model = Model()
+    target = model.active_context
+    cmd = _cmd(model)
+    cmd.do(model)
+    inst = target.children[0]
+    defn = inst.definition
+    assert len(defn.instances) == 1 and len(target.children) == 1
+    cmd.undo(model)
+    assert len(defn.instances) == 0 and len(target.children) == 0
+    cmd.do(model)  # redo
+    assert len(defn.instances) == 1 and len(target.children) == 1
+    assert target.children[0] is inst  # redo reuses the SAME instance object
+
+
+def test_shared_definition_undo_leaves_other_instance():
+    model = Model()
+    target = model.active_context
+    c1 = _cmd(model)
+    c2 = _cmd(model)
+    c1.do(model)
+    c2.do(model)
+    defn = target.children[0].definition
+    assert defn is target.children[1].definition
+    assert len(defn.instances) == 2
+    c2.undo(model)
+    assert len(target.children) == 1
+    assert len(defn.instances) == 1  # only c1's instance remains; no leak
