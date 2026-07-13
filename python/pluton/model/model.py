@@ -115,6 +115,38 @@ class Model:
                 best, best_t = inst, hit.t
         return best
 
+    def pick_face_local(self, origin, direction):
+        """Nearest child-instance face hit for a WORLD ray, as (point, normal)
+        in the active-context-local frame. `normal` faces the ray origin
+        (viewer-facing). None if nothing is hit."""
+        from pluton.geometry.transforms import mat_invert
+
+        w = self.active_world_transform
+        w_inv = mat_invert(w)
+        o_a = (w_inv @ np.append(np.asarray(origin, np.float64), 1.0))[:3]
+        d_a = w_inv[:3, :3] @ np.asarray(direction, np.float64)
+
+        best = None
+        best_t = float("inf")
+        for inst in self.active_context.children:
+            if not self.tags.is_visible(inst.tag_id):
+                continue
+            t_inv = mat_invert(inst.transform)
+            o_c = (t_inv @ np.append(o_a, 1.0))[:3]
+            d_c = t_inv[:3, :3] @ d_a
+            hit = inst.definition.mesh.ray_pick_face(o_c, d_c)
+            if hit is None or hit.t >= best_t:
+                continue
+            n_c = np.asarray(inst.definition.mesh.face_normal(hit.face_id), np.float64)
+            p_c = np.asarray(hit.point, np.float64)
+            p_a = (inst.transform @ np.append(p_c, 1.0))[:3]
+            n_a = inst.transform[:3, :3] @ n_c
+            if np.dot(n_a, d_a) > 0.0:      # orient toward the viewer (against the ray)
+                n_a = -n_a
+            best = (p_a, n_a)
+            best_t = hit.t
+        return best
+
     def load_from(self, other: "Model") -> None:
         """Replace this model's contents with another's, in place (keeps identity).
 
