@@ -9,6 +9,8 @@ a picked wall face (see Task 2).
 """
 from __future__ import annotations
 
+import numpy as np
+
 _EPS = 1e-9
 _PROFILE = 0.06        # frame member width (m), fixed (not a user knob)
 _PANEL_T = 0.04        # door panel thickness (m)
@@ -72,3 +74,28 @@ def opening_frame(kind, width, height, depth):
         vertices.extend((float(a), float(b), float(c)) for (a, b, c) in bverts)
         faces.extend(tuple(i + off for i in loop) for loop in bfaces)
     return vertices, faces
+
+
+def opening_placement_transform(point, normal, sill):
+    """Return the 4x4 placing a canonical opening onto a wall face, or None.
+
+    point/normal are in the active-context-local frame; normal faces the viewer.
+    The opening stands upright (up = local +Z); its outer face is flush with the
+    wall face; its bottom-center sits at the cursor's horizontal position, at
+    height `sill`. Returns None for a near-horizontal face (no valid upright).
+    """
+    up = np.array([0.0, 0.0, 1.0])
+    n = np.asarray(normal, dtype=np.float64).reshape(3)
+    out = n - np.dot(n, up) * up          # horizontalize
+    mag = float(np.linalg.norm(out))
+    if mag < _EPS:
+        return None                        # near-horizontal face
+    out /= mag
+    along = np.cross(up, out)              # unit (up, out orthonormal)
+    p = np.asarray(point, dtype=np.float64).reshape(3)
+    m = np.eye(4, dtype=np.float64)
+    m[:3, 0] = along                       # canonical +X -> along-wall
+    m[:3, 1] = -out                        # canonical +Y -> into the wall
+    m[:3, 2] = up                          # canonical +Z -> up
+    m[:3, 3] = np.array([p[0], p[1], float(sill)])
+    return m
