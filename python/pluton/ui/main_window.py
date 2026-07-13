@@ -176,6 +176,7 @@ class MainWindow(QMainWindow):
         QShortcut(QKeySequence("S"), self, activated=lambda: self._activate("S"))
         QShortcut(QKeySequence("T"), self, activated=lambda: self._activate("T"))
         QShortcut(QKeySequence("W"), self, activated=lambda: self._activate("W"))
+        QShortcut(QKeySequence("D"), self, activated=lambda: self._activate("D"))
         QShortcut(QKeySequence(Qt.Key.Key_Delete), self, activated=self._on_delete_selection)
         QShortcut(QKeySequence(Qt.Key.Key_Backspace), self, activated=self._on_delete_selection)
         QShortcut(QKeySequence(Qt.Key.Key_Up), self, activated=lambda: self._on_tool_key(Qt.Key.Key_Up))

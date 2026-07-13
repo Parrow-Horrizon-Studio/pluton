@@ -21,3 +21,12 @@ def test_opening_options_bar_visible_only_for_tool(qtbot):
     w._tool_manager.activate_by_shortcut("L")   # line tool
     w._refresh_tool_options()
     assert not w._opening_options_bar.isVisibleTo(w)
+
+
+def test_d_key_shortcut_registered(qtbot):
+    from PySide6.QtGui import QShortcut
+
+    w = MainWindow()
+    qtbot.addWidget(w)
+    keys = {sc.key().toString() for sc in w.findChildren(QShortcut)}
+    assert "D" in keys
