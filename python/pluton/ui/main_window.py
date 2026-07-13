@@ -41,9 +41,11 @@ from pluton.tools import (
     ToolContext,
     ToolManager,
 )
+from pluton.tools.opening_tool import DoorWindowTool
 from pluton.tools.paint_tool import PaintTool
 from pluton.tools.wall_tool import WallTool
 from pluton.ui.materials_dock import MaterialsDock
+from pluton.ui.opening_options_bar import OpeningOptionsBar
 from pluton.ui.status_bar import StatusBar
 from pluton.ui.tags_dock import TagsDock
 from pluton.ui.value_control_box import ValueControlBox
@@ -87,6 +89,8 @@ class MainWindow(QMainWindow):
         self._tool_manager.register(TapeMeasureTool())
         self._wall_tool = WallTool()
         self._tool_manager.register(self._wall_tool)
+        self._opening_tool = DoorWindowTool()
+        self._tool_manager.register(self._opening_tool)
 
         # Viewport + status bar (created BEFORE setting ToolContext so we can
         # wire the camera + widget_size_provider into the context).
@@ -132,12 +136,21 @@ class MainWindow(QMainWindow):
         )
         self._wall_options_bar.hide()
 
+        # Opening options bar (M7b, Task 7) — Door/Window toggle + size fields
+        # for the Door/Window tool; shown only while that tool is active (see
+        # _refresh_tool_options).
+        self._opening_options_bar = OpeningOptionsBar(
+            self._opening_tool, units_provider=lambda: self._doc.units
+        )
+        self._opening_options_bar.hide()
+
         container = QWidget(self)
         layout = QVBoxLayout(container)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
         layout.addWidget(self._viewport, stretch=1)
         layout.addWidget(self._wall_options_bar, stretch=0)
+        layout.addWidget(self._opening_options_bar, stretch=0)
         layout.addWidget(self._status_bar, stretch=0)
         self.setCentralWidget(container)
 
@@ -227,6 +240,7 @@ class MainWindow(QMainWindow):
         # with no per-tool menu items; Wall gets one entry mirroring that idiom.
         self._tools_menu = menubar.addMenu("Tools")
         self._tools_menu.addAction("Wall\tW", lambda: self._activate("W"))
+        self._tools_menu.addAction("Door/Window\tD", lambda: self._activate("D"))
 
         # View menu (M5a) — face-style radio group + independent X-Ray toggle.
         self._view_menu = menubar.addMenu("View")
@@ -415,6 +429,10 @@ class MainWindow(QMainWindow):
         if is_wall:
             self._wall_options_bar.refresh()
         self._wall_options_bar.setVisible(is_wall)
+        is_opening = isinstance(self._tool_manager.active, DoorWindowTool)
+        if is_opening:
+            self._opening_options_bar.refresh()
+        self._opening_options_bar.setVisible(is_opening)
 
     def _on_escape(self) -> None:
         active = self._tool_manager.active
