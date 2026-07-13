@@ -18,6 +18,7 @@ class Model:
         self.active_path: list[Instance] = []
         self.materials = MaterialLibrary()
         self.tags = TagLibrary()
+        self.opening_definitions = {}   # M7b: (kind, w, h, depth) -> shared Component Definition
 
     # --- construction ---
     def new_definition(self, name: str, is_group: bool) -> Definition:
