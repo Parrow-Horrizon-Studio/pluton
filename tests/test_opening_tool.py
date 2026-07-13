@@ -89,3 +89,23 @@ def test_window_kind_places_window():
     tool.on_mouse_move(_Event(), None)
     tool.on_mouse_press(_Event(), None)
     assert model.active_context.children[-1].definition.name == "Window"
+
+
+def test_overlay_outline_is_world_space_in_entered_context():
+    model = Model()
+    grp = model.new_definition("G", is_group=True)
+    t = np.eye(4)
+    t[:3, 3] = [10.0, 0.0, 0.0]
+    inst = model.new_instance(grp, t)
+    model.active_context.children.append(inst)
+    model.enter(inst)                    # real API: pushes onto active_path
+    assert not np.allclose(model.active_world_transform, np.eye(4))
+    tool = DoorWindowTool()
+    tool._model = model
+    tool.width = 1.0
+    tool.height = 2.0
+    tool._preview = np.eye(4)            # identity LOCAL placement
+    segs = tool.overlay().rubber_band_segments
+    assert segs.shape[0] == 8            # 4 segments x 2 endpoints
+    # local corner x in {-0.5, +0.5}; world x must be offset by +10 (the group translation)
+    assert float(segs[:, 0].min()) > 9.0

@@ -165,6 +165,7 @@ class Model:
         self._next_inst_id = other._next_inst_id
         self.materials = other.materials
         self.tags = other.tags
+        self.opening_definitions = other.opening_definitions
 
     def revalidate_active_path(self) -> None:
         """Pop the active path to the nearest still-reachable instance.

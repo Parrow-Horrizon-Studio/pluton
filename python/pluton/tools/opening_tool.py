@@ -110,7 +110,8 @@ class DoorWindowTool(Tool):
                 [-hx, 0.0, 0.0], [hx, 0.0, 0.0],
                 [hx, 0.0, self.height], [-hx, 0.0, self.height],
             ], dtype=np.float64)
-            world = [(self._preview @ np.append(c, 1.0))[:3] for c in corners]
+            w = self._model.active_world_transform
+            world = [(w @ self._preview @ np.append(c, 1.0))[:3] for c in corners]
             loop = [*world, world[0]]
             segs = []
             for a, b in itertools.pairwise(loop):

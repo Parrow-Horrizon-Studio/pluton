@@ -87,3 +87,15 @@ def test_shared_definition_undo_leaves_other_instance():
     c2.undo(model)
     assert len(target.children) == 1
     assert len(defn.instances) == 1  # only c1's instance remains; no leak
+
+
+def test_load_from_resets_opening_registry():
+    model = Model()
+    PlaceOpeningCommand("door", 0.9, 2.1, 0.1, np.eye(4), model.active_context).do(model)
+    assert ("door", 0.9, 2.1, 0.1) in model.opening_definitions
+    stale = model.opening_definitions[("door", 0.9, 2.1, 0.1)]
+    model.load_from(Model())                       # swap in a fresh document
+    assert model.opening_definitions == {}          # registry cleared
+    # placing the default door again builds a NEW Definition, not the discarded one
+    PlaceOpeningCommand("door", 0.9, 2.1, 0.1, np.eye(4), model.active_context).do(model)
+    assert model.active_context.children[-1].definition is not stale
