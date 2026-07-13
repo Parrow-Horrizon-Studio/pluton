@@ -118,7 +118,12 @@ class Model:
     def pick_face_local(self, origin, direction):
         """Nearest child-instance face hit for a WORLD ray, as (point, normal)
         in the active-context-local frame. `normal` faces the ray origin
-        (viewer-facing). None if nothing is hit."""
+        (viewer-facing). None if nothing is hit.
+
+        The normal uses the instance transform's linear block, so it is exact
+        for rigid or uniform-scale hierarchies (all M7b walls and openings); it
+        is only approximate under a non-uniformly scaled ancestor, where a true
+        fix would use the inverse-transpose of that block."""
         from pluton.geometry.transforms import mat_invert
 
         w = self.active_world_transform
