@@ -11,7 +11,7 @@ from PySide6.QtCore import Qt
 from PySide6.QtGui import QKeyEvent, QMouseEvent
 
 from pluton.commands.roof_commands import CreateRoofCommand
-from pluton.geometry.roof import _rot_z, roof_solid
+from pluton.geometry.roof import _MAX_SLOPE_DEG, _rot_z, roof_solid
 from pluton.geometry.transforms import mat_invert
 from pluton.tools.tool import Tool, ToolContext, ToolOverlay
 from pluton.viewport.snap_engine import MARKER_COLOR_BY_KIND, SnapKind
@@ -129,7 +129,7 @@ class RoofTool(Tool):
         from pluton.units import parse_angle
 
         value = parse_angle(text)
-        if value is None or value <= 0.0 or value > 85.0:
+        if value is None or value <= 0.0 or value > _MAX_SLOPE_DEG:
             return False
         self.slope = value
         return True

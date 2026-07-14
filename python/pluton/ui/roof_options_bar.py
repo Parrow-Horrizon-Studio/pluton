@@ -10,6 +10,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from pluton.geometry.roof import _MAX_SLOPE_DEG
 from pluton.units import format_angle, parse_angle
 
 _KINDS = ("gable", "hip", "shed")
@@ -52,6 +53,6 @@ class RoofOptionsBar(QWidget):
 
     def _on_slope_committed(self) -> None:
         value = parse_angle(self._slope_edit.text())
-        if value is not None and 0.0 < value <= 85.0:
+        if value is not None and 0.0 < value <= _MAX_SLOPE_DEG:
             self._tool.slope = value
         self.refresh()

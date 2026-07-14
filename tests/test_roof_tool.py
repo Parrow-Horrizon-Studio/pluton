@@ -6,6 +6,8 @@ from pluton.model.model import Model
 from pluton.tools.roof_tool import RoofTool
 from pluton.tools.tool import ToolContext
 from pluton.viewport.snap_engine import SnapKind
+from PySide6.QtCore import Qt
+from PySide6.QtGui import QKeyEvent
 
 
 class _Snap:
@@ -68,3 +70,62 @@ def test_no_footprint_no_placement_on_degenerate():
 
 def _defn_local_verts(defn):
     return [v.position for v in defn.mesh.vertices_iter()]
+
+
+def _apex_axis(model):
+    inst = model.active_context.children[-1]
+    m = inst.transform
+    verts = np.array([(m @ np.append(v.position, 1.0))[:3]
+                      for v in inst.definition.mesh.vertices_iter()])
+    apex = verts[np.isclose(verts[:, 2], verts[:, 2].max())]
+    span_x = apex[:, 0].max() - apex[:, 0].min()
+    span_y = apex[:, 1].max() - apex[:, 1].min()
+    return "y" if span_y > span_x else "x"
+
+
+def test_up_arrow_flips_ridge_axis():
+    # 4 (x) x 8 (y) gable: default ridge runs along the longer edge (Y);
+    # one Up press mid-gesture rotates it 90 deg so the ridge runs along X.
+    m1 = Model()
+    t1 = RoofTool()
+    t1.activate(_ctx(m1, CommandStack()))
+    _place(t1, 0.0, 0.0, 4.0, 8.0)
+    assert _apex_axis(m1) == "y"
+
+    m2 = Model()
+    t2 = RoofTool()
+    t2.activate(_ctx(m2, CommandStack()))
+    t2.on_mouse_press(None, _Snap(0.0, 0.0))
+    t2.on_key_press(
+        QKeyEvent(QKeyEvent.Type.KeyPress, Qt.Key.Key_Up, Qt.KeyboardModifier.NoModifier)
+    )
+    t2.on_mouse_move(None, _Snap(4.0, 8.0))
+    t2.on_mouse_press(None, _Snap(4.0, 8.0))
+    assert _apex_axis(m2) == "x"
+
+
+def test_placement_inside_entered_group_lands_at_world_footprint():
+    # Placing a roof while entered into a translated+rotated group must still
+    # land at the DRAWN WORLD footprint (transform_local = inv(active_world) @ m_world
+    # => rendered at m_world). This guards the M7b-class overlay/placement frame bug.
+    model = Model()
+    grp = model.new_definition("G", is_group=True)
+    ang = np.radians(35.0)
+    c, s = np.cos(ang), np.sin(ang)
+    tf = np.array(
+        [[c, -s, 0.0, 10.0], [s, c, 0.0, 20.0], [0.0, 0.0, 1.0, 0.0], [0.0, 0.0, 0.0, 1.0]]
+    )
+    inst = model.new_instance(grp, tf)
+    model.active_context.children.append(inst)
+    model.active_path = [inst]
+    tool = RoofTool()
+    tool.activate(_ctx(model, CommandStack()))
+    _place(tool, 0.0, 0.0, 4.0, 8.0)   # world footprint corners (0,0)-(4,8)
+    roof = model.active_context.children[-1]
+    world = model.active_world_transform @ roof.transform
+    verts = np.array([(world @ np.append(v.position, 1.0))[:3]
+                      for v in roof.definition.mesh.vertices_iter()])
+    assert np.isclose(verts[:, 0].min(), 0.0, atol=1e-6)
+    assert np.isclose(verts[:, 0].max(), 4.0, atol=1e-6)
+    assert np.isclose(verts[:, 1].min(), 0.0, atol=1e-6)
+    assert np.isclose(verts[:, 1].max(), 8.0, atol=1e-6)
