@@ -69,3 +69,38 @@ def test_degenerate_returns_empty():
     assert roof_solid("gable", 4.0, 6.0, 0.0) == ([], [])
     assert roof_solid("gable", 4.0, 6.0, 90.0) == ([], [])
     assert roof_solid("shed", 4.0, 6.0, -5.0) == ([], [])
+
+
+def test_hip_ridge_case_counts_and_closed():
+    # depth > width -> a ridge set back from both ends
+    verts, faces = roof_solid("hip", width=4.0, depth=6.0, angle=30.0)
+    assert len(verts) == 6
+    assert len(faces) == 5
+    assert _closed(faces)
+
+
+def test_hip_pyramid_case_counts_and_closed():
+    # depth <= width -> pyramidal apex (single point)
+    verts, faces = roof_solid("hip", width=6.0, depth=4.0, angle=30.0)
+    assert len(verts) == 5
+    assert len(faces) == 5
+    assert _closed(faces)
+
+
+def test_hip_apex_height_equal_pitch():
+    # apex height = min(w, d)/2 * tan(angle)
+    for w, d in [(4.0, 6.0), (6.0, 4.0), (5.0, 5.0)]:
+        verts, _ = roof_solid("hip", w, d, 35.0)
+        _, hi = _bbox(verts)
+        assert np.isclose(hi[2], min(w, d) / 2.0 * math.tan(math.radians(35.0)))
+
+
+def test_hip_ridge_setback_length():
+    # for d > w, ridge length along Y == d - w (hip run = w/2 each end)
+    w, d = 4.0, 10.0
+    verts, _ = roof_solid("hip", w, d, 30.0)
+    a = np.array(verts)
+    apex_z = (w / 2.0) * math.tan(math.radians(30.0))
+    ridge = a[np.isclose(a[:, 2], apex_z)]
+    assert len(ridge) == 2
+    assert np.isclose(abs(ridge[:, 1].max() - ridge[:, 1].min()), d - w)

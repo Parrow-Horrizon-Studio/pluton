@@ -73,5 +73,46 @@ def roof_solid(kind, width, depth, angle):
         ]
         return _finish(verts), faces
 
-    # "hip" is added in Task 2; until then any unrecognised kind -> empty.
+    if kind == "hip":
+        return _hip(hw, hd, w, d, t)
     return [], []
+
+
+def _hip(hw, hd, w, d, t):
+    """Equal-pitch hip. depth>width -> ridge set back by w/2 each end;
+    depth<=width -> pyramidal apex. hw/hd are half width/depth; t = tan(angle)."""
+    h = min(w, d) / 2.0 * t
+    if d > w:
+        ry = (d - w) / 2.0  # half ridge length
+        verts = [
+            (-hw, -hd, 0.0),
+            (hw, -hd, 0.0),
+            (hw, hd, 0.0),
+            (-hw, hd, 0.0),  # base 0..3
+            (0.0, -ry, h),
+            (0.0, ry, h),  # ridge 4,5
+        ]
+        faces = [
+            (0, 3, 2, 1),  # base
+            (1, 2, 5, 4),  # +X eave trapezoid
+            (3, 0, 4, 5),  # -X eave trapezoid
+            (0, 1, 4),  # -Y hip triangle
+            (2, 3, 5),  # +Y hip triangle
+        ]
+        return _finish(verts), faces
+    # pyramidal (tented) hip
+    verts = [
+        (-hw, -hd, 0.0),
+        (hw, -hd, 0.0),
+        (hw, hd, 0.0),
+        (-hw, hd, 0.0),  # base 0..3
+        (0.0, 0.0, h),  # apex 4
+    ]
+    faces = [
+        (0, 3, 2, 1),  # base
+        (0, 1, 4),  # -Y
+        (1, 2, 4),  # +X
+        (2, 3, 4),  # +Y
+        (3, 0, 4),  # -X
+    ]
+    return _finish(verts), faces
