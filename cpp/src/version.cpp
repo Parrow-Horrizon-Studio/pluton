@@ -3,7 +3,7 @@
 namespace pluton {
 
 std::string version() {
-    return "0.2.2";
+    return "0.2.3";
 }
 
 }  // namespace pluton
