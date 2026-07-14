@@ -43,9 +43,11 @@ from pluton.tools import (
 )
 from pluton.tools.opening_tool import DoorWindowTool
 from pluton.tools.paint_tool import PaintTool
+from pluton.tools.roof_tool import RoofTool
 from pluton.tools.wall_tool import WallTool
 from pluton.ui.materials_dock import MaterialsDock
 from pluton.ui.opening_options_bar import OpeningOptionsBar
+from pluton.ui.roof_options_bar import RoofOptionsBar
 from pluton.ui.status_bar import StatusBar
 from pluton.ui.tags_dock import TagsDock
 from pluton.ui.value_control_box import ValueControlBox
@@ -91,6 +93,8 @@ class MainWindow(QMainWindow):
         self._tool_manager.register(self._wall_tool)
         self._opening_tool = DoorWindowTool()
         self._tool_manager.register(self._opening_tool)
+        self._roof_tool = RoofTool()
+        self._tool_manager.register(self._roof_tool)
 
         # Viewport + status bar (created BEFORE setting ToolContext so we can
         # wire the camera + widget_size_provider into the context).
@@ -144,6 +148,13 @@ class MainWindow(QMainWindow):
         )
         self._opening_options_bar.hide()
 
+        # Roof options bar (M7c, Task 6) — pitch/overhang fields for the Roof
+        # tool; shown only while that tool is active (see _refresh_tool_options).
+        self._roof_options_bar = RoofOptionsBar(
+            self._roof_tool, units_provider=lambda: self._doc.units
+        )
+        self._roof_options_bar.hide()
+
         container = QWidget(self)
         layout = QVBoxLayout(container)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -151,6 +162,7 @@ class MainWindow(QMainWindow):
         layout.addWidget(self._viewport, stretch=1)
         layout.addWidget(self._wall_options_bar, stretch=0)
         layout.addWidget(self._opening_options_bar, stretch=0)
+        layout.addWidget(self._roof_options_bar, stretch=0)
         layout.addWidget(self._status_bar, stretch=0)
         self.setCentralWidget(container)
 
@@ -177,6 +189,7 @@ class MainWindow(QMainWindow):
         QShortcut(QKeySequence("T"), self, activated=lambda: self._activate("T"))
         QShortcut(QKeySequence("W"), self, activated=lambda: self._activate("W"))
         QShortcut(QKeySequence("D"), self, activated=lambda: self._activate("D"))
+        QShortcut(QKeySequence("O"), self, activated=lambda: self._activate("O"))
         QShortcut(QKeySequence(Qt.Key.Key_Delete), self, activated=self._on_delete_selection)
         QShortcut(QKeySequence(Qt.Key.Key_Backspace), self, activated=self._on_delete_selection)
         QShortcut(QKeySequence(Qt.Key.Key_Up), self, activated=lambda: self._on_tool_key(Qt.Key.Key_Up))
@@ -242,6 +255,7 @@ class MainWindow(QMainWindow):
         self._tools_menu = menubar.addMenu("Tools")
         self._tools_menu.addAction("Wall\tW", lambda: self._activate("W"))
         self._tools_menu.addAction("Door/Window\tD", lambda: self._activate("D"))
+        self._tools_menu.addAction("Roof\tO", lambda: self._activate("O"))
 
         # View menu (M5a) — face-style radio group + independent X-Ray toggle.
         self._view_menu = menubar.addMenu("View")
@@ -434,6 +448,10 @@ class MainWindow(QMainWindow):
         if is_opening:
             self._opening_options_bar.refresh()
         self._opening_options_bar.setVisible(is_opening)
+        is_roof = isinstance(self._tool_manager.active, RoofTool)
+        if is_roof:
+            self._roof_options_bar.refresh()
+        self._roof_options_bar.setVisible(is_roof)
 
     def _on_escape(self) -> None:
         active = self._tool_manager.active
