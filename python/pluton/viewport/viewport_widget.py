@@ -207,6 +207,7 @@ class ViewportWidget(QOpenGLWidget):
         from PySide6.QtGui import QColor, QFont, QPainter
 
         from pluton.annotations.draw_plan import FONT_PX, plan_annotation
+        from pluton.units import Units
         from pluton.viewport.annotation_painter import paint_annotation_plans
 
         if self.model is None:
@@ -216,7 +217,10 @@ class ViewportWidget(QOpenGLWidget):
             return
         width, height = self.width(), self.height()
         world = self.model.active_world_transform
-        units = self._units_provider() if self._units_provider is not None else None
+        # Every other units provider in this codebase (wall/opening/roof options
+        # bars) always yields a real Units object -- None is not a value
+        # format_length expects, so default to Units() rather than None.
+        units = self._units_provider() if self._units_provider is not None else Units()
         plans = []
         for ann in annotations:
             plan = plan_annotation(ann, world, self.camera, width, height, units)
@@ -227,15 +231,17 @@ class ViewportWidget(QOpenGLWidget):
         # Selection.annotations lands in Task 7; guard until then.
         selected_ids = set(getattr(self.selection, "annotations", set()))
         painter = QPainter(self)
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
-        font = QFont()
-        font.setPixelSize(int(FONT_PX))
-        painter.setFont(font)
-        paint_annotation_plans(
-            painter,
-            plans,
-            QColor(30, 30, 30),
-            selected_ids,
-            QColor(51, 140, 242),
-        )
-        painter.end()
+        try:
+            painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+            font = QFont()
+            font.setPixelSize(int(FONT_PX))
+            painter.setFont(font)
+            paint_annotation_plans(
+                painter,
+                plans,
+                QColor(30, 30, 30),
+                selected_ids,
+                QColor(51, 140, 242),
+            )
+        finally:
+            painter.end()
