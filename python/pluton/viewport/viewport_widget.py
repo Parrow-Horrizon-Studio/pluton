@@ -33,6 +33,7 @@ class ViewportWidget(QOpenGLWidget):
         self.snap_engine = SnapEngine()
         self._status_bar = None
         self._on_event_finished = None
+        self._units_provider = None  # M7d — callable () -> pluton.units.Units (or None)
 
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         self.setMouseTracking(True)
@@ -57,6 +58,12 @@ class ViewportWidget(QOpenGLWidget):
         self.scene_renderer.set_render_style(style)
         self.update()
 
+    def set_units_provider(self, fn) -> None:
+        """M7d: install a callable () -> pluton.units.Units, used by
+        _paint_annotations to format dimension text. Set by MainWindow
+        (mirrors set_status_bar / set_event_finished_callback)."""
+        self._units_provider = fn
+
     # --- GL lifecycle -----------------------------------------------------
 
     def initializeGL(self) -> None:
@@ -70,6 +77,7 @@ class ViewportWidget(QOpenGLWidget):
         active = self.tool_manager.active if self.tool_manager is not None else None
         overlay = active.overlay() if active is not None else None
         self.scene_renderer.render(self.camera, self.model, overlay, self.selection)
+        self._paint_annotations()
 
     # --- Mouse handling ---------------------------------------------------
 
@@ -191,3 +199,43 @@ class ViewportWidget(QOpenGLWidget):
             anchor=anchor,
             world_transform=wt,
         )
+
+    def _paint_annotations(self) -> None:
+        """M7d: draw the active context's annotations in screen space, on top
+        of the GL render. All layout is delegated to the pure draw_plan module
+        (plan_annotation); this method only projects + paints via QPainter."""
+        from PySide6.QtGui import QColor, QFont, QPainter
+
+        from pluton.annotations.draw_plan import FONT_PX, plan_annotation
+        from pluton.viewport.annotation_painter import paint_annotation_plans
+
+        if self.model is None:
+            return
+        annotations = self.model.active_context.annotations
+        if not annotations:
+            return
+        width, height = self.width(), self.height()
+        world = self.model.active_world_transform
+        units = self._units_provider() if self._units_provider is not None else None
+        plans = []
+        for ann in annotations:
+            plan = plan_annotation(ann, world, self.camera, width, height, units)
+            if plan is not None:
+                plans.append(plan)
+        if not plans:
+            return
+        # Selection.annotations lands in Task 7; guard until then.
+        selected_ids = set(getattr(self.selection, "annotations", set()))
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        font = QFont()
+        font.setPixelSize(int(FONT_PX))
+        painter.setFont(font)
+        paint_annotation_plans(
+            painter,
+            plans,
+            QColor(30, 30, 30),
+            selected_ids,
+            QColor(51, 140, 242),
+        )
+        painter.end()
