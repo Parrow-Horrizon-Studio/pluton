@@ -287,9 +287,87 @@ def test_arrow_endpoints_with_hardcoded_values():
         dx = arrow_seg[2] - arrow_seg[0]
         dy = arrow_seg[3] - arrow_seg[1]
         length = float(np.sqrt(dx**2 + dy**2))
-        assert length == pytest.approx(9.0)  # hardcoded _ARROW_PX value
+        assert length == pytest.approx(_ARROW_PX)
 
     # Hardcoded arrow tail coordinates with _ARROW_SPREAD=0.42
     # These will fail if _ARROW_SPREAD changes
     assert arr1 == pytest.approx((100.0, 200.0, 108.0, 195.88), abs=0.1)
     assert arr2 == pytest.approx((100.0, 200.0, 102.27, 191.29), abs=0.1)
+
+
+def test_label_geometry_with_non_identity_world_transform():
+    """Non-identity world_transform must be applied to produce screen geometry.
+
+    Tests that both translation and scale in the world_transform are applied
+    to the anchor and text positions before projection. This catches regressions
+    where world_transform handling is partially or completely removed.
+
+    Transform: 2x scale + translation by (1, 1, 0)
+    Anchor (0,0,0) local → (1,1,0) world → screen (110,190)
+    Text (5,3,0) local → (11,7,0) world → screen (210,130)
+    """
+    transform = np.array([
+        [2.0, 0.0, 0.0, 1.0],
+        [0.0, 2.0, 0.0, 1.0],
+        [0.0, 0.0, 2.0, 0.0],
+        [0.0, 0.0, 0.0, 1.0],
+    ], dtype=np.float64)
+
+    lab = Label(1, (0.0, 0.0, 0.0), (5.0, 3.0, 0.0), "scaled")
+    plan = plan_annotation(lab, transform, _FlatCamera(), 640, 480, Units())
+    assert plan is not None
+
+    leader, landing, _, _ = plan.segments_px
+
+    # With the transform, world coordinates differ from local coordinates
+    # anchor_w = (1, 1, 0), text_w = (11, 7, 0)
+    # After projection: anchor_px = (110, 190), text_px = (210, 130)
+    anchor_px_expected = np.array([110.0, 190.0])
+    text_px_expected = np.array([210.0, 130.0])
+    elbow_px_expected = np.array([210.0 - _LANDING_PX, 130.0])
+
+    # Leader connects anchor to elbow
+    assert leader == pytest.approx((
+        float(anchor_px_expected[0]), float(anchor_px_expected[1]),
+        float(elbow_px_expected[0]), float(elbow_px_expected[1])
+    ))
+
+    # Landing is horizontal at text y
+    assert landing == pytest.approx((
+        float(elbow_px_expected[0]), float(elbow_px_expected[1]),
+        float(text_px_expected[0]), float(text_px_expected[1])
+    ))
+
+    # Verify landing is indeed horizontal
+    assert abs(landing[1] - landing[3]) < 1e-9
+
+
+def test_label_degenerate_anchor_and_text_coincident():
+    """When anchor and text are very close, leader direction is near-zero.
+
+    In this case, _unit returns None and the arrowhead strokes are gracefully
+    skipped, resulting in only 2 segments (leader + landing, no arrows).
+    No exception or NaN should occur.
+
+    With camera projection (100 + x*10, 200 - y*10):
+    Anchor (0,0,0) → screen (100,200)
+    Text (2.6,0,0) → screen (126,200)
+    Elbow = (126 - 26, 200) = (100,200)
+    Leader vector = (0,0) → _unit returns None, no arrows drawn
+    """
+    lab = Label(1, (0.0, 0.0, 0.0), (2.6, 0.0, 0.0), "degenerate")
+    plan = _plan(lab)
+    assert plan is not None
+
+    # With elbow ≈ anchor in screen space, leader vector is near-zero
+    # The _unit function returns None, so only leader + landing are drawn
+    assert len(plan.segments_px) == 2
+
+    # Verify no NaN in any coordinate
+    for seg in plan.segments_px:
+        for coord in seg:
+            assert not np.isnan(coord)
+
+    # Text should still be present
+    assert len(plan.texts) == 1
+    assert plan.texts[0].text == "degenerate"
