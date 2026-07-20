@@ -16,7 +16,13 @@ def _shift(point, delta):
 
 
 class CreateAnnotationCommand(Command):
-    """Append one annotation to a context; undo detaches the same object."""
+    """Append one annotation to a context; undo detaches the same object.
+
+    Membership is checked by identity (`is`), not `==`. Annotation entities
+    are dataclasses, so `in`/`list.remove()` would resolve through the
+    auto-generated value-equality `__eq__` and could add/remove the wrong
+    object if two annotations ever happen to be field-for-field equal.
+    """
 
     name = "Create Annotation"
 
@@ -25,12 +31,16 @@ class CreateAnnotationCommand(Command):
         self._target = target_context
 
     def do(self, model) -> None:
-        if self._annotation not in self._target.annotations:
-            self._target.annotations.append(self._annotation)
+        annotations = self._target.annotations
+        if not any(a is self._annotation for a in annotations):
+            annotations.append(self._annotation)
 
     def undo(self, model) -> None:
-        if self._annotation in self._target.annotations:
-            self._target.annotations.remove(self._annotation)
+        annotations = self._target.annotations
+        for index, a in enumerate(annotations):
+            if a is self._annotation:
+                del annotations[index]
+                break
 
 
 class DeleteAnnotationsCommand(Command):
@@ -84,11 +94,21 @@ class EditLabelTextCommand(Command):
             ann.text = self._old_text
 
 
+_MOVE_FIELD_BY_KIND = {"dimension": "offset", "label": "text_pos"}
+
+
 class MoveAnnotationsCommand(Command):
     """Translate annotations by a local delta.
 
     A Dimension's `offset` shifts (moving the dimension line); a Label's
     `text_pos` shifts while its `anchor` stays put so the leader re-aims.
+
+    On the first `do()`, captures each affected annotation's absolute
+    original field value and computes the absolute new value from the
+    delta. do()/undo() thereafter are plain absolute writes of the
+    captured (field, old, new) tuples -- re-entrant like
+    TransformVerticesCommand, and immune to anything else mutating the
+    field between do() and undo() (a delta-negate undo is not).
     """
 
     name = "Move Annotations"
@@ -97,19 +117,31 @@ class MoveAnnotationsCommand(Command):
         self._ids = list(annotation_ids)
         self._delta = (float(delta[0]), float(delta[1]), float(delta[2]))
         self._target = target_context
-
-    def _apply(self, delta) -> None:
-        wanted = set(self._ids)
-        for ann in self._target.annotations:
-            if ann.id not in wanted:
-                continue
-            if getattr(ann, "kind", None) == "dimension":
-                ann.offset = _shift(ann.offset, delta)
-            elif getattr(ann, "kind", None) == "label":
-                ann.text_pos = _shift(ann.text_pos, delta)
+        self._moves: dict[int, tuple[str, tuple, tuple]] = {}
 
     def do(self, model) -> None:
-        self._apply(self._delta)
+        if not self._moves:
+            wanted = set(self._ids)
+            for ann in self._target.annotations:
+                if ann.id not in wanted:
+                    continue
+                field = _MOVE_FIELD_BY_KIND.get(getattr(ann, "kind", None))
+                if field is None:
+                    continue
+                old = getattr(ann, field)
+                new = _shift(old, self._delta)
+                self._moves[ann.id] = (field, old, new)
+        for ann in self._target.annotations:
+            move = self._moves.get(ann.id)
+            if move is None:
+                continue
+            field, _old, new = move
+            setattr(ann, field, new)
 
     def undo(self, model) -> None:
-        self._apply((-self._delta[0], -self._delta[1], -self._delta[2]))
+        for ann in self._target.annotations:
+            move = self._moves.get(ann.id)
+            if move is None:
+                continue
+            field, old, _new = move
+            setattr(ann, field, old)
