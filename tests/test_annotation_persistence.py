@@ -10,7 +10,12 @@ from __future__ import annotations
 
 import pytest
 from pluton.document import DocumentSettings
-from pluton.io.document_codec import document_from_dict, document_to_dict
+from pluton.io.document_codec import (
+    annotation_from_dict,
+    document_from_dict,
+    document_to_dict,
+)
+from pluton.io.errors import PlutonFormatError
 from pluton.model.annotation import Dimension, Label
 from pluton.model.model import Model
 from pluton.viewport.camera import Camera
@@ -124,3 +129,29 @@ def test_load_from_resets_next_annotation_id_after_document_load():
 
     new_id = target.new_annotation_id()
     assert new_id not in existing_ids
+
+
+def test_annotation_from_dict_raises_on_missing_kind():
+    """A record with a missing 'kind' key must raise PlutonFormatError,
+    not silently construct a Label."""
+    record = {
+        "id": 1,
+        "anchor": [0.0, 0.0, 0.0],
+        "text_pos": [1.0, 1.0, 0.0],
+        "text": "label",
+    }
+    with pytest.raises(PlutonFormatError):
+        annotation_from_dict(record)
+
+
+def test_annotation_from_dict_raises_on_unrecognized_kind():
+    """A record with an unrecognized 'kind' value must raise PlutonFormatError."""
+    record = {
+        "kind": "callout",
+        "id": 1,
+        "anchor": [0.0, 0.0, 0.0],
+        "text_pos": [1.0, 1.0, 0.0],
+        "text": "callout",
+    }
+    with pytest.raises(PlutonFormatError):
+        annotation_from_dict(record)

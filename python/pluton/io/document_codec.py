@@ -94,14 +94,20 @@ def annotation_to_dict(ann: Dimension | Label) -> dict:
 
 
 def annotation_from_dict(record: dict) -> Dimension | Label:
-    """Rebuild the Dimension or Label produced by `annotation_to_dict`."""
-    if record.get("kind") == "dimension":
+    """Rebuild the Dimension or Label produced by `annotation_to_dict`.
+
+    Raises PlutonFormatError if 'kind' is missing or unrecognized.
+    """
+    kind = record.get("kind")
+    if kind == "dimension":
         return Dimension(
             record["id"], tuple(record["p1"]), tuple(record["p2"]), tuple(record["offset"])
         )
-    return Label(
-        record["id"], tuple(record["anchor"]), tuple(record["text_pos"]), record["text"]
-    )
+    if kind == "label":
+        return Label(
+            record["id"], tuple(record["anchor"]), tuple(record["text_pos"]), record["text"]
+        )
+    raise PlutonFormatError(f"annotation has unknown kind: {kind!r}")
 
 
 def model_to_dict(model: Model) -> dict:

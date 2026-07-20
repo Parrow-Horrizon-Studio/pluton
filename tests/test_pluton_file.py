@@ -185,3 +185,90 @@ def test_rich_document_roundtrip_through_real_zip_and_json(tmp_path):
     # Imperial units survive.
     assert loaded.units.system is UnitSystem.IMPERIAL
     assert loaded.units.imperial_denominator == 8
+
+
+def test_load_schema_version_1_document_without_annotations_key(tmp_path):
+    """Back-compat test for v1 documents that predate the per-Definition
+    'annotations' array. The real pluton_file load path must handle a v1
+    document whose definitions lack the 'annotations' key entirely.
+
+    This exercises the full save/load pipeline (zip + manifest + json), not
+    just the dict codec, ensuring the version gate accepts v1 files and
+    document_from_dict correctly defaults missing annotations to empty lists."""
+    path = tmp_path / "old_v1.pluton"
+
+    # Construct a minimal v1 document by hand: the archive layout must match
+    # exactly what save_document produces, but with schema_version=1 and no
+    # "annotations" keys in the definitions.
+    doc_data = {
+        "units": {
+            "system": "metric",
+            "metric_unit": "m",
+            "metric_precision": 3,
+            "imperial_denominator": 16,
+        },
+        "camera": {
+            "position": [0.0, 0.0, 10.0],
+            "target": [0.0, 0.0, 0.0],
+            "up": [0.0, 1.0, 0.0],
+            "fov_y_deg": 45.0,
+        },
+        "materials": {
+            "next_id": 1,
+            "items": [],
+        },
+        "tags": {
+            "next_id": 1,
+            "items": [],
+        },
+        "model": {
+            "next_def_id": 2,
+            "next_inst_id": 1,
+            "root_id": 1,
+            "definitions": [
+                {
+                    "id": 1,
+                    "name": "Root",
+                    "is_group": True,
+                    "geometry": {
+                        "vertices": [[0, 0, 0], [1, 0, 0], [1, 1, 0], [0, 1, 0]],
+                        "edges": [],
+                        "faces": [[0, 1, 2, 3]],
+                        "face_materials": {},
+                    },
+                    "children": [],
+                    # NOTE: no "annotations" key, as in pre-M7d files
+                },
+            ],
+        },
+    }
+
+    manifest = {
+        "format": "pluton",
+        "schema_version": 1,
+        "app_version": "0.0.0-test",
+    }
+
+    with zipfile.ZipFile(path, "w") as zf:
+        zf.writestr("manifest.json", json.dumps(manifest, separators=(",", ":")))
+        zf.writestr("document.json", json.dumps(doc_data, separators=(",", ":")))
+
+    # Load the v1 file through the real pluton_file pipeline.
+    loaded = load_document(path)
+
+    # The v1 document must load without error.
+    assert loaded.model.root.id == 1
+    assert loaded.model.root.name == "Root"
+
+    # Every definition must end up with an empty annotations list, not None
+    # or missing. This is the back-compat guarantee.
+    assert loaded.model.root.annotations == []
+
+    # The annotation id counter must be initialized correctly: since no
+    # annotations were loaded, the next id should be 0.
+    new_id = loaded.model.new_annotation_id()
+    assert new_id == 0
+
+    # Sanity: the newly allocated id is not 0 again on the next call.
+    next_new_id = loaded.model.new_annotation_id()
+    assert next_new_id == 1
