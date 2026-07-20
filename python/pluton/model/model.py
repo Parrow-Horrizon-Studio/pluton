@@ -173,6 +173,7 @@ class Model:
         self.materials = other.materials
         self.tags = other.tags
         self.opening_definitions = other.opening_definitions
+        self._next_annotation_id = other._next_annotation_id
 
     def revalidate_active_path(self) -> None:
         """Pop the active path to the nearest still-reachable instance.

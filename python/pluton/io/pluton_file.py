@@ -19,7 +19,7 @@ from pluton.io.document_codec import (
 )
 from pluton.io.errors import PlutonFormatError, PlutonVersionError
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2  # M7d: bumped for per-Definition "annotations" array
 _MANIFEST = "manifest.json"
 _DOCUMENT = "document.json"
 

@@ -14,6 +14,7 @@ from typing import NamedTuple
 import numpy as np
 
 from pluton.io.errors import PlutonFormatError
+from pluton.model.annotation import Dimension, Label
 from pluton.model.definition import Definition
 from pluton.model.instance import Instance
 from pluton.model.material import MaterialLibrary
@@ -73,6 +74,36 @@ def geometry_from_dict(scene: Scene, data: dict) -> None:
         scene.set_face_material(new_fids[fi], int(mat))
 
 
+def annotation_to_dict(ann: Dimension | Label) -> dict:
+    """Serialize a Dimension or Label, discriminated by `ann.kind`."""
+    if ann.kind == "dimension":
+        return {
+            "kind": "dimension",
+            "id": ann.id,
+            "p1": list(ann.p1),
+            "p2": list(ann.p2),
+            "offset": list(ann.offset),
+        }
+    return {
+        "kind": "label",
+        "id": ann.id,
+        "anchor": list(ann.anchor),
+        "text_pos": list(ann.text_pos),
+        "text": ann.text,
+    }
+
+
+def annotation_from_dict(record: dict) -> Dimension | Label:
+    """Rebuild the Dimension or Label produced by `annotation_to_dict`."""
+    if record.get("kind") == "dimension":
+        return Dimension(
+            record["id"], tuple(record["p1"]), tuple(record["p2"]), tuple(record["offset"])
+        )
+    return Label(
+        record["id"], tuple(record["anchor"]), tuple(record["text_pos"]), record["text"]
+    )
+
+
 def model_to_dict(model: Model) -> dict:
     """Serialize the scene graph. Definitions reachable from root are emitted once."""
     # Walks only definitions reachable from root via placed instances — an unplaced
@@ -95,6 +126,7 @@ def model_to_dict(model: Model) -> dict:
             "name": d.name,
             "is_group": d.is_group,
             "geometry": geometry_to_dict(d.mesh),
+            "annotations": [annotation_to_dict(a) for a in d.annotations],
             "children": [
                 {"id": inst.id,
                  "definition_id": inst.definition.id,
@@ -120,6 +152,7 @@ def model_from_dict(data: dict) -> Model:
     defs_by_id: dict[int, Definition] = {}
     for rec in data["definitions"]:
         d = Definition(int(rec["id"]), str(rec["name"]), bool(rec["is_group"]))
+        d.annotations = [annotation_from_dict(r) for r in rec.get("annotations", [])]
         defs_by_id[d.id] = d
 
     # Pass 2: geometry + child instances.
@@ -146,6 +179,13 @@ def model_from_dict(data: dict) -> Model:
     model.active_path = []
     model._next_def_id = int(data["next_def_id"])
     model._next_inst_id = int(data["next_inst_id"])
+
+    max_ann_id = -1
+    for d in defs_by_id.values():
+        for ann in d.annotations:
+            max_ann_id = max(max_ann_id, ann.id)
+    model._next_annotation_id = max_ann_id + 1
+
     return model
 
 
