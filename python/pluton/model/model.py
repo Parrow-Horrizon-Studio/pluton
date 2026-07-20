@@ -19,6 +19,7 @@ class Model:
         self.materials = MaterialLibrary()
         self.tags = TagLibrary()
         self.opening_definitions = {}   # M7b: (kind, w, h, depth) -> shared Component Definition
+        self._next_annotation_id = 0   # M7d: model-wide unique annotation ids
 
     # --- construction ---
     def new_definition(self, name: str, is_group: bool) -> Definition:
@@ -31,6 +32,12 @@ class Model:
         self._next_inst_id += 1
         definition.instances.append(inst)
         return inst
+
+    def new_annotation_id(self) -> int:
+        """Allocate a model-wide unique annotation id."""
+        annotation_id = self._next_annotation_id
+        self._next_annotation_id += 1
+        return annotation_id
 
     # --- active context ---
     @property
