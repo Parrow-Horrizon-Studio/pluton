@@ -228,8 +228,7 @@ class ViewportWidget(QOpenGLWidget):
                 plans.append(plan)
         if not plans:
             return
-        # Selection.annotations lands in Task 7; guard until then.
-        selected_ids = set(getattr(self.selection, "annotations", set()))
+        selected_ids = set(self.selection.annotations) if self.selection is not None else set()
         painter = QPainter(self)
         try:
             painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
