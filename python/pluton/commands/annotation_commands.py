@@ -83,7 +83,8 @@ class EditLabelTextCommand(Command):
         ann = _find(self._target, self._id)
         if ann is None or getattr(ann, "kind", None) != "label":
             return
-        self._old_text = ann.text
+        if self._old_text is None:
+            self._old_text = ann.text
         ann.text = self._new_text
 
     def undo(self, model) -> None:

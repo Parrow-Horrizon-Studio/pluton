@@ -206,6 +206,38 @@ def test_edit_label_text_do_undo_do_undo_cycle():
     assert ctx.annotations[0].text == "original"
 
 
+def test_edit_label_text_undo_restores_true_original_despite_external_mutation():
+    """Regression for review Finding 3.
+
+    undo() must restore the absolute original value it captured on do(), not
+    derive "original" by rereading the current text on each do(). If anything
+    else mutates the annotation's text between undo() and a following do(),
+    recomputing the "old" text on the second do() silently captures the
+    externally-mutated value, and the subsequent undo() produces a bogus result.
+    """
+    model = Model()
+    ctx = model.active_context
+    lab = _label(model, "original")
+    ctx.annotations.append(lab)
+    cmd = EditLabelTextCommand(lab.id, "edited", ctx)
+
+    cmd.do(model)
+    assert ctx.annotations[0].text == "edited"
+
+    cmd.undo(model)
+    assert ctx.annotations[0].text == "original"
+
+    # Something else mutates the annotation's text between undo() and do()
+    # (a UI edit, an unrelated command, whatever) -- undo must not care.
+    ctx.annotations[0].text = "externally-mutated"
+
+    cmd.do(model)   # redo
+    assert ctx.annotations[0].text == "edited"
+
+    cmd.undo(model)   # second undo
+    assert ctx.annotations[0].text == "original"
+
+
 def test_move_do_undo_do_undo_cycle():
     """Genuine redo cycle for MoveAnnotationsCommand, multiple ids at once,
     pinning per-kind semantics (dimension offset vs. label text_pos/anchor)
