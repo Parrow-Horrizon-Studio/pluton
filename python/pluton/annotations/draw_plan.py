@@ -23,6 +23,9 @@ _TEXT_GAP_PX = 5.0            # text sits this far above the dimension line
 _EXT_GAP_PX = 4.0             # extension line starts this far off the geometry
 _EXT_OVERSHOOT_PX = 6.0       # ...and runs this far past the dimension line
 _TICK_PX = 6.0                # half-length of a 45-degree tick
+_LANDING_PX = 26.0            # horizontal landing under the text
+_ARROW_PX = 9.0               # arrowhead stroke length
+_ARROW_SPREAD = 0.42          # radians each side of the leader direction
 _EPS = 1e-9
 
 
@@ -87,6 +90,8 @@ def plan_annotation(annotation, world_transform, camera, width, height, units):
     """Return an AnnotationDraw for `annotation`, or None if it cannot be drawn."""
     if getattr(annotation, "kind", None) == "dimension":
         return _plan_dimension(annotation, world_transform, camera, width, height, units)
+    if getattr(annotation, "kind", None) == "label":
+        return _plan_label(annotation, world_transform, camera, width, height)
     return None
 
 
@@ -146,4 +151,48 @@ def _plan_dimension(dim, world_transform, camera, width, height, units):
 
     plan.hit_boxes.append(_text_box(label, text.x, text.y, text.align))
     plan.hit_boxes.append(_segment_box(dim_seg))
+    return plan
+
+
+def _plan_label(label, world_transform, camera, width, height):
+    anchor_w = _to_world(label.anchor, world_transform)
+    text_w = _to_world(label.text_pos, world_transform)
+    anchor_px = _project(anchor_w, camera, width, height)
+    text_px = _project(text_w, camera, width, height)
+    if anchor_px is None or text_px is None:
+        return None
+
+    plan = AnnotationDraw(annotation_id=label.id)
+    to_right = float(text_px[0]) >= float(anchor_px[0])
+    sign = 1.0 if to_right else -1.0
+    # the landing runs from the elbow toward the text side
+    elbow = np.array([float(text_px[0]) - sign * _LANDING_PX, float(text_px[1])])
+
+    leader = (float(anchor_px[0]), float(anchor_px[1]), float(elbow[0]), float(elbow[1]))
+    landing = (float(elbow[0]), float(elbow[1]), float(text_px[0]), float(text_px[1]))
+    plan.segments_px.append(leader)
+    plan.segments_px.append(landing)
+
+    # arrowhead: two strokes fanned about the leader direction, tip at the anchor
+    direction = _unit(elbow - anchor_px)
+    if direction is not None:
+        for spread in (_ARROW_SPREAD, -_ARROW_SPREAD):
+            c, s = float(np.cos(spread)), float(np.sin(spread))
+            rotated = np.array([direction[0] * c - direction[1] * s,
+                                direction[0] * s + direction[1] * c])
+            tail = anchor_px + rotated * _ARROW_PX
+            plan.segments_px.append(
+                (float(anchor_px[0]), float(anchor_px[1]), float(tail[0]), float(tail[1]))
+            )
+
+    align = "left" if to_right else "right"
+    text = TextDraw(
+        text=label.text,
+        x=float(text_px[0]),
+        y=float(text_px[1]) - _TEXT_GAP_PX * 0.4,
+        align=align,
+    )
+    plan.texts.append(text)
+    plan.hit_boxes.append(_text_box(label.text, text.x, text.y, align))
+    plan.hit_boxes.append(_segment_box(leader))
     return plan
