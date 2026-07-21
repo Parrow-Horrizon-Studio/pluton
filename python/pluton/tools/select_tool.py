@@ -11,7 +11,9 @@ import numpy as np
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QKeyEvent, QMouseEvent
 
+from pluton.annotations.picking import pick_annotation
 from pluton.tools.tool import Tool, ToolContext, ToolOverlay
+from pluton.units import Units
 from pluton.viewport.picking import pick_selectable
 
 _HOVER_EDGE_COLOR = (0.45, 0.70, 1.00)
@@ -38,9 +40,11 @@ class SelectTool(Tool):
         self._size_provider = None
         self._selection = None
         self._model = None
+        self._units_provider = None  # M7d — callable () -> pluton.units.Units (or None)
         self._request_rebuild = None  # M4e — callable () -> None
         self._hovered: tuple[str, int] | None = None
         self._hovered_instance = None  # M4e — Instance | None (for Task 15 silhouette)
+        self._hovered_annotation: int | None = None  # M7d — annotation id under the cursor
         self._press_px: tuple[float, float] | None = None
         self._is_box = False
         self._box_rect: tuple[float, float, float, float] | None = None
@@ -53,9 +57,11 @@ class SelectTool(Tool):
         self._size_provider = ctx.widget_size_provider
         self._selection = ctx.selection
         self._model = ctx.model
+        self._units_provider = ctx.units_provider
         self._request_rebuild = ctx.request_context_rebuild
         self._hovered = None
         self._hovered_instance = None
+        self._hovered_annotation = None
         self._press_px = None
         self._is_box = False
         self._box_rect = None
@@ -63,6 +69,27 @@ class SelectTool(Tool):
 
     def _world_transform(self):
         return self._model.active_world_transform if self._model is not None else None
+
+    def _units(self) -> Units:
+        # M7d: every other units provider in this codebase (wall/opening/roof
+        # options bars, the annotation painter) always yields a real Units
+        # object -- None is not a value format_length expects.
+        return self._units_provider() if self._units_provider is not None else Units()
+
+    def _pick_annotation(self, cx: float, cy: float, w: int, h: int) -> int | None:
+        """M7d: annotation hit-test scoped to the active context, mirroring how
+        pick_selectable/pick_instance already scope to it."""
+        if self._model is None or self._camera is None:
+            return None
+        return pick_annotation(
+            (cx, cy),
+            self._model.active_context.annotations,
+            self._model.active_world_transform,
+            self._camera,
+            w,
+            h,
+            self._units(),
+        )
 
     def deactivate(self) -> None:
         self._hovered = None
@@ -90,6 +117,10 @@ class SelectTool(Tool):
             self._cursor(event), self._viewport_size(), self._camera, self._scene,
             world_transform=self._world_transform(),
         )
+        # M7d: also track the hovered annotation (drawn on top, so hover-picked first)
+        cx, cy = self._cursor(event)
+        w, h = self._viewport_size()
+        self._hovered_annotation = self._pick_annotation(cx, cy, w, h)
         # M4e: also track hovered instance for Task 15 silhouette rendering
         if self._model is not None and self._camera is not None:
             cx, cy = self._cursor(event)
@@ -128,6 +159,16 @@ class SelectTool(Tool):
         else:
             cx, cy = self._cursor(event)
             w, h = self._viewport_size()
+            # M7d: annotations draw on top, so they win the click before the
+            # instance/geometry pick below ever runs.
+            ann_id = self._pick_annotation(cx, cy, w, h)
+            if ann_id is not None:
+                if shift:
+                    self._selection.toggle_annotation(ann_id)
+                else:
+                    self._selection.replace(annotations=[ann_id])
+                self._reset_press()
+                return
             # M4e: try instance pick first (only if we have a model + camera)
             if self._model is not None and self._camera is not None:
                 origin, direction = self._camera.ray_from_screen(cx, cy, w, h)
