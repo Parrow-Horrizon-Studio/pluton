@@ -337,6 +337,36 @@ def test_eraser_annotation_erase_is_undoable(qtbot):
     assert len(model.active_context.annotations) == 1
 
 
+# ---------------------------------------------------------------------------
+# Fix wave (Minor finding): ordering parity with SelectTool -- the annotation
+# pass must beat the geometry pass for the Eraser too, mirroring
+# test_annotation_pick_beats_geometry_pick_when_they_overlap above.
+# ---------------------------------------------------------------------------
+
+def test_eraser_click_on_overlap_erases_annotation_not_geometry(qtbot):
+    """A click that hits BOTH an annotation and underlying geometry must erase
+    the annotation and leave the geometry untouched -- the same overlap setup
+    as test_annotation_pick_beats_geometry_pick_when_they_overlap, driven
+    through the Eraser instead of the Select tool."""
+    model = _model_with_dimension()
+    scene = model.active_scene
+    # This edge's endpoints project to EXACTLY the same screen segment as the
+    # dimension line ((100,220)-(140,220) under _FlatCamera) -- a genuine
+    # overlap, not just a nearby coincidence.
+    a = scene.add_vertex(np.array([0.0, -2.0, 0.0], dtype=np.float32))
+    b = scene.add_vertex(np.array([4.0, -2.0, 0.0], dtype=np.float32))
+    e_id = scene.add_edge(a, b)
+
+    sel = Selection()
+    stack = CommandStack()
+    tool, _cam = _make_eraser(model, sel, stack)
+
+    tool.on_mouse_press(_press(120.0, 220.0), None)
+
+    assert model.active_context.annotations == [], "annotation pass must win on overlap"
+    assert e_id in {e.id for e in scene.edges_iter()}, "geometry must survive the annotation hit"
+
+
 def test_eraser_annotation_erase_is_active_context_scoped(qtbot):
     """Mirrors test_annotation_in_non_active_context_is_not_selectable: a
     click at an annotation's screen position must not erase it when that

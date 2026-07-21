@@ -96,3 +96,53 @@ def test_delete_removes_annotation_only_selection_and_undo_restores(win):
 
     assert win._command_stack.undo()
     assert len(win._model.active_context.annotations) == 1
+
+
+# ---------------------------------------------------------------------------
+# Fix wave: a mixed annotation + geometry/instance selection must delete as
+# ONE undo-stack entry, so a single Ctrl+Z restores everything at once.
+# ---------------------------------------------------------------------------
+
+def test_delete_mixed_annotation_and_face_selection_is_one_undo(win):
+    scene, fid = _quad(win)
+    f0 = len(list(scene.faces_iter()))
+    ann = Dimension(
+        win._model.new_annotation_id(), (0.0, 0.0, 0.0), (4.0, 0.0, 0.0), (0.0, -2.0, 0.0)
+    )
+    win._model.active_context.annotations.append(ann)
+    win._selection.replace(faces=[fid], annotations=[ann.id])
+
+    win._on_delete_selection()
+
+    assert len(list(scene.faces_iter())) == f0 - 1
+    assert win._model.active_context.annotations == []
+    assert win._selection.is_empty()
+    assert len(win._command_stack._undo) == 1, "one delete must be one undo-stack entry"
+
+    assert win._command_stack.undo()
+
+    assert len(list(scene.faces_iter())) == f0
+    assert len(win._model.active_context.annotations) == 1
+
+
+def test_delete_mixed_annotation_and_instance_selection_is_one_undo(win):
+    d = win._model.new_definition("Box", is_group=False)
+    inst = win._model.new_instance(d)
+    win._model.active_context.children.append(inst)
+    ann = Dimension(
+        win._model.new_annotation_id(), (0.0, 0.0, 0.0), (4.0, 0.0, 0.0), (0.0, -2.0, 0.0)
+    )
+    win._model.active_context.annotations.append(ann)
+    win._selection.replace(instances=[inst.id], annotations=[ann.id])
+
+    win._on_delete_selection()
+
+    assert inst not in win._model.active_context.children
+    assert win._model.active_context.annotations == []
+    assert win._selection.is_empty()
+    assert len(win._command_stack._undo) == 1, "one delete must be one undo-stack entry"
+
+    assert win._command_stack.undo()
+
+    assert inst in win._model.active_context.children
+    assert len(win._model.active_context.annotations) == 1

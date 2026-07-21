@@ -608,13 +608,18 @@ class MainWindow(QMainWindow):
         if sel.is_empty():
             return
 
-        # M7d: annotations go through their own undoable command up front so an
-        # annotation-only selection (which the instance/edge/face branches below
-        # never touch) is deleted with a real undo record instead of being
-        # silently dropped when the selection is cleared below.
+        # Fix wave: build the annotation delete up front but do NOT execute it
+        # standalone -- it must ride along as one child of whichever single
+        # command below ends up on the undo stack, so a mixed selection (any
+        # combination of annotations + instances/edges/faces) is always
+        # exactly ONE undo-stack entry instead of two. DeleteAnnotationsCommand
+        # ignores the `target` argument passed to do()/undo() (it operates on
+        # the target_context captured here), so it composes safely whether the
+        # enclosing command executes against self._model (instance branch) or
+        # self._model.active_scene (edge/face branch below).
+        ann_cmd = None
         if sel.annotations:
             ann_cmd = DeleteAnnotationsCommand(list(sel.annotations), self._model.active_context)
-            self._command_stack.execute(ann_cmd, self._model)
 
         # Instance delete takes priority when instances are selected.
         if sel.instances:
@@ -625,6 +630,8 @@ class MainWindow(QMainWindow):
                 if inst is None:
                     continue
                 cmds.append(DeleteInstanceCommand(self._model.active_context, inst))
+            if ann_cmd is not None:
+                cmds.append(ann_cmd)
             if not cmds:
                 sel.clear()
                 return
@@ -667,6 +674,9 @@ class MainWindow(QMainWindow):
             fc.do(self._model.active_scene)
             composite.children.append(fc)
             removed_faces.add(f_id)
+        if ann_cmd is not None:
+            ann_cmd.do(self._model.active_scene)
+            composite.children.append(ann_cmd)
         if composite.children:
             self._command_stack.push_executed(composite, self._model.active_scene)
         sel.clear()
