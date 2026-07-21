@@ -600,12 +600,21 @@ class MainWindow(QMainWindow):
 
     def _on_delete_selection(self) -> None:
         from pluton.commands import CompositeCommand
+        from pluton.commands.annotation_commands import DeleteAnnotationsCommand
         from pluton.commands.instance_lifecycle_commands import DeleteInstanceCommand
         from pluton.commands.scene_commands import RemoveEdgeCommand, RemoveFaceCommand
 
         sel = self._selection
         if sel.is_empty():
             return
+
+        # M7d: annotations go through their own undoable command up front so an
+        # annotation-only selection (which the instance/edge/face branches below
+        # never touch) is deleted with a real undo record instead of being
+        # silently dropped when the selection is cleared below.
+        if sel.annotations:
+            ann_cmd = DeleteAnnotationsCommand(list(sel.annotations), self._model.active_context)
+            self._command_stack.execute(ann_cmd, self._model)
 
         # Instance delete takes priority when instances are selected.
         if sel.instances:

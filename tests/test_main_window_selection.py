@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import numpy as np
 import pytest
+from pluton.model.annotation import Dimension
 
 
 @pytest.fixture
@@ -72,3 +73,26 @@ def test_empty_selection_delete_is_noop(win):
     win._on_delete_selection()
     assert len(list(scene.faces_iter())) == f0
     assert not win._command_stack.can_undo
+
+
+# ---------------------------------------------------------------------------
+# M7d Task 11: closes a real gap -- before this task, an annotation-only
+# selection fell through the instance/edge/face branches above (all of which
+# found nothing to do) and _on_delete_selection unconditionally cleared the
+# selection anyway, silently dropping the annotation with no undo record.
+# ---------------------------------------------------------------------------
+
+def test_delete_removes_annotation_only_selection_and_undo_restores(win):
+    ann = Dimension(
+        win._model.new_annotation_id(), (0.0, 0.0, 0.0), (4.0, 0.0, 0.0), (0.0, -2.0, 0.0)
+    )
+    win._model.active_context.annotations.append(ann)
+    win._selection.replace(annotations=[ann.id])
+
+    win._on_delete_selection()
+
+    assert win._model.active_context.annotations == []
+    assert win._selection.is_empty()
+
+    assert win._command_stack.undo()
+    assert len(win._model.active_context.annotations) == 1

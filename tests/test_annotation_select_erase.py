@@ -7,14 +7,25 @@ select_tool.py's on_mouse_release. Mirrors the press/release + QMouseEvent
 conventions already used in test_select_tool.py and test_select_tool_objects.py
 rather than the bare on_mouse_press-only calls sketched in the task brief,
 because the real SelectTool only commits a selection on release.
+
+M7d Task 11 (erase half) appends below: EraserTool.on_mouse_press is the real
+click-commit path for annotations -- unlike edges (mutated eagerly on press,
+pushed to the undo stack only on release), an annotation hit is deleted via a
+single `command_stack.execute(DeleteAnnotationsCommand(...), model)` call
+inside on_mouse_press itself, so it is both removed AND undoable the instant
+press fires, with no release needed. Confirmed against the real erase_tool.py
+rather than the `_ctx(model, sel)` / `_Event(...)` helpers sketched in the task
+brief, which don't exist anywhere in this codebase.
 """
 
 from __future__ import annotations
 
 import numpy as np
+from pluton.commands.command_stack import CommandStack
 from pluton.model.annotation import Dimension
 from pluton.model.model import Model
 from pluton.selection import Selection
+from pluton.tools.erase_tool import EraserTool
 from pluton.tools.select_tool import SelectTool
 from pluton.tools.tool import ToolContext
 from PySide6.QtCore import QEvent, QPointF, Qt
@@ -276,3 +287,92 @@ def test_geometry_click_unaffected_when_model_has_no_annotations(qtbot):
     assert sel.edges == {e_ab}
     assert sel.faces == set()
     assert sel.annotations == set()
+
+
+# ---------------------------------------------------------------------------
+# M7d Task 11: EraserTool erases a clicked annotation via DeleteAnnotationsCommand
+# ---------------------------------------------------------------------------
+
+def _make_eraser(model, sel, stack, w=640, h=480):
+    cam = _FlatCamera()
+    tool = EraserTool()
+    ctx = ToolContext(
+        scene=model.active_scene,
+        command_stack=stack,
+        camera=cam,
+        widget_size_provider=lambda: (w, h),
+        selection=sel,
+        model=model,
+    )
+    tool.activate(ctx)
+    return tool, cam
+
+
+def test_eraser_click_removes_an_annotation(qtbot):
+    model = _model_with_dimension()
+    sel = Selection()
+    stack = CommandStack()
+    tool, _cam = _make_eraser(model, sel, stack)
+
+    # The real click-commit path: EraserTool deletes an annotation eagerly
+    # inside on_mouse_press (like its edge cascade), not on release.
+    tool.on_mouse_press(_press(120.0, 220.0), None)
+
+    assert model.active_context.annotations == []
+
+
+def test_eraser_annotation_erase_is_undoable(qtbot):
+    """The brief only asserts deletion -- this proves the deletion actually
+    went through DeleteAnnotationsCommand on the real command stack, not a
+    direct list mutation that would be unrecoverable."""
+    model = _model_with_dimension()
+    sel = Selection()
+    stack = CommandStack()
+    tool, _cam = _make_eraser(model, sel, stack)
+
+    tool.on_mouse_press(_press(120.0, 220.0), None)
+    assert model.active_context.annotations == []
+
+    assert stack.undo()
+    assert len(model.active_context.annotations) == 1
+
+
+def test_eraser_annotation_erase_is_active_context_scoped(qtbot):
+    """Mirrors test_annotation_in_non_active_context_is_not_selectable: a
+    click at an annotation's screen position must not erase it when that
+    annotation lives in a context other than the active one."""
+    model = Model()
+    group_def = model.new_definition("Group", is_group=True)
+    nested_ann = Dimension(
+        model.new_annotation_id(), (0.0, 0.0, 0.0), (4.0, 0.0, 0.0), (0.0, -2.0, 0.0)
+    )
+    group_def.annotations.append(nested_ann)
+    inst = model.new_instance(group_def)
+    model.root.children.append(inst)
+
+    sel = Selection()
+    stack = CommandStack()
+    tool, _cam = _make_eraser(model, sel, stack)  # still at root
+
+    tool.on_mouse_press(_press(120.0, 220.0), None)
+
+    assert nested_ann in group_def.annotations, (
+        "must not erase an annotation from an inactive context"
+    )
+    assert not stack.can_undo, "no command should have been pushed for a scoped-out miss"
+
+
+# ---------------------------------------------------------------------------
+# M7d Task 11: Delete key removes selected annotations via DeleteAnnotationsCommand
+# ---------------------------------------------------------------------------
+
+def test_delete_removes_selected_annotations_and_undo_restores():
+    from pluton.commands.annotation_commands import DeleteAnnotationsCommand
+
+    model = _model_with_dimension()
+    ctx = model.active_context
+    stack = CommandStack()
+    stack.execute(DeleteAnnotationsCommand([5], ctx), model)
+    assert ctx.annotations == []
+    stack.undo()
+    assert len(ctx.annotations) == 1

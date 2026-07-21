@@ -12,9 +12,12 @@ import numpy as np
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QMouseEvent
 
+from pluton.annotations.picking import pick_annotation
 from pluton.commands import CompositeCommand
+from pluton.commands.annotation_commands import DeleteAnnotationsCommand
 from pluton.commands.scene_commands import RemoveEdgeCommand, RemoveFaceCommand
 from pluton.tools.tool import Tool, ToolContext, ToolOverlay
+from pluton.units import Units
 from pluton.viewport.picking import pick_selectable
 
 _ERASE_EDGE_COLOR = (1.00, 0.40, 0.40)
@@ -37,6 +40,7 @@ class EraserTool(Tool):
         self._size_provider = None
         self._command_stack = None
         self._model = None
+        self._units_provider = None  # M7d — callable () -> pluton.units.Units (or None)
         self._hovered_edge: int | None = None
         self._stroke: CompositeCommand | None = None
         self._erased: set[int] = set()
@@ -47,6 +51,7 @@ class EraserTool(Tool):
         self._size_provider = ctx.widget_size_provider
         self._command_stack = ctx.command_stack
         self._model = ctx.model
+        self._units_provider = ctx.units_provider
         self._hovered_edge = None
         self._stroke = None
         self._erased = set()
@@ -73,6 +78,27 @@ class EraserTool(Tool):
     def _pick_edge(self, event: QMouseEvent) -> int | None:
         hit = pick_selectable(self._cursor(event), self._viewport_size(), self._camera, self._scene, world_transform=self._world_transform())
         return hit[1] if hit is not None and hit[0] == "edge" else None
+
+    def _units(self) -> Units:
+        # M7d: mirrors SelectTool._units -- format_length rejects None, so a
+        # missing provider still yields a real Units object.
+        return self._units_provider() if self._units_provider is not None else Units()
+
+    def _pick_annotation(self, event: QMouseEvent) -> int | None:
+        """M7d: annotation hit-test scoped to the active context, same call
+        shape as SelectTool._pick_annotation."""
+        if self._model is None or self._camera is None:
+            return None
+        w, h = self._viewport_size()
+        return pick_annotation(
+            self._cursor(event),
+            self._model.active_context.annotations,
+            self._model.active_world_transform,
+            self._camera,
+            w,
+            h,
+            self._units(),
+        )
 
     def _erase_edge(self, e_id: int) -> None:
         """Append (and execute) the cascade for one edge into the active stroke."""
@@ -102,6 +128,16 @@ class EraserTool(Tool):
         self._hovered_edge = self._pick_edge(event)
 
     def on_mouse_press(self, event: QMouseEvent, snap) -> None:  # noqa: ANN001
+        # M7d: annotations draw on top, so a click that lands on one erases it
+        # outright (a single undoable command, not part of the edge stroke)
+        # and never falls through to the edge/face pick below.
+        ann_id = self._pick_annotation(event)
+        if ann_id is not None:
+            if self._command_stack is not None and self._model is not None:
+                self._command_stack.execute(
+                    DeleteAnnotationsCommand([ann_id], self._model.active_context), self._model
+                )
+            return
         self._stroke = CompositeCommand(name="Erase")
         self._erased = set()
         e_id = self._pick_edge(event)
