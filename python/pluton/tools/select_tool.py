@@ -301,6 +301,7 @@ class SelectTool(Tool):
             box_rect=box_rect,
             box_rect_color=box_color,
             world_polylines=world_polylines,
+            hovered_annotation_id=self._hovered_annotation if not self._is_box else None,
         )
 
     @property

@@ -77,7 +77,7 @@ class ViewportWidget(QOpenGLWidget):
         active = self.tool_manager.active if self.tool_manager is not None else None
         overlay = active.overlay() if active is not None else None
         self.scene_renderer.render(self.camera, self.model, overlay, self.selection)
-        self._paint_annotations()
+        self._paint_annotations(overlay)
 
     # --- Mouse handling ---------------------------------------------------
 
@@ -200,10 +200,17 @@ class ViewportWidget(QOpenGLWidget):
             world_transform=wt,
         )
 
-    def _paint_annotations(self) -> None:
+    def _paint_annotations(self, overlay=None) -> None:
         """M7d: draw the active context's annotations in screen space, on top
         of the GL render. All layout is delegated to the pure draw_plan module
-        (plan_annotation); this method only projects + paints via QPainter."""
+        (plan_annotation); this method only projects + paints via QPainter.
+
+        `overlay`: Task 10b -- the active tool's ToolOverlay for this frame
+        (the same object paintGL already asks the tool for and hands to
+        scene_renderer.render() to draw edge/face/instance hover). Its
+        `hovered_annotation_id` is threaded through to paint_annotation_plans
+        so the hovered annotation gets a hover highlight too, without a new
+        tool -> painter channel."""
         from PySide6.QtGui import QColor, QFont, QPainter
 
         from pluton.annotations.draw_plan import FONT_PX, plan_annotation
@@ -229,6 +236,7 @@ class ViewportWidget(QOpenGLWidget):
         if not plans:
             return
         selected_ids = set(self.selection.annotations) if self.selection is not None else set()
+        hovered_id = overlay.hovered_annotation_id if overlay is not None else None
         painter = QPainter(self)
         try:
             painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
@@ -241,6 +249,12 @@ class ViewportWidget(QOpenGLWidget):
                 QColor(30, 30, 30),
                 selected_ids,
                 QColor(51, 140, 242),
+                hovered_id,
+                # M4b/M4e hover blue (SelectTool._HOVER_EDGE_COLOR = (0.45, 0.70,
+                # 1.00), the same colour edges/faces already hover-highlight
+                # with), converted to 8-bit: round(0.45*255), round(0.70*255),
+                # round(1.00*255).
+                QColor(115, 178, 255),
             )
         finally:
             painter.end()

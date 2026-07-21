@@ -59,6 +59,13 @@ class ToolOverlay:
     world_polylines: list = field(default_factory=list)
     screen_markers: list = field(default_factory=list)
 
+    # M7d Task 10b: annotation hover highlight. The id of the single
+    # annotation currently under the cursor (SelectTool only), or None.
+    # Surfaced here rather than via a new channel: _paint_annotations reads it
+    # off the same per-frame ToolOverlay that paintGL already asks the active
+    # tool for to render edge/face/instance hover.
+    hovered_annotation_id: int | None = None
+
 
 class Tool(ABC):
     """Base class for all M2+ tools."""
