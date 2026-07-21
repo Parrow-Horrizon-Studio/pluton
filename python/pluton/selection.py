@@ -131,9 +131,10 @@ class Selection:
             and not self._annotations
         )
 
-    def counts(self) -> tuple[int, int, int]:
-        # NOTE: intentionally NOT extended to a 4-tuple. main_window.py (off
-        # limits for this task) does `ne, nf, ni = self._selection.counts()`;
-        # widening this would break that unpack. Annotation count is exposed
-        # via `len(selection.annotations)` instead.
-        return (len(self._edges), len(self._faces), len(self._instances))
+    def counts(self) -> tuple[int, int, int, int]:
+        return (
+            len(self._edges),
+            len(self._faces),
+            len(self._instances),
+            len(self._annotations),
+        )

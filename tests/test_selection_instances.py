@@ -10,4 +10,4 @@ def test_selection_tracks_instances():
     assert s.instances == {5}
     s.clear()
     assert s.is_empty()
-    assert s.counts() == (0, 0, 0)
+    assert s.counts() == (0, 0, 0, 0)

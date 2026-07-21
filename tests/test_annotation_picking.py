@@ -130,7 +130,7 @@ def test_selection_annotations_round_trip_and_leaves_others_untouched():
     assert sel.edges == {1}
     assert sel.faces == {2}
     assert sel.instances == {3}
-    assert sel.counts() == (1, 1, 1)  # edges/faces/instances counts unaffected
+    assert sel.counts() == (1, 1, 1, 2)  # edges/faces/instances counts unaffected
 
     sel.add(annotations=[12])
     assert sel.annotations == {10, 11, 12}

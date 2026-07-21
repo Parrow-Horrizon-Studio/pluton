@@ -41,9 +41,11 @@ from pluton.tools import (
     ToolContext,
     ToolManager,
 )
+from pluton.tools.dimension_tool import DimensionTool
 from pluton.tools.opening_tool import DoorWindowTool
 from pluton.tools.paint_tool import PaintTool
 from pluton.tools.roof_tool import RoofTool
+from pluton.tools.text_tool import TextTool
 from pluton.tools.wall_tool import WallTool
 from pluton.ui.materials_dock import MaterialsDock
 from pluton.ui.opening_options_bar import OpeningOptionsBar
@@ -95,11 +97,19 @@ class MainWindow(QMainWindow):
         self._tool_manager.register(self._opening_tool)
         self._roof_tool = RoofTool()
         self._tool_manager.register(self._roof_tool)
+        self._dimension_tool = DimensionTool()
+        self._tool_manager.register(self._dimension_tool)
+        self._text_tool = TextTool()
+        self._tool_manager.register(self._text_tool)
 
         # Viewport + status bar (created BEFORE setting ToolContext so we can
         # wire the camera + widget_size_provider into the context).
         self._viewport = ViewportWidget(self._model, self._tool_manager, self)
         self._viewport.selection = self._selection
+        # M7d, Task 13 (Part B): wire the annotation units provider (Task 4
+        # carry-over) -- without this, _paint_annotations silently falls back
+        # to a default Units() regardless of the document's unit setting.
+        self._viewport.set_units_provider(lambda: self._doc.units)
         self._status_bar = StatusBar()
 
         # Materials dock — must exist BEFORE _rebuild_tool_context() so the
@@ -190,6 +200,8 @@ class MainWindow(QMainWindow):
         QShortcut(QKeySequence("W"), self, activated=lambda: self._activate("W"))
         QShortcut(QKeySequence("D"), self, activated=lambda: self._activate("D"))
         QShortcut(QKeySequence("O"), self, activated=lambda: self._activate("O"))
+        QShortcut(QKeySequence("I"), self, activated=lambda: self._activate("I"))
+        QShortcut(QKeySequence("N"), self, activated=lambda: self._activate("N"))
         QShortcut(QKeySequence(Qt.Key.Key_Delete), self, activated=self._on_delete_selection)
         QShortcut(QKeySequence(Qt.Key.Key_Backspace), self, activated=self._on_delete_selection)
         QShortcut(QKeySequence(Qt.Key.Key_Up), self, activated=lambda: self._on_tool_key(Qt.Key.Key_Up))
@@ -256,6 +268,8 @@ class MainWindow(QMainWindow):
         self._tools_menu.addAction("Wall\tW", lambda: self._activate("W"))
         self._tools_menu.addAction("Door/Window\tD", lambda: self._activate("D"))
         self._tools_menu.addAction("Roof\tO", lambda: self._activate("O"))
+        self._tools_menu.addAction("Dimension\tI", lambda: self._activate("I"))
+        self._tools_menu.addAction("Text\tN", lambda: self._activate("N"))
 
         # View menu (M5a) — face-style radio group + independent X-Ray toggle.
         self._view_menu = menubar.addMenu("View")
@@ -684,8 +698,8 @@ class MainWindow(QMainWindow):
         self._viewport.update()
 
     def _refresh_selection_status(self) -> None:
-        ne, nf, ni = self._selection.counts()
-        if ne == 0 and nf == 0 and ni == 0:
+        ne, nf, ni, na = self._selection.counts()
+        if ne == 0 and nf == 0 and ni == 0 and na == 0:
             self._status_bar.set_selection("")
             return
         parts = []
@@ -695,6 +709,8 @@ class MainWindow(QMainWindow):
             parts.append(f"{nf} face" + ("s" if nf != 1 else ""))
         if ni:
             parts.append(f"{ni} instance" + ("s" if ni != 1 else ""))
+        if na:
+            parts.append(f"{na} annotation" + ("s" if na != 1 else ""))
         self._status_bar.set_selection(", ".join(parts) + " selected")
 
     def _refresh_breadcrumb(self) -> None:
