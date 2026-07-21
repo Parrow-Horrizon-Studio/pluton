@@ -254,10 +254,12 @@ def test_paint_annotations_paints_the_hovered_annotation_with_the_hover_pen(monk
     """
     import numpy as np
     from pluton.model.annotation import Dimension
+    from pluton.tools.select_tool import _HOVER_EDGE_COLOR
     from pluton.tools.tool import ToolOverlay
     from pluton.viewport.camera import Camera
     from pluton.viewport.viewport_widget import ViewportWidget
     from PySide6 import QtGui
+    from PySide6.QtGui import QColor
 
     monkeypatch.setattr(QtGui, "QPainter", _RecordingQPainter)
 
@@ -273,7 +275,11 @@ def test_paint_annotations_paints_the_hovered_annotation_with_the_hover_pen(monk
 
     ViewportWidget._paint_annotations(fake_viewport, overlay)
 
-    from PySide6.QtGui import QColor
+    expected_hover_color = QColor(
+        round(_HOVER_EDGE_COLOR[0] * 255),
+        round(_HOVER_EDGE_COLOR[1] * 255),
+        round(_HOVER_EDGE_COLOR[2] * 255),
+    )
     hover_pen = _RecordingQPainter.last.pens[0]
     assert isinstance(hover_pen, QColor)
-    assert hover_pen != QColor(30, 30, 30)  # must not be the plain default pen
+    assert hover_pen == expected_hover_color

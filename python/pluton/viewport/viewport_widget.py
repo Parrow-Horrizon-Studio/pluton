@@ -15,6 +15,7 @@ from PySide6.QtCore import QPoint, Qt
 from PySide6.QtGui import QMouseEvent, QWheelEvent
 from PySide6.QtOpenGLWidgets import QOpenGLWidget
 
+from pluton.tools.select_tool import _HOVER_EDGE_COLOR
 from pluton.viewport.camera import Camera
 from pluton.viewport.scene_renderer import SceneRenderer
 from pluton.viewport.snap_engine import SnapEngine, SnapKind
@@ -250,11 +251,11 @@ class ViewportWidget(QOpenGLWidget):
                 selected_ids,
                 QColor(51, 140, 242),
                 hovered_id,
-                # M4b/M4e hover blue (SelectTool._HOVER_EDGE_COLOR = (0.45, 0.70,
-                # 1.00), the same colour edges/faces already hover-highlight
-                # with), converted to 8-bit: round(0.45*255), round(0.70*255),
-                # round(1.00*255).
-                QColor(115, 178, 255),
+                QColor(
+                    round(_HOVER_EDGE_COLOR[0] * 255),
+                    round(_HOVER_EDGE_COLOR[1] * 255),
+                    round(_HOVER_EDGE_COLOR[2] * 255),
+                ),
             )
         finally:
             painter.end()
