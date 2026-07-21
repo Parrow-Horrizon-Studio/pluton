@@ -40,6 +40,7 @@ class SelectTool(Tool):
         self._size_provider = None
         self._selection = None
         self._model = None
+        self._stack = None  # M7d Task 12 — pluton.commands.CommandStack (or None)
         self._units_provider = None  # M7d — callable () -> pluton.units.Units (or None)
         self._request_rebuild = None  # M4e — callable () -> None
         self._hovered: tuple[str, int] | None = None
@@ -57,6 +58,7 @@ class SelectTool(Tool):
         self._size_provider = ctx.widget_size_provider
         self._selection = ctx.selection
         self._model = ctx.model
+        self._stack = ctx.command_stack
         self._units_provider = ctx.units_provider
         self._request_rebuild = ctx.request_context_rebuild
         self._hovered = None
@@ -205,17 +207,55 @@ class SelectTool(Tool):
         self._box_window = True
 
     def on_mouse_double_click(self, event: QMouseEvent, snap) -> None:  # noqa: ANN001
-        """Double-click an instance to enter it (group/component open for editing)."""
+        """Double-click a label to reopen its text prompt; a dimension has no
+        stored text and does nothing. Otherwise double-click an instance to
+        enter it (group/component open for editing)."""
         if self._model is None or self._camera is None:
             return
         cx, cy = self._cursor(event)
         w, h = self._viewport_size()
+        # M7d Task 12: annotations draw on top, so they win the double-click
+        # before the instance pick below ever runs (same order as on_mouse_release).
+        ann_id = self._pick_annotation(cx, cy, w, h)
+        if ann_id is not None:
+            self._edit_annotation_text(ann_id)
+            return
         origin, direction = self._camera.ray_from_screen(cx, cy, w, h)
         inst = self._model.pick_instance(origin, direction)
         if inst is not None:
             self._model.enter(inst)
             self._enter_or_exit_cleanup()
             self._suppress_next_release = True
+
+    def prompt_text(self, default: str = "") -> str | None:
+        """Ask the user for a label's new text. Overridable for testing
+        (mirrors TextTool.prompt_text so it can be stubbed the same way)."""
+        from PySide6.QtWidgets import QInputDialog
+
+        text, ok = QInputDialog.getText(None, "Text", "Label:", text=default)
+        return text if ok else None
+
+    def _edit_annotation_text(self, ann_id: int) -> None:
+        """M7d Task 12: reopen the prompt pre-filled for a label and commit
+        an EditLabelTextCommand. A dimension's text is derived from its
+        geometry and has nothing stored to edit, so this is a no-op."""
+        ann = None
+        for a in self._model.active_context.annotations:
+            if a.id == ann_id:
+                ann = a
+                break
+        if ann is None or getattr(ann, "kind", None) != "label":
+            return
+        text = self.prompt_text(ann.text)
+        if text is None or not text.strip():
+            return
+        if self._stack is None:
+            return
+        from pluton.commands.annotation_commands import EditLabelTextCommand
+        self._stack.execute(
+            EditLabelTextCommand(ann_id, text.strip(), self._model.active_context),
+            self._model,
+        )
 
     def _enter_or_exit_cleanup(self) -> None:
         """Clear selection and trigger a context rebuild after enter/exit."""

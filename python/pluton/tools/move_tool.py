@@ -24,6 +24,7 @@ import numpy as np
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QKeyEvent, QMouseEvent
 
+from pluton.commands.annotation_commands import MoveAnnotationsCommand
 from pluton.commands.scene_commands import TransformVerticesCommand
 from pluton.geometry.transforms import apply_mat, is_identity_transform, mat_invert, translate
 from pluton.tools.tool import Tool, ToolContext, ToolOverlay
@@ -107,7 +108,9 @@ class MoveTool(Tool):
             self._dragging = True
         else:
             self._vertex_ids = selection_vertices(self._scene, self._selection)
-            if not self._vertex_ids:
+            # M7d Task 12: an annotation-only selection has no vertices to
+            # grab, but the gesture must still open so its Move can commit.
+            if not self._vertex_ids and not self._selection.annotations:
                 return
             self._orig = {v: self._scene.vertex(v).position.copy() for v in self._vertex_ids}
             self._grab = np.asarray(snap.world_position, np.float32).copy()
@@ -133,16 +136,7 @@ class MoveTool(Tool):
             ctrl = bool(event.modifiers() & Qt.KeyboardModifier.ControlModifier)
             self._commit_instance_move(self._delta, move_copy=ctrl)
         else:
-            ids = self._vertex_ids
-            if ids:
-                pts = np.array([self._orig[v] for v in ids], np.float32)
-                # self._delta is a WORLD vector; local mesh vertices need a LOCAL delta.
-                local_delta = self._world_vec_to_local(self._delta)
-                new = translate(pts, local_delta)
-                moves = {v: (self._orig[v], new[i]) for i, v in enumerate(ids)}
-                cmd = TransformVerticesCommand(moves)
-                if not cmd.is_empty() and self._stack is not None:
-                    self._stack.execute(cmd, self._scene)
+            self._commit_vertex_and_annotation_move(self._delta)
         self._reset()
 
     def on_key_press(self, event: QKeyEvent) -> None:
@@ -164,19 +158,8 @@ class MoveTool(Tool):
 
         if self._instance_mode:
             self._commit_instance_move(typed_delta)
-            self._reset()
-            return True
-
-        # typed_delta is a WORLD vector; convert to local before applying to mesh.
-        local_typed_delta = self._world_vec_to_local(typed_delta)
-        moves = {}
-        for v in self._vertex_ids:
-            old = self._orig[v]
-            moves[v] = (old, (old + local_typed_delta).astype(np.float32))
-        from pluton.commands.scene_commands import TransformVerticesCommand
-        cmd = TransformVerticesCommand(moves)
-        if not cmd.is_empty() and self._stack is not None:
-            self._stack.execute(cmd, self._scene)
+        else:
+            self._commit_vertex_and_annotation_move(typed_delta)
         self._reset()
         return True
 
@@ -279,6 +262,16 @@ class MoveTool(Tool):
                 TransformInstanceCommand(inst, delta_mat @ inst.transform)
                 for inst in self._instances
             ]
+            # M7d Task 12: fold a co-selected annotation move into this SAME
+            # composite -- one Move gesture must be one undo entry, so this
+            # reuses local_delta above verbatim rather than recomputing it.
+            has_ann_sel = self._selection is not None and self._selection.annotations
+            if has_ann_sel and self._model is not None:
+                cmds.append(MoveAnnotationsCommand(
+                    list(self._selection.annotations),
+                    tuple(float(x) for x in local_delta),
+                    self._model.active_context,
+                ))
             if not cmds:
                 return
             if len(cmds) == 1:
@@ -287,6 +280,46 @@ class MoveTool(Tool):
                 cmd = CompositeCommand(name="Move Instances", children=cmds)
             if self._stack is not None and self._model is not None:
                 self._stack.execute(cmd, self._model)
+
+    def _commit_vertex_and_annotation_move(self, delta: np.ndarray) -> None:
+        """Compose the vertex move and any selected-annotation move into a
+        SINGLE undo entry.
+
+        Annotations can be co-selected with geometry, so one Move gesture
+        must be one undo step: an undo must restore BOTH. `delta` arrives in
+        WORLD space; `local_delta` (the active context's LOCAL frame) is
+        computed once here and reused verbatim for the mesh vertices and for
+        MoveAnnotationsCommand -- never recomputed independently.
+        """
+        from pluton.commands.command import CompositeCommand
+
+        local_delta = self._world_vec_to_local(delta)
+        children: list = []
+
+        ids = self._vertex_ids
+        if ids:
+            pts = np.array([self._orig[v] for v in ids], np.float32)
+            new = translate(pts, local_delta)
+            moves = {v: (self._orig[v], new[i]) for i, v in enumerate(ids)}
+            vertex_cmd = TransformVerticesCommand(moves)
+            if not vertex_cmd.is_empty():
+                children.append(vertex_cmd)
+
+        has_ann_sel = self._selection is not None and self._selection.annotations
+        if has_ann_sel and self._model is not None:
+            children.append(MoveAnnotationsCommand(
+                list(self._selection.annotations),
+                tuple(float(x) for x in local_delta),
+                self._model.active_context,
+            ))
+
+        if not children or self._stack is None:
+            return
+        if len(children) == 1:
+            cmd = children[0]
+        else:
+            cmd = CompositeCommand(name="Move", children=children)
+        self._stack.execute(cmd, self._scene)
 
     def _ghost_segments(self) -> np.ndarray:
         """Selection edges + face loops as world segments, translated by delta.
