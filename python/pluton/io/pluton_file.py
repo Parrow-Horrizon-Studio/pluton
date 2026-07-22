@@ -19,15 +19,15 @@ from pluton.io.document_codec import (
 )
 from pluton.io.errors import PlutonFormatError, PlutonVersionError
 
-SCHEMA_VERSION = 2  # M7d: bumped for per-Definition "annotations" array
+SCHEMA_VERSION = 3  # M7e: bumped for top-level "scenes" + "style"
 _MANIFEST = "manifest.json"
 _DOCUMENT = "document.json"
 
 
-def save_document(path, model, camera, doc) -> None:
+def save_document(path, model, camera, doc, render_style) -> None:
     """Write the document to `path` atomically (temp file + os.replace)."""
     path = Path(path)
-    data = document_to_dict(model, camera, doc)
+    data = document_to_dict(model, camera, doc, render_style)
     manifest = {"format": "pluton", "schema_version": SCHEMA_VERSION,
                 "app_version": _core_version()}
     tmp = path.with_name(path.name + ".tmp")

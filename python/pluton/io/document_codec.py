@@ -22,6 +22,7 @@ from pluton.model.model import Model
 from pluton.model.tag import TagLibrary
 from pluton.scene.scene import Scene
 from pluton.units import Units, units_from_dict, units_to_dict
+from pluton.viewport.render_style import FaceStyle, RenderStyle
 
 _DEFAULT_MATERIAL_ID = 0  # mirrors MaterialLibrary.DEFAULT_ID
 
@@ -195,6 +196,18 @@ def model_from_dict(data: dict) -> Model:
     return model
 
 
+def render_style_to_dict(style: RenderStyle) -> dict:
+    """Serialize the document's render style (face style name + X-Ray)."""
+    return {"face_style": style.face_style.name, "xray": bool(style.xray)}
+
+
+def render_style_from_dict(d: dict | None) -> RenderStyle:
+    """Rebuild a RenderStyle; missing/empty data yields the default (SHADED)."""
+    if not d:
+        return RenderStyle()
+    return RenderStyle(face_style=FaceStyle[d["face_style"]], xray=bool(d.get("xray", False)))
+
+
 @dataclass(frozen=True)
 class CameraState:
     """Snapshot of the viewport Camera's user-facing state (not aspect/near/far,
@@ -235,21 +248,24 @@ class CameraState:
 
 
 class LoadedDocument(NamedTuple):
-    """Result of loading a .pluton document: model + camera + units."""
+    """Result of loading a .pluton document: model + camera + units + render style."""
 
     model: Model
     camera_state: CameraState
     units: Units
+    style: RenderStyle
 
 
-def document_to_dict(model: Model, camera, doc) -> dict:
-    """Serialize the top-level document: units, camera, libraries, model."""
+def document_to_dict(model: Model, camera, doc, render_style) -> dict:
+    """Serialize the top-level document: units, camera, libraries, scenes, style, model."""
     return {
         "units": units_to_dict(doc.units),
         "camera": CameraState.from_camera(camera).to_dict(),
         "materials": {"next_id": model.materials.next_id,
                       "items": model.materials.to_records()},
         "tags": {"next_id": model.tags.next_id, "items": model.tags.to_records()},
+        "scenes": {"next_id": model.views.next_id, "items": model.views.to_records()},
+        "style": render_style_to_dict(render_style),
         "model": model_to_dict(model),
     }
 
@@ -258,14 +274,19 @@ def document_from_dict(data: dict) -> LoadedDocument:
     """Rebuild a LoadedDocument. Any structural malformation anywhere in the
     document (including in nested geometry/model data) is normalized into
     PlutonFormatError — the only exception callers need to catch."""
+    from pluton.views.view_library import ViewLibrary  # function-level: breaks import cycle
     try:
         model = model_from_dict(data["model"])
         model.materials = MaterialLibrary.from_records(
             data["materials"]["items"], data["materials"]["next_id"])
         model.tags = TagLibrary.from_records(
             data["tags"]["items"], data["tags"]["next_id"])
+        scenes = data.get("scenes", {})
+        model.views = ViewLibrary.from_records(
+            scenes.get("items", []), scenes.get("next_id", 0))
         camera_state = CameraState.from_dict(data["camera"])
         units = units_from_dict(data["units"])
+        style = render_style_from_dict(data.get("style"))
     except (KeyError, TypeError, ValueError, IndexError) as e:
         raise PlutonFormatError(f"malformed document: {e}") from e
-    return LoadedDocument(model=model, camera_state=camera_state, units=units)
+    return LoadedDocument(model=model, camera_state=camera_state, units=units, style=style)

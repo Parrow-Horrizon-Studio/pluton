@@ -870,7 +870,7 @@ class MainWindow(QMainWindow):
         if not path.endswith(".pluton"):
             path += ".pluton"
         try:
-            save_document(path, self._model, self._viewport.camera, self._doc)
+            save_document(path, self._model, self._viewport.camera, self._doc, self._render_style)
         except OSError as e:
             from PySide6.QtWidgets import QMessageBox
             QMessageBox.critical(self, "Save failed", str(e))

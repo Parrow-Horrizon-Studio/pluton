@@ -15,6 +15,7 @@ from pluton.model.model import Model
 from pluton.scene.scene import Scene
 from pluton.units import Units, UnitSystem
 from pluton.viewport.camera import Camera
+from pluton.viewport.render_style import RenderStyle
 
 
 def _square(scene: Scene) -> list[int]:
@@ -133,7 +134,7 @@ def test_document_roundtrip_camera_units_materials_tags():
     doc = DocumentSettings()
     doc.set_units(Units(system=UnitSystem.IMPERIAL, imperial_denominator=8))
 
-    data = document_to_dict(model, cam, doc)
+    data = document_to_dict(model, cam, doc, RenderStyle())
     loaded = document_from_dict(data)
 
     assert loaded.units.system is UnitSystem.IMPERIAL
@@ -159,3 +160,49 @@ def test_camera_state_apply_to_roundtrip():
 def test_document_from_dict_wraps_structural_errors():
     with pytest.raises(PlutonFormatError):
         document_from_dict({"model": {}})  # missing keys everywhere
+
+
+def test_document_dict_round_trips_scenes_and_style():
+    from pluton.document import DocumentSettings
+    from pluton.io.document_codec import (
+        CameraState,
+        document_from_dict,
+        document_to_dict,
+    )
+    from pluton.model.model import Model
+    from pluton.viewport.camera import Camera
+    from pluton.viewport.render_style import FaceStyle, RenderStyle
+    from pluton.views.saved_view import SavedView
+
+    model = Model()
+    cam_state = CameraState(position=(2.0, 2.0, 2.0), target=(0.0, 0.0, 0.0),
+                            up=(0.0, 0.0, 1.0), fov_y_deg=50.0)
+    model.views.add(SavedView(0, "Front", cam_state, {1: False}, "WIREFRAME", True))
+    style = RenderStyle(face_style=FaceStyle.MONOCHROME, xray=True)
+
+    data = document_to_dict(model, Camera(), DocumentSettings(), style)
+    assert data["scenes"]["items"][0]["name"] == "Front"
+    assert data["scenes"]["items"][0]["tag_visibility"] == {"1": False}
+    assert data["style"] == {"face_style": "MONOCHROME", "xray": True}
+
+    loaded = document_from_dict(data)
+    assert [v.name for v in loaded.model.views.views()] == ["Front"]
+    assert loaded.model.views.get(0).tag_visibility == {1: False}
+    assert loaded.style.face_style is FaceStyle.MONOCHROME
+    assert loaded.style.xray is True
+
+
+def test_document_from_dict_without_scenes_or_style_uses_defaults():
+    # A v2-shaped document (no "scenes"/"style" keys) still loads.
+    from pluton.document import DocumentSettings
+    from pluton.io.document_codec import document_from_dict, document_to_dict
+    from pluton.model.model import Model
+    from pluton.viewport.camera import Camera
+    from pluton.viewport.render_style import RenderStyle
+
+    data = document_to_dict(Model(), Camera(), DocumentSettings(), RenderStyle())
+    del data["scenes"]
+    del data["style"]
+    loaded = document_from_dict(data)
+    assert loaded.model.views.views() == []
+    assert loaded.style == RenderStyle()   # RenderStyle default (SHADED, xray False)

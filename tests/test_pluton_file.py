@@ -13,6 +13,7 @@ from pluton.io import (
 from pluton.model.model import Model
 from pluton.units import Units, UnitSystem
 from pluton.viewport.camera import Camera
+from pluton.viewport.render_style import RenderStyle
 
 
 def _model_with_box():
@@ -31,7 +32,7 @@ def _add_box(scene):
 
 def test_save_then_load_roundtrip(tmp_path):
     path = tmp_path / "house.pluton"
-    save_document(path, _model_with_box(), Camera(), DocumentSettings())
+    save_document(path, _model_with_box(), Camera(), DocumentSettings(), RenderStyle())
     loaded = load_document(path)
     assert len(list(loaded.model.root.mesh.faces_iter())) == 1
 
@@ -74,14 +75,14 @@ def test_load_rejects_missing_document_entry(tmp_path):
 
 def test_save_is_atomic_old_file_survives_failure(tmp_path, monkeypatch):
     path = tmp_path / "keep.pluton"
-    save_document(path, _model_with_box(), Camera(), DocumentSettings())
+    save_document(path, _model_with_box(), Camera(), DocumentSettings(), RenderStyle())
     original = path.read_bytes()
 
     import pluton.io.pluton_file as pf
     monkeypatch.setattr(pf, "document_to_dict",
                         lambda *a, **k: (_ for _ in ()).throw(RuntimeError("boom")))
     with pytest.raises(RuntimeError):
-        save_document(path, _model_with_box(), Camera(), DocumentSettings())
+        save_document(path, _model_with_box(), Camera(), DocumentSettings(), RenderStyle())
     assert path.read_bytes() == original  # untouched
     assert not (tmp_path / "keep.pluton.tmp").exists()  # temp cleaned up
 
@@ -143,7 +144,7 @@ def test_rich_document_roundtrip_through_real_zip_and_json(tmp_path):
     doc.set_units(Units(system=UnitSystem.IMPERIAL, imperial_denominator=8))
 
     path = tmp_path / "rich.pluton"
-    save_document(path, model, cam, doc)
+    save_document(path, model, cam, doc, RenderStyle())
     loaded = load_document(path)
 
     loaded_root = loaded.model.root
@@ -272,3 +273,52 @@ def test_load_schema_version_1_document_without_annotations_key(tmp_path):
     # Sanity: the newly allocated id is not 0 again on the next call.
     next_new_id = loaded.model.new_annotation_id()
     assert next_new_id == 1
+
+
+def test_save_load_round_trips_scenes_and_style(tmp_path):
+    from pluton.io.document_codec import CameraState
+    from pluton.io.pluton_file import load_document, save_document
+    from pluton.viewport.camera import Camera
+    from pluton.viewport.render_style import FaceStyle, RenderStyle
+    from pluton.views.saved_view import SavedView
+
+    model = _model_with_box()
+    cam_state = CameraState(position=(3.0, 3.0, 3.0), target=(0.0, 0.0, 0.0),
+                            up=(0.0, 0.0, 1.0), fov_y_deg=55.0)
+    model.views.add(SavedView(0, "Iso", cam_state, {}, "HIDDEN_LINE", False))
+    style = RenderStyle(face_style=FaceStyle.WIREFRAME, xray=True)
+
+    path = tmp_path / "scenes.pluton"
+    save_document(path, model, Camera(), DocumentSettings(), style)
+    loaded = load_document(path)
+
+    assert [v.name for v in loaded.model.views.views()] == ["Iso"]
+    assert loaded.style.face_style is FaceStyle.WIREFRAME
+    assert loaded.style.xray is True
+
+
+def test_v2_file_without_scenes_still_opens(tmp_path):
+    # Hand-craft a v2 .pluton (schema_version 2, document.json without
+    # scenes/style) and confirm the version gate accepts it and load yields
+    # an empty ViewLibrary + default RenderStyle.
+    import json
+    import zipfile
+
+    from pluton.io.document_codec import document_to_dict
+    from pluton.io.pluton_file import load_document
+    from pluton.viewport.camera import Camera
+    from pluton.viewport.render_style import RenderStyle
+
+    data = document_to_dict(_model_with_box(), Camera(), DocumentSettings(), RenderStyle())
+    del data["scenes"]
+    del data["style"]
+    manifest = {"format": "pluton", "schema_version": 2, "app_version": "0.2.4"}
+
+    path = tmp_path / "legacy.pluton"
+    with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr("manifest.json", json.dumps(manifest))
+        zf.writestr("document.json", json.dumps(data))
+
+    loaded = load_document(path)
+    assert loaded.model.views.views() == []
+    assert loaded.style == RenderStyle()

@@ -19,10 +19,11 @@ from pluton.io.errors import PlutonFormatError
 from pluton.model.annotation import Dimension, Label
 from pluton.model.model import Model
 from pluton.viewport.camera import Camera
+from pluton.viewport.render_style import RenderStyle
 
 
 def _roundtrip(model, camera, doc):
-    data = document_to_dict(model, camera, doc)
+    data = document_to_dict(model, camera, doc, RenderStyle())
     return document_from_dict(data)
 
 
@@ -34,7 +35,7 @@ def test_annotations_round_trip_in_the_root_context():
     model.active_context.annotations.append(
         Label(model.new_annotation_id(), (0, 0, 0), (2, 2, 0), "Load-bearing")
     )
-    restored, _cam, _units = _roundtrip(model, Camera(), DocumentSettings())
+    restored, _cam, _units, _style = _roundtrip(model, Camera(), DocumentSettings())
     anns = restored.active_context.annotations
     assert len(anns) == 2
     assert anns[0].kind == "dimension" and anns[0].p2 == pytest.approx((4.0, 0.0, 0.0))
@@ -46,7 +47,7 @@ def test_annotations_round_trip_inside_a_group():
     grp = model.new_definition("G", is_group=True)
     model.active_context.children.append(model.new_instance(grp))
     grp.annotations.append(Label(model.new_annotation_id(), (0, 0, 0), (1, 1, 0), "inside"))
-    restored, _cam, _units = _roundtrip(model, Camera(), DocumentSettings())
+    restored, _cam, _units, _style = _roundtrip(model, Camera(), DocumentSettings())
     inner = restored.active_context.children[0].definition
     assert len(inner.annotations) == 1
     assert inner.annotations[0].text == "inside"
@@ -56,11 +57,11 @@ def test_document_without_annotations_key_still_loads():
     """A document saved before annotations existed (genuinely missing the key,
     not merely empty) must still load, yielding an empty annotation list."""
     model = Model()
-    data = document_to_dict(model, Camera(), DocumentSettings())
+    data = document_to_dict(model, Camera(), DocumentSettings(), RenderStyle())
     for defn in data["model"]["definitions"]:
         assert "annotations" in defn  # sanity: codec does emit the key normally
         defn.pop("annotations")
-    restored, _cam, _units = document_from_dict(data)
+    restored, _cam, _units, _style = document_from_dict(data)
     assert restored.active_context.annotations == []
 
 
@@ -84,7 +85,7 @@ def test_dimension_and_label_round_trip_all_fields_without_transposition():
     model.active_context.annotations.append(dim)
     model.active_context.annotations.append(label)
 
-    restored, _cam, _units = _roundtrip(model, Camera(), DocumentSettings())
+    restored, _cam, _units, _style = _roundtrip(model, Camera(), DocumentSettings())
     r_dim, r_label = restored.active_context.annotations
 
     assert r_dim.kind == "dimension"
@@ -119,8 +120,8 @@ def test_load_from_resets_next_annotation_id_after_document_load():
     )
     existing_ids = {a.id for a in model.active_context.annotations}
 
-    data = document_to_dict(model, Camera(), DocumentSettings())
-    loaded, _cam, _units = document_from_dict(data)
+    data = document_to_dict(model, Camera(), DocumentSettings(), RenderStyle())
+    loaded, _cam, _units, _style = document_from_dict(data)
 
     # Mirrors how MainWindow/DocumentController actually swap contents: a
     # long-lived Model object has its contents replaced in place via load_from.
