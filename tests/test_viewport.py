@@ -307,3 +307,13 @@ class TestPushPullToolIntegration:
         size = ctx.widget_size_provider()
         assert isinstance(size, tuple)
         assert len(size) == 2
+
+
+def test_camera_input_callback_fires(qtbot):
+    from pluton.viewport.viewport_widget import ViewportWidget
+    vp = ViewportWidget()
+    qtbot.addWidget(vp)
+    fired = []
+    vp.set_camera_input_callback(lambda: fired.append(1))
+    vp._notify_camera_input()
+    assert fired == [1]

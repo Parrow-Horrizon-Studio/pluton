@@ -35,6 +35,7 @@ class ViewportWidget(QOpenGLWidget):
         self._status_bar = None
         self._on_event_finished = None
         self._units_provider = None  # M7d — callable () -> pluton.units.Units (or None)
+        self._camera_input_callback = None  # M7e — invoked when the user moves the camera
 
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         self.setMouseTracking(True)
@@ -64,6 +65,16 @@ class ViewportWidget(QOpenGLWidget):
         _paint_annotations to format dimension text. Set by MainWindow
         (mirrors set_status_bar / set_event_finished_callback)."""
         self._units_provider = fn
+
+    def set_camera_input_callback(self, fn) -> None:
+        """M7e: install a zero-arg callable invoked when the user manipulates the
+        camera (MMB orbit/pan, wheel zoom). MainWindow wires this to the view
+        animator's cancel(), so a manual camera move interrupts a running tween."""
+        self._camera_input_callback = fn
+
+    def _notify_camera_input(self) -> None:
+        if self._camera_input_callback is not None:
+            self._camera_input_callback()
 
     # --- GL lifecycle -----------------------------------------------------
 
@@ -109,6 +120,7 @@ class ViewportWidget(QOpenGLWidget):
             self._dragging_button == Qt.MouseButton.MiddleButton
             and self._last_mouse_pos is not None
         ):
+            self._notify_camera_input()
             current = event.position().toPoint()
             dx = float(current.x() - self._last_mouse_pos.x())
             dy = float(current.y() - self._last_mouse_pos.y())
@@ -172,6 +184,7 @@ class ViewportWidget(QOpenGLWidget):
         if notches == 0:
             super().wheelEvent(event)
             return
+        self._notify_camera_input()
         cursor = event.position()
         ndc = self._cursor_to_ndc(cursor.x(), cursor.y())
         self.camera.zoom(scroll_delta=notches, cursor_ndc=ndc)
