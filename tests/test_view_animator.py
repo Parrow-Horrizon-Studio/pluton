@@ -24,11 +24,17 @@ def test_start_finishes_on_target(qtbot):
     ticks = []
     a = ViewAnimator(cam, on_tick=lambda: ticks.append(1))
     s0, s1 = _state((2.0, 0.0, 0.0)), _state((0.0, 3.0, 1.0))
-    with qtbot.waitSignal(a.finished, timeout=3000):
+    # Drive the real animation to its end deterministically instead of waiting on
+    # Qt's global animation timer (which stalls under full-suite load, making a
+    # real-time wait flaky). setCurrentTime to the duration makes the actual
+    # QVariantAnimation emit valueChanged(1.0) -> _on_value and finished ->
+    # _on_finished, exercising the real signal wiring without a wall-clock wait.
+    with qtbot.waitSignal(a.finished, timeout=2000):
         a.start(s0, s1)
+        a._anim.setCurrentTime(a._DURATION_MS)
     assert np.allclose(cam.position, (0.0, 3.0, 1.0), atol=1e-5)
     assert not a.is_running
-    assert ticks   # on_tick fired during the animation
+    assert ticks  # on_tick fired during the animation
 
 
 def test_cancel_stops_before_target(qtbot):
