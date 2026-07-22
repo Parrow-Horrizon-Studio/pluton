@@ -98,3 +98,53 @@ def test_update_undo_restores_prior_snapshot():
     model.views.replace_view(0, _view(0, "V", fov=12.0))
     stack.undo()
     assert model.views.get(0).camera.fov_y_deg == 30.0
+
+
+def test_delete_first_do_capture_survives_redo():
+    model = Model()
+    stack = CommandStack()
+    for i, n in enumerate("ABC"):
+        model.views.add(_view(i, n))
+    cmd = DeleteViewCommand(1)                     # delete "B" (middle)
+    stack.execute(cmd, model)
+    assert _names(model) == ["A", "C"]
+    stack.undo()                                   # "B" back at index 1
+    assert _names(model) == ["A", "B", "C"]
+    model.views.replace_view(1, _view(1, "B-MUTATED"))   # external change at id 1
+    stack.redo()                                   # do() again: guard must skip recapture
+    assert _names(model) == ["A", "C"]
+    stack.undo()                                   # restores the ORIGINAL "B", not "B-MUTATED"
+    assert model.views.get(1).name == "B"
+
+
+def test_rename_first_do_capture_survives_redo():
+    model = Model()
+    stack = CommandStack()
+    model.views.add(_view(0, "Old"))
+    cmd = RenameViewCommand(0, "New")
+    stack.execute(cmd, model)
+    assert model.views.get(0).name == "New"
+    stack.undo()
+    assert model.views.get(0).name == "Old"
+    model.views.rename(0, "Externally Changed")    # external change between undo and redo
+    stack.redo()                                   # do() again: guard must skip recapture
+    assert model.views.get(0).name == "New"
+    stack.undo()                                   # restores the true original "Old"
+    assert model.views.get(0).name == "Old"
+
+
+def test_update_first_do_capture_survives_redo():
+    model = Model()
+    stack = CommandStack()
+    model.views.add(_view(0, "V", fov=30.0))
+    new_view = _view(0, "V", fov=90.0)
+    cmd = UpdateViewCommand(0, new_view)
+    stack.execute(cmd, model)
+    assert model.views.get(0).camera.fov_y_deg == 90.0
+    stack.undo()
+    assert model.views.get(0).camera.fov_y_deg == 30.0
+    model.views.replace_view(0, _view(0, "V", fov=12.0))   # external change
+    stack.redo()                                   # do() again: guard must skip recapture
+    assert model.views.get(0).camera.fov_y_deg == 90.0
+    stack.undo()                                   # restores the true original fov 30
+    assert model.views.get(0).camera.fov_y_deg == 30.0
