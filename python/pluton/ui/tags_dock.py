@@ -128,6 +128,10 @@ class TagsDock(QDockWidget):
         self._active_id = TagLibrary.UNTAGGED_ID
         self._rebuild()
 
+    def refresh(self) -> None:
+        """Rebuild the list from the current library (reflects programmatic changes)."""
+        self._rebuild()
+
     @property
     def active_tag_id(self) -> int:
         return self._active_id

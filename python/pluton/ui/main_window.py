@@ -10,6 +10,13 @@ from PySide6.QtWidgets import QMainWindow, QVBoxLayout, QWidget
 
 from pluton.commands import CommandStack
 from pluton.commands.scene_commands import ClearSceneCommand
+from pluton.commands.view_commands import (
+    CreateViewCommand,
+    DeleteViewCommand,
+    RenameViewCommand,
+    ReorderViewCommand,
+    UpdateViewCommand,
+)
 from pluton.document import DocumentSettings
 from pluton.io import (
     PlutonIOError,
@@ -50,12 +57,15 @@ from pluton.tools.wall_tool import WallTool
 from pluton.ui.materials_dock import MaterialsDock
 from pluton.ui.opening_options_bar import OpeningOptionsBar
 from pluton.ui.roof_options_bar import RoofOptionsBar
+from pluton.ui.scenes_dock import ScenesDock
 from pluton.ui.status_bar import StatusBar
 from pluton.ui.tags_dock import TagsDock
 from pluton.ui.value_control_box import ValueControlBox
 from pluton.ui.wall_options_bar import WallOptionsBar
 from pluton.viewport.render_style import FaceStyle, RenderStyle
+from pluton.viewport.view_animator import ViewAnimator
 from pluton.viewport.viewport_widget import ViewportWidget
+from pluton.views.capture import apply_tags_and_style, capture_view
 
 
 class MainWindow(QMainWindow):
@@ -129,6 +139,22 @@ class MainWindow(QMainWindow):
         self._tags_dock.active_tag_changed.connect(self._on_active_tag_changed)
         self._tags_dock.visibility_changed.connect(self._viewport.update)
         self._tags_dock.assign_to_selection_requested.connect(self._on_assign_tag)
+
+        # Scenes dock (M7e) — tabbed with Materials/Tags on the right.
+        self._scenes_dock = ScenesDock(self._model.views, self)
+        self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, self._scenes_dock)
+        self.tabifyDockWidget(self._tags_dock, self._scenes_dock)
+        self._scenes_dock.create_requested.connect(self._on_create_view)
+        self._scenes_dock.update_requested.connect(self._on_update_view)
+        self._scenes_dock.delete_requested.connect(self._on_delete_view)
+        self._scenes_dock.rename_requested.connect(self._on_rename_view)
+        self._scenes_dock.reorder_requested.connect(self._on_reorder_view)
+        self._scenes_dock.recall_requested.connect(self._on_recall_view)
+
+        # Camera tween animator (M7e). Owns the same live camera object the
+        # viewport mutates in place; a manual camera move cancels a running tween.
+        self._view_animator = ViewAnimator(self._viewport.camera, self._viewport.update, self)
+        self._viewport.set_camera_input_callback(self._view_animator.cancel)
 
         # Document session state (path / dirty / title) + dirty signal sources.
         self._doc_controller = DocumentController()
@@ -301,6 +327,8 @@ class MainWindow(QMainWindow):
         self._view_menu.addAction(self._materials_dock_action)
         self._tags_dock_action = self._tags_dock.toggleViewAction()
         self._view_menu.addAction(self._tags_dock_action)
+        self._scenes_dock_action = self._scenes_dock.toggleViewAction()
+        self._view_menu.addAction(self._scenes_dock_action)
 
         self._update_window_title()
 
@@ -743,6 +771,7 @@ class MainWindow(QMainWindow):
         self._model.revalidate_active_path()
         self._rebuild_tool_context()
         self._refresh_breadcrumb()
+        self._scenes_dock.refresh()
 
     def _on_set_face_style(self, style: FaceStyle) -> None:
         self._render_style.face_style = style
@@ -752,6 +781,63 @@ class MainWindow(QMainWindow):
     def _on_toggle_xray(self, checked: bool) -> None:
         self._render_style.xray = bool(checked)
         self._viewport.set_render_style(self._render_style)
+
+    # --- Scenes (M7e) ----------------------------------------------------
+
+    def _sync_render_style_ui(self) -> None:
+        """Reflect self._render_style in the View menu + viewport (no signal echo)."""
+        for st, action in self._face_style_actions.items():
+            action.setChecked(st == self._render_style.face_style)
+        self._xray_action.blockSignals(True)
+        self._xray_action.setChecked(self._render_style.xray)
+        self._xray_action.blockSignals(False)
+        self._viewport.set_render_style(self._render_style)
+
+    def _on_create_view(self) -> None:
+        name = f"Scene {len(self._model.views.views()) + 1}"
+        view = capture_view(self._model.views.next_id, name, self._viewport.camera,
+                            self._model.tags, self._render_style)
+        self._command_stack.execute(CreateViewCommand(view), self._model)
+        self._scenes_dock.refresh(select_id=view.id)
+
+    def _on_update_view(self, view_id: int) -> None:
+        old = self._model.views.get(int(view_id))
+        if old is None:
+            return
+        new_view = capture_view(old.id, old.name, self._viewport.camera,
+                                self._model.tags, self._render_style)
+        self._command_stack.execute(UpdateViewCommand(old.id, new_view), self._model)
+        self._scenes_dock.refresh(select_id=old.id)
+
+    def _on_delete_view(self, view_id: int) -> None:
+        if self._model.views.get(int(view_id)) is None:
+            return
+        self._command_stack.execute(DeleteViewCommand(int(view_id)), self._model)
+        self._scenes_dock.refresh()
+
+    def _on_rename_view(self, view_id: int, name: str) -> None:
+        name = str(name).strip()
+        old = self._model.views.get(int(view_id))
+        if old is None or not name or name == old.name:
+            self._scenes_dock.refresh(select_id=int(view_id))
+            return
+        self._command_stack.execute(RenameViewCommand(int(view_id), name), self._model)
+        self._scenes_dock.refresh(select_id=int(view_id))
+
+    def _on_reorder_view(self, view_id: int, direction: int) -> None:
+        self._command_stack.execute(
+            ReorderViewCommand(int(view_id), int(direction)), self._model)
+        self._scenes_dock.refresh(select_id=int(view_id))
+
+    def _on_recall_view(self, view_id: int) -> None:
+        view = self._model.views.get(int(view_id))
+        if view is None:
+            return
+        apply_tags_and_style(view, self._model.tags, self._render_style)
+        self._sync_render_style_ui()
+        self._tags_dock.refresh()
+        from_state = CameraState.from_camera(self._viewport.camera)
+        self._view_animator.start(from_state, view.camera)
 
     def _on_undo(self) -> None:
         if self._command_stack.undo():
@@ -928,12 +1014,17 @@ class MainWindow(QMainWindow):
         else:
             event.ignore()
 
-    def _reset_document(self, model, camera_state, units, path) -> None:  # noqa: ANN001
-        """Adopt a (model, camera, units) into the live window, in place."""
+    def _reset_document(self, model, camera_state, units, style, path) -> None:  # noqa: ANN001
+        """Adopt a (model, camera, units, render style) into the live window, in place."""
+        from dataclasses import replace
         self._model.load_from(model)
         self._materials_dock.set_library(self._model.materials)
         self._tags_dock.set_library(self._model.tags)
+        self._scenes_dock.set_library(self._model.views)
         camera_state.apply_to(self._viewport.camera)
+        self._view_animator.cancel()
+        self._render_style = replace(style)
+        self._sync_render_style_ui()
         self._doc.set_units(units)
         self._active_material_id = self._model.materials.DEFAULT_ID
         self._active_tag_id = self._model.tags.UNTAGGED_ID
@@ -952,7 +1043,8 @@ class MainWindow(QMainWindow):
             return
         from pluton.units import Units
         from pluton.viewport.camera import Camera
-        self._reset_document(Model(), CameraState.from_camera(Camera()), Units(), None)
+        self._reset_document(Model(), CameraState.from_camera(Camera()), Units(),
+                            RenderStyle(), None)
 
     def _prompt_open_path(self, file_filter: str = "Pluton files (*.pluton)",
                           title: str = "Open") -> str | None:
@@ -973,4 +1065,5 @@ class MainWindow(QMainWindow):
             from PySide6.QtWidgets import QMessageBox
             QMessageBox.critical(self, "Open failed", str(e))
             return
-        self._reset_document(loaded.model, loaded.camera_state, loaded.units, path)
+        self._reset_document(loaded.model, loaded.camera_state, loaded.units,
+                            loaded.style, path)
