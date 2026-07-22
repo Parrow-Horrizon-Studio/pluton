@@ -20,6 +20,10 @@ class Model:
         self.tags = TagLibrary()
         self.opening_definitions = {}   # M7b: (kind, w, h, depth) -> shared Component Definition
         self._next_annotation_id = 0   # M7d: model-wide unique annotation ids
+        # M7e: saved Scenes (camera + tags + style). Imported here, not at module
+        # top, to avoid a model <-> io.document_codec import cycle.
+        from pluton.views.view_library import ViewLibrary
+        self.views = ViewLibrary()
 
     # --- construction ---
     def new_definition(self, name: str, is_group: bool) -> Definition:
@@ -174,6 +178,7 @@ class Model:
         self.tags = other.tags
         self.opening_definitions = other.opening_definitions
         self._next_annotation_id = other._next_annotation_id
+        self.views = other.views
 
     def revalidate_active_path(self) -> None:
         """Pop the active path to the nearest still-reachable instance.
