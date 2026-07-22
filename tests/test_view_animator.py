@@ -36,10 +36,15 @@ def test_cancel_stops_before_target(qtbot):
     a = ViewAnimator(cam, on_tick=None)
     s0, s1 = _state((2.0, 0.0, 0.0)), _state((0.0, 3.0, 0.0))
     a.start(s0, s1)
-    a._on_value(0.5)          # advance partway deterministically
+    qtbot.wait(30)                       # let a few real ticks advance the camera
+    assert a.is_running
+    pos_after_cancel = None
     a.cancel()
     assert not a.is_running
-    # Camera is somewhere on the arc, not at the target:
+    pos_after_cancel = np.array(cam.position)
+    qtbot.wait(60)                       # if cancel didn't stop the timer, ticks would move it
+    assert np.allclose(cam.position, pos_after_cancel, atol=1e-9)
+    # And it never reached the target:
     assert not np.allclose(cam.position, (0.0, 3.0, 0.0), atol=1e-3)
 
 

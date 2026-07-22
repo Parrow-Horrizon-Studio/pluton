@@ -10,7 +10,7 @@ cancels/retargets the running animation.
 
 from __future__ import annotations
 
-from PySide6.QtCore import QEasingCurve, QObject, QVariantAnimation, Signal
+from PySide6.QtCore import QAbstractAnimation, QEasingCurve, QObject, QVariantAnimation, Signal
 
 from pluton.views.interpolate import interpolate_pose
 
@@ -42,7 +42,7 @@ class ViewAnimator(QObject):
         anim.valueChanged.connect(self._on_value)
         anim.finished.connect(self._on_finished)
         self._anim = anim
-        anim.start()
+        anim.start(QAbstractAnimation.DeletionPolicy.DeleteWhenStopped)
 
     def _on_value(self, t) -> None:
         if self._from is None or self._to is None:
