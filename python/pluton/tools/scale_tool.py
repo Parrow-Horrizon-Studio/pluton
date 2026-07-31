@@ -37,6 +37,20 @@ _BOX_COLOR = (0.20, 0.55, 0.95)
 _EPS = 1e-3
 
 
+def _closest_point_on_axis(p0, axis_dir, origin, direction):
+    """Point on the line (p0 + t*axis_dir) closest to the ray (origin + s*direction)."""
+    u = np.asarray(axis_dir, np.float64)
+    d = np.asarray(direction, np.float64)
+    w0 = np.asarray(p0, np.float64) - np.asarray(origin, np.float64)
+    a, b, c = float(u @ u), float(u @ d), float(d @ d)
+    dd, e = float(u @ w0), float(d @ w0)
+    denom = a * c - b * b
+    if abs(denom) < 1e-12:  # ray parallel to the axis
+        return np.asarray(p0, np.float64)
+    t = (b * e - c * dd) / denom
+    return np.asarray(p0, np.float64) + u * t
+
+
 class ScaleTool(Tool):
     @property
     def name(self) -> str:
@@ -391,23 +405,23 @@ class ScaleTool(Tool):
         return best
 
     def _cursor_world(self, event):
-        """Cursor ray intersect the ground-parallel plane through the grip.
+        """Cursor ray intersected with a camera-facing plane through the grip,
+        or (for single-axis grips) projected onto the grip's axis line.
 
-        Falls back to None if no camera. (M4d refines with axis-aware dragging.)
+        Falls back to None if no camera.
 
         In entity-mode the grips are LOCAL.  We use the grip's WORLD position as
-        the plane anchor (p0) so the projection is stable in screen space, then
-        convert the resulting world-space cursor back to LOCAL so the factor math
-        (which compares cursor to LOCAL grips/anchor) operates in the right frame.
-        In instance-mode grips are already world; the cursor stays world.
+        the plane/axis anchor (p0) so the projection is stable in screen space,
+        then convert the resulting world-space cursor back to LOCAL so the factor
+        math (which compares cursor to LOCAL grips/anchor) operates in the right
+        frame. In instance-mode grips are already world; the cursor stays world.
         """
         if self._camera is None or self._size_provider is None:
             return None
         w, h = self._size_provider()
         pos = event.position()
         origin, direction = self._camera.ray_from_screen(pos.x(), pos.y(), w, h)
-        n = np.array([0, 0, 1], np.float32)
-        # Plane anchor: world position of the active grip (or anchor).
+        # Plane/axis anchor: world position of the active grip (or anchor).
         if self._active is not None:
             p0 = self._grip_world_pos(self._active)
         else:
@@ -420,13 +434,49 @@ class ScaleTool(Tool):
                     p0 = apply_mat(np.asarray(self._anchor, np.float64).reshape(1, 3), wt)[0]
             else:
                 p0 = np.asarray(self._anchor, np.float32)
-        denom = float(np.dot(direction, n))
-        if abs(denom) < 1e-9:
-            return None
-        t = float(np.dot(p0 - origin, n)) / denom
-        if t <= 0:
-            return None
-        cursor_world = (origin + t * direction).astype(np.float32)
+
+        if self._active is not None and len(self._active.axes) == 1:
+            # Single-axis grip (edge/face is >1): drag along the axis line
+            # itself rather than an arbitrary plane, so the grip tracks the
+            # cursor exactly instead of sliding off-axis.
+            ax = self._active.axes[0]
+            axis_dir = np.zeros(3, np.float64)
+            axis_dir[ax] = 1.0
+            if self._grips_are_local:
+                wt = self._world_transform()
+                if not is_identity_transform(wt):
+                    # Rotate the local basis vector into world space using the
+                    # world transform's linear part (its ax-th column), the
+                    # same pattern picking.ray_into_local uses for directions.
+                    axis_dir = np.asarray(wt, np.float64)[:3, ax]
+            cursor_world = _closest_point_on_axis(p0, axis_dir, origin, direction).astype(
+                np.float32
+            )
+        else:
+            # Corner/uniform or edge grips (and the no-active-grip case): a
+            # plane through p0 facing the camera is correct in every
+            # orientation and can never be edge-on to the cursor ray.
+            # (Minimal camera doubles that stub only ray_from_screen and don't
+            # expose position/target keep the prior ground plane so their
+            # fixtures are unaffected.)
+            if hasattr(self._camera, "position") and hasattr(self._camera, "target"):
+                view_dir = np.asarray(self._camera.position, np.float64) - np.asarray(
+                    self._camera.target, np.float64
+                )
+                view_norm = float(np.linalg.norm(view_dir))
+                if view_norm < 1e-9:
+                    return None
+                n = (view_dir / view_norm).astype(np.float32)
+            else:
+                n = np.array([0.0, 0.0, 1.0], np.float32)
+            denom = float(np.dot(direction, n))
+            if abs(denom) < 1e-9:
+                return None
+            t = float(np.dot(p0 - origin, n)) / denom
+            if t <= 0:
+                return None
+            cursor_world = (origin + t * direction).astype(np.float32)
+
         # In entity-mode convert the world cursor back to LOCAL so the factor
         # math (comparing to LOCAL grips/anchor) remains correct.
         if self._grips_are_local:
