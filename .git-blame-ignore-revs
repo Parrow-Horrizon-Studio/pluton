@@ -1,0 +1,12 @@
+# Mechanical sweeps from M7.1 — no behavior change.
+# Configure once locally with:
+#   git config blame.ignoreRevsFile .git-blame-ignore-revs
+
+# style(m7.1): remove stale noqa directives and fix long lines
+c869e2fc58899b79276ad86d9e42f17cde4d6061
+
+# style(m7.1): apply ruff format across python/pluton
+872cf4edbc37ce5002a63a62a14614421b1b199d
+
+# style(m7.1): add .clang-format and sweep the C++ tree
+12094d7da6ceb6149aed5707c525c4a395c7d8d6
