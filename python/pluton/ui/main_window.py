@@ -466,7 +466,7 @@ class MainWindow(QMainWindow):
             return True
         return False
 
-    def eventFilter(self, obj, event):  # noqa: N802
+    def eventFilter(self, obj, event):
         from PySide6.QtCore import QEvent
 
         if event.type() in (QEvent.Type.KeyPress, QEvent.Type.ShortcutOverride):
@@ -1052,7 +1052,7 @@ class MainWindow(QMainWindow):
             return True
         return False
 
-    def closeEvent(self, event):  # noqa: N802
+    def closeEvent(self, event):
         if self._confirm_discard_if_dirty():
             event.accept()
         else:
