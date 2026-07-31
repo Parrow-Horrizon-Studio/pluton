@@ -44,6 +44,9 @@ class ExplodeInstanceCommand(Command):
         for child in defn.children:
             child.transform = t @ child.transform
             self._parent.children.append(child)
+        # The definition no longer owns them — otherwise any OTHER instance of
+        # this definition would still render/pick the same child objects (#56).
+        defn.children.clear()
 
         # Remove the exploded instance.
         if self._inst in self._parent.children:
@@ -71,4 +74,6 @@ class ExplodeInstanceCommand(Command):
             if child in self._parent.children:
                 self._parent.children.remove(child)
             child.transform = tinv @ child.transform
+        # do() cleared the definition's children; restore them in original order.
+        self._inst.definition.children.extend(self._child_records)
         self._parent.children.append(self._inst)

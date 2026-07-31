@@ -89,3 +89,68 @@ def test_undo_restores_two_instances():
     # root mesh is clear
     assert list(m.root.mesh.vertices_iter()) == []
     assert list(m.root.mesh.faces_iter()) == []
+
+
+# --- #56: exploding an instance must not leave its NESTED child instances
+# double-owned by the source definition (distinct from the sibling-instance
+# corruption covered above, which is guarded by MakeUniqueCommand). ---
+
+
+def test_explode_removes_children_from_source_definition():
+    model = Model()
+    # A component definition that itself contains one child instance.
+    inner = model.new_definition("Inner", is_group=False)
+    comp = model.new_definition("Comp", is_group=False)
+    comp.children.append(model.new_instance(inner, np.eye(4, dtype=np.float64)))
+
+    # Place the SAME component twice in the root.
+    a = model.new_instance(comp, np.eye(4, dtype=np.float64))
+    b = model.new_instance(comp, np.eye(4, dtype=np.float64))
+    model.root.children.extend([a, b])
+    assert len(comp.children) == 1
+
+    stack = CommandStack()
+    stack.execute(ExplodeInstanceCommand(model.root, a), model)
+
+    # The child moved to the root; the definition must no longer own it,
+    # otherwise instance `b` still renders it too (double ownership).
+    assert len(comp.children) == 0
+    assert len(model.root.children) == 2      # b + the reparented child
+
+
+def test_explode_undo_restores_children_to_the_definition():
+    model = Model()
+    inner = model.new_definition("Inner", is_group=False)
+    comp = model.new_definition("Comp", is_group=False)
+    child = model.new_instance(inner, np.eye(4, dtype=np.float64))
+    comp.children.append(child)
+    a = model.new_instance(comp, np.eye(4, dtype=np.float64))
+    model.root.children.append(a)
+
+    stack = CommandStack()
+    stack.execute(ExplodeInstanceCommand(model.root, a), model)
+    stack.undo()
+
+    assert comp.children == [child]
+    assert a in model.root.children
+
+
+def test_explode_redo_reclears_definition_children():
+    """Redo re-runs do(), which re-captures defn.children — it must re-clear
+    the definition too, not just re-append to the parent."""
+    model = Model()
+    inner = model.new_definition("Inner", is_group=False)
+    comp = model.new_definition("Comp", is_group=False)
+    child = model.new_instance(inner, np.eye(4, dtype=np.float64))
+    comp.children.append(child)
+    a = model.new_instance(comp, np.eye(4, dtype=np.float64))
+    b = model.new_instance(comp, np.eye(4, dtype=np.float64))
+    model.root.children.extend([a, b])
+
+    stack = CommandStack()
+    stack.execute(ExplodeInstanceCommand(model.root, a), model)
+    stack.undo()
+    stack.redo()
+
+    assert len(comp.children) == 0
+    assert child in model.root.children
