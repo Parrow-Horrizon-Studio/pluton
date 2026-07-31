@@ -111,7 +111,15 @@ class Model:
 
         The world ray is transformed into each instance's local frame via mat_invert.
         Returns the Instance with the smallest hit.t, or None if no hit.
+
+        Instances whose definition has no faces under the cursor (e.g. an
+        edge-only group or component) fall back to a ray/edge proximity test
+        in the same local frame, so they remain pickable. A face hit always
+        wins over an edge hit within the same instance (edges are only
+        tested when the face test misses); across instances the nearest hit
+        wins.
         """
+        from pluton.geometry.ray import closest_point_on_segment_to_ray
         from pluton.geometry.transforms import mat_invert
 
         best, best_t = None, float("inf")
@@ -124,8 +132,25 @@ class Model:
             o = (inv @ np.append(origin, 1.0))[:3]
             d = inv[:3, :3] @ np.asarray(direction, np.float64)
             hit = inst.definition.mesh.ray_pick_face(o, d)
-            if hit is not None and hit.t < best_t:
-                best, best_t = inst, hit.t
+            if hit is not None:
+                if hit.t < best_t:
+                    best, best_t = inst, hit.t
+                continue
+
+            # Face miss: fall back to edge proximity in the same local frame.
+            mesh = inst.definition.mesh
+            for e in mesh.edges_iter():
+                a = np.asarray(mesh.vertex(e.v1_id).position, np.float64)
+                b = np.asarray(mesh.vertex(e.v2_id).position, np.float64)
+                on_pt, _seg_t = closest_point_on_segment_to_ray(o, d, a, b)
+                on_pt = np.asarray(on_pt, np.float64)
+                ray_t = float(np.dot(on_pt - o, d) / np.dot(d, d))
+                if ray_t <= 0:
+                    continue
+                dist = float(np.linalg.norm(on_pt - (o + ray_t * d)))
+                tol = 0.05 * ray_t  # world-space tolerance, a ~3deg cone
+                if dist <= tol and ray_t < best_t:
+                    best, best_t = inst, ray_t
         return best
 
     def pick_face_local(self, origin, direction):
