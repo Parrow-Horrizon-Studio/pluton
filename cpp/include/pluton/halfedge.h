@@ -14,11 +14,11 @@ namespace pluton {
 /// Result of HalfEdgeMesh::split_edge — the ids of the entities it created.
 /// face_a / face_b are INVALID_ID for a boundary edge's empty side.
 struct SplitEdgeResult {
-    std::uint32_t vertex;   // the new vertex w inserted on the edge
-    std::uint32_t edge_a;   // new edge (v_min — w)
-    std::uint32_t edge_b;   // new edge (w — v_max)
-    std::uint32_t face_a;   // rebuilt face on he(2e) side, or INVALID_ID
-    std::uint32_t face_b;   // rebuilt face on he(2e+1) side, or INVALID_ID
+    std::uint32_t vertex;  // the new vertex w inserted on the edge
+    std::uint32_t edge_a;  // new edge (v_min — w)
+    std::uint32_t edge_b;  // new edge (w — v_max)
+    std::uint32_t face_a;  // rebuilt face on he(2e) side, or INVALID_ID
+    std::uint32_t face_b;  // rebuilt face on he(2e+1) side, or INVALID_ID
 };
 
 /// Half-edge mesh — the topology source of truth for Pluton's M3+ kernel.
@@ -48,8 +48,7 @@ public:
 
     void restore_vertex(std::uint32_t v_id, float x, float y, float z);
     void restore_edge(std::uint32_t e_id, std::uint32_t v1_id, std::uint32_t v2_id);
-    void restore_face(std::uint32_t f_id,
-                      const std::vector<std::uint32_t>& loop,
+    void restore_face(std::uint32_t f_id, const std::vector<std::uint32_t>& loop,
                       const std::vector<std::int32_t>& triangles);
 
     /// Move an existing live vertex to (x, y, z) in place. Updates the
@@ -77,9 +76,7 @@ public:
     ///   - every vertex of either face lies within `dist_tol` of the other face's plane.
     /// Returns false (without crashing) for degenerate-normal faces (|n| < 1e-7).
     /// Project defaults: angle_tol_cos = cos(0.5°) ≈ 0.9999619f, dist_tol = 1e-4f.
-    bool faces_are_coplanar(std::uint32_t f1_id,
-                            std::uint32_t f2_id,
-                            float angle_tol_cos,
+    bool faces_are_coplanar(std::uint32_t f1_id, std::uint32_t f2_id, float angle_tol_cos,
                             float dist_tol) const;
 
     /// Dissolve an edge between two adjacent faces — merges the faces into one.
@@ -118,13 +115,29 @@ public:
     std::size_t face_slab_size() const noexcept { return faces_.size(); }
 
 private:
-    struct Vertex   { float pos[3]; std::uint32_t outgoing_he; bool alive; };
-    struct HalfEdge { std::uint32_t origin; std::uint32_t next; std::uint32_t twin; std::uint32_t face; bool alive; };
-    struct Face     { std::uint32_t boundary_he; float normal[3]; std::vector<std::int32_t> tris; std::vector<std::uint32_t> loop; bool alive; };
+    struct Vertex {
+        float pos[3];
+        std::uint32_t outgoing_he;
+        bool alive;
+    };
+    struct HalfEdge {
+        std::uint32_t origin;
+        std::uint32_t next;
+        std::uint32_t twin;
+        std::uint32_t face;
+        bool alive;
+    };
+    struct Face {
+        std::uint32_t boundary_he;
+        float normal[3];
+        std::vector<std::int32_t> tris;
+        std::vector<std::uint32_t> loop;
+        bool alive;
+    };
 
-    std::vector<Vertex>   vertices_;
+    std::vector<Vertex> vertices_;
     std::vector<HalfEdge> halfedges_;
-    std::vector<Face>     faces_;
+    std::vector<Face> faces_;
 
     // Packed position → live vertex id, for idempotent add_vertex.
     std::unordered_map<std::uint64_t, std::uint32_t> position_index_;

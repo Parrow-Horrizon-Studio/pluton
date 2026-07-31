@@ -4,8 +4,8 @@
 #include "pluton/ray_intersect.h"
 
 using pluton::HalfEdgeMesh;
-using pluton::RayMeshHit;
 using pluton::ray_intersect_mesh;
+using pluton::RayMeshHit;
 
 namespace {
 
@@ -82,10 +82,9 @@ TEST(RayIntersectMesh, ClosestFaceWinsWhenTwoFacesAlongRay) {
         m.add_halfedge_pair(v1, v2);
         m.add_halfedge_pair(v2, v3);
         m.add_halfedge_pair(v3, v0);
-        m.add_face_from_loop(
-            {v0, v1, v2, v3},
-            {static_cast<int>(v0), static_cast<int>(v1), static_cast<int>(v2),
-             static_cast<int>(v0), static_cast<int>(v2), static_cast<int>(v3)});
+        m.add_face_from_loop({v0, v1, v2, v3},
+                             {static_cast<int>(v0), static_cast<int>(v1), static_cast<int>(v2),
+                              static_cast<int>(v0), static_cast<int>(v2), static_cast<int>(v3)});
     }
     // Upper face at z=2 (will be hit FIRST from a ray coming from above)
     std::uint32_t upper_face;
@@ -99,9 +98,8 @@ TEST(RayIntersectMesh, ClosestFaceWinsWhenTwoFacesAlongRay) {
         m.add_halfedge_pair(u2, u3);
         m.add_halfedge_pair(u3, u0);
         upper_face = m.add_face_from_loop(
-            {u0, u1, u2, u3},
-            {static_cast<int>(u0), static_cast<int>(u1), static_cast<int>(u2),
-             static_cast<int>(u0), static_cast<int>(u2), static_cast<int>(u3)});
+            {u0, u1, u2, u3}, {static_cast<int>(u0), static_cast<int>(u1), static_cast<int>(u2),
+                               static_cast<int>(u0), static_cast<int>(u2), static_cast<int>(u3)});
     }
 
     auto hit = ray_intersect_mesh(m, {0.5f, 0.5f, 5.0f}, {0.0f, 0.0f, -1.0f});
@@ -120,7 +118,8 @@ TEST(RayIntersectMesh, TombstonedFaceIsSkipped) {
 TEST(RayIntersectMesh, NormalizedAndUnnormalizedDirectionsAgreeOnFaceId) {
     auto [m, f] = make_ground_rect();
     auto a = ray_intersect_mesh(m, {0.5f, 0.5f, 5.0f}, {0.0f, 0.0f, -1.0f});
-    auto b = ray_intersect_mesh(m, {0.5f, 0.5f, 5.0f}, {0.0f, 0.0f, -7.5f});  // same direction, different magnitude
+    auto b = ray_intersect_mesh(m, {0.5f, 0.5f, 5.0f},
+                                {0.0f, 0.0f, -7.5f});  // same direction, different magnitude
     ASSERT_TRUE(a.has_value());
     ASSERT_TRUE(b.has_value());
     EXPECT_EQ(a->face_id, b->face_id);

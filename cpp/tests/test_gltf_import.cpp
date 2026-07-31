@@ -18,7 +18,7 @@ TEST(GltfImport, PlainBoxHasGeometryAndNodes) {
     EXPECT_GT(s.meshes[0].positions.size(), 0u);
     EXPECT_GT(s.meshes[0].triangles.size(), 0u);
     EXPECT_FALSE(s.nodes.empty());
-    EXPECT_EQ(s.nodes[0].parent, -1);           // root first
+    EXPECT_EQ(s.nodes[0].parent, -1);  // root first
 }
 
 TEST(GltfImport, DracoBoxDecodes) {

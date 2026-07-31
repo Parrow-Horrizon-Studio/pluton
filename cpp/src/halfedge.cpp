@@ -56,13 +56,16 @@ std::uint32_t HalfEdgeMesh::add_vertex(float x, float y, float z) {
 
 std::uint32_t HalfEdgeMesh::add_halfedge_pair(std::uint32_t v1_id, std::uint32_t v2_id) {
     if (v1_id == v2_id) {
-        throw std::invalid_argument("HalfEdgeMesh::add_halfedge_pair: self-loop at vertex " + std::to_string(v1_id));
+        throw std::invalid_argument("HalfEdgeMesh::add_halfedge_pair: self-loop at vertex " +
+                                    std::to_string(v1_id));
     }
     if (!vertex_is_live(v1_id)) {
-        throw std::out_of_range("HalfEdgeMesh::add_halfedge_pair: v1_id " + std::to_string(v1_id) + " is not live");
+        throw std::out_of_range("HalfEdgeMesh::add_halfedge_pair: v1_id " + std::to_string(v1_id) +
+                                " is not live");
     }
     if (!vertex_is_live(v2_id)) {
-        throw std::out_of_range("HalfEdgeMesh::add_halfedge_pair: v2_id " + std::to_string(v2_id) + " is not live");
+        throw std::out_of_range("HalfEdgeMesh::add_halfedge_pair: v2_id " + std::to_string(v2_id) +
+                                " is not live");
     }
     const std::uint32_t v_min = std::min(v1_id, v2_id);
     const std::uint32_t v_max = std::max(v1_id, v2_id);
@@ -82,13 +85,15 @@ std::uint32_t HalfEdgeMesh::add_halfedge_pair(std::uint32_t v1_id, std::uint32_t
 }
 
 std::uint32_t HalfEdgeMesh::add_face_from_loop(const std::vector<std::uint32_t>& loop,
-                                                const std::vector<std::int32_t>& triangles) {
+                                               const std::vector<std::int32_t>& triangles) {
     if (loop.size() < 3) {
-        throw std::invalid_argument("HalfEdgeMesh::add_face_from_loop: loop has " + std::to_string(loop.size()) + " vertices; minimum 3");
+        throw std::invalid_argument("HalfEdgeMesh::add_face_from_loop: loop has " +
+                                    std::to_string(loop.size()) + " vertices; minimum 3");
     }
     for (auto v : loop) {
         if (!vertex_is_live(v)) {
-            throw std::out_of_range("HalfEdgeMesh::add_face_from_loop: vertex " + std::to_string(v) + " is not live");
+            throw std::out_of_range("HalfEdgeMesh::add_face_from_loop: vertex " +
+                                    std::to_string(v) + " is not live");
         }
     }
     const std::uint32_t f_id = static_cast<std::uint32_t>(faces_.size());
@@ -108,10 +113,14 @@ std::uint32_t HalfEdgeMesh::add_face_from_loop(const std::vector<std::uint32_t>&
     float nz = e1x * e2y - e1y * e2x;
     const float length = std::sqrt(nx * nx + ny * ny + nz * nz);
     if (length > 1e-9f) {
-        nx /= length; ny /= length; nz /= length;
+        nx /= length;
+        ny /= length;
+        nz /= length;
     } else {
         // Degenerate (collinear) — keep a sensible default; renderer will see weak lighting.
-        nx = 0.0f; ny = 0.0f; nz = 1.0f;
+        nx = 0.0f;
+        ny = 0.0f;
+        nz = 1.0f;
     }
     Face f{INVALID_ID, {nx, ny, nz}, triangles, loop, true};
 
@@ -129,8 +138,9 @@ std::uint32_t HalfEdgeMesh::add_face_from_loop(const std::vector<std::uint32_t>&
         const std::uint64_t key = pack_pair(v_min, v_max);
         auto it = edge_index_.find(key);
         if (it == edge_index_.end() || !edge_is_live(it->second)) {
-            throw std::invalid_argument("HalfEdgeMesh::add_face_from_loop: edge ("
-                + std::to_string(v_from) + ", " + std::to_string(v_to) + ") is missing");
+            throw std::invalid_argument("HalfEdgeMesh::add_face_from_loop: edge (" +
+                                        std::to_string(v_from) + ", " + std::to_string(v_to) +
+                                        ") is missing");
         }
         const std::uint32_t edge_id = it->second;
         loop_halfedges[i] = (v_from < v_to) ? (edge_id * 2) : (edge_id * 2 + 1);
@@ -158,12 +168,14 @@ std::uint32_t HalfEdgeMesh::add_face_from_loop(const std::vector<std::uint32_t>&
 
 void HalfEdgeMesh::remove_edge(std::uint32_t e_id) {
     if (!edge_is_live(e_id)) {
-        throw std::out_of_range("HalfEdgeMesh::remove_edge: edge " + std::to_string(e_id) + " is not live");
+        throw std::out_of_range("HalfEdgeMesh::remove_edge: edge " + std::to_string(e_id) +
+                                " is not live");
     }
     const std::uint32_t he_a = e_id * 2;
     const std::uint32_t he_b = he_a + 1;
     if (halfedges_[he_a].face != INVALID_ID || halfedges_[he_b].face != INVALID_ID) {
-        throw std::invalid_argument("HalfEdgeMesh::remove_edge: edge " + std::to_string(e_id) + " still bordered by a face");
+        throw std::invalid_argument("HalfEdgeMesh::remove_edge: edge " + std::to_string(e_id) +
+                                    " still bordered by a face");
     }
     const std::uint32_t v_min = halfedges_[he_a].origin;
     const std::uint32_t v_max = halfedges_[he_b].origin;
@@ -175,12 +187,14 @@ void HalfEdgeMesh::remove_edge(std::uint32_t e_id) {
 
 void HalfEdgeMesh::remove_vertex(std::uint32_t v_id) {
     if (!vertex_is_live(v_id)) {
-        throw std::out_of_range("HalfEdgeMesh::remove_vertex: vertex " + std::to_string(v_id) + " is not live");
+        throw std::out_of_range("HalfEdgeMesh::remove_vertex: vertex " + std::to_string(v_id) +
+                                " is not live");
     }
     // Scan live half-edges; reject if any has origin == v_id.
     for (const auto& he : halfedges_) {
         if (he.alive && he.origin == v_id) {
-            throw std::invalid_argument("HalfEdgeMesh::remove_vertex: vertex " + std::to_string(v_id) + " still has incident edges");
+            throw std::invalid_argument("HalfEdgeMesh::remove_vertex: vertex " +
+                                        std::to_string(v_id) + " still has incident edges");
         }
     }
     const auto& v = vertices_[v_id];
@@ -190,7 +204,8 @@ void HalfEdgeMesh::remove_vertex(std::uint32_t v_id) {
 }
 void HalfEdgeMesh::remove_face(std::uint32_t f_id) {
     if (!face_is_live(f_id)) {
-        throw std::out_of_range("HalfEdgeMesh::remove_face: face " + std::to_string(f_id) + " is not live");
+        throw std::out_of_range("HalfEdgeMesh::remove_face: face " + std::to_string(f_id) +
+                                " is not live");
     }
     // Walk the boundary half-edge cycle and clear face pointers.
     Face& f = faces_[f_id];
@@ -210,10 +225,12 @@ void HalfEdgeMesh::remove_face(std::uint32_t f_id) {
 
 void HalfEdgeMesh::restore_vertex(std::uint32_t v_id, float x, float y, float z) {
     if (v_id >= vertices_.size()) {
-        throw std::out_of_range("HalfEdgeMesh::restore_vertex: v_id " + std::to_string(v_id) + " out of range");
+        throw std::out_of_range("HalfEdgeMesh::restore_vertex: v_id " + std::to_string(v_id) +
+                                " out of range");
     }
     if (vertices_[v_id].alive) {
-        throw std::logic_error("HalfEdgeMesh::restore_vertex: slot " + std::to_string(v_id) + " is already live");
+        throw std::logic_error("HalfEdgeMesh::restore_vertex: slot " + std::to_string(v_id) +
+                               " is already live");
     }
     if (x == 0.0f) x = 0.0f;
     if (y == 0.0f) y = 0.0f;
@@ -230,10 +247,12 @@ void HalfEdgeMesh::restore_edge(std::uint32_t e_id, std::uint32_t v1_id, std::ui
     const std::uint32_t he_a = e_id * 2;
     const std::uint32_t he_b = he_a + 1;
     if (he_b >= halfedges_.size()) {
-        throw std::out_of_range("HalfEdgeMesh::restore_edge: e_id " + std::to_string(e_id) + " out of range");
+        throw std::out_of_range("HalfEdgeMesh::restore_edge: e_id " + std::to_string(e_id) +
+                                " out of range");
     }
     if (halfedges_[he_a].alive || halfedges_[he_b].alive) {
-        throw std::logic_error("HalfEdgeMesh::restore_edge: slot " + std::to_string(e_id) + " is already live");
+        throw std::logic_error("HalfEdgeMesh::restore_edge: slot " + std::to_string(e_id) +
+                               " is already live");
     }
     const std::uint32_t v_min = std::min(v1_id, v2_id);
     const std::uint32_t v_max = std::max(v1_id, v2_id);
@@ -249,14 +268,15 @@ void HalfEdgeMesh::restore_edge(std::uint32_t e_id, std::uint32_t v1_id, std::ui
     dirty_ = true;
 }
 
-void HalfEdgeMesh::restore_face(std::uint32_t f_id,
-                                 const std::vector<std::uint32_t>& loop,
-                                 const std::vector<std::int32_t>& triangles) {
+void HalfEdgeMesh::restore_face(std::uint32_t f_id, const std::vector<std::uint32_t>& loop,
+                                const std::vector<std::int32_t>& triangles) {
     if (f_id >= faces_.size()) {
-        throw std::out_of_range("HalfEdgeMesh::restore_face: f_id " + std::to_string(f_id) + " out of range");
+        throw std::out_of_range("HalfEdgeMesh::restore_face: f_id " + std::to_string(f_id) +
+                                " out of range");
     }
     if (faces_[f_id].alive) {
-        throw std::logic_error("HalfEdgeMesh::restore_face: slot " + std::to_string(f_id) + " is already live");
+        throw std::logic_error("HalfEdgeMesh::restore_face: slot " + std::to_string(f_id) +
+                               " is already live");
     }
     // Same wiring as add_face_from_loop but writes into the existing slot.
     const std::size_t n = loop.size();
@@ -268,8 +288,9 @@ void HalfEdgeMesh::restore_face(std::uint32_t f_id,
         const std::uint32_t v_max = std::max(v_from, v_to);
         auto it = edge_index_.find(pack_pair(v_min, v_max));
         if (it == edge_index_.end() || !edge_is_live(it->second)) {
-            throw std::invalid_argument("HalfEdgeMesh::restore_face: edge ("
-                + std::to_string(v_from) + ", " + std::to_string(v_to) + ") is missing");
+            throw std::invalid_argument("HalfEdgeMesh::restore_face: edge (" +
+                                        std::to_string(v_from) + ", " + std::to_string(v_to) +
+                                        ") is missing");
         }
         loop_halfedges[i] = (v_from < v_to) ? (it->second * 2) : (it->second * 2 + 1);
     }
@@ -301,11 +322,17 @@ void HalfEdgeMesh::restore_face(std::uint32_t f_id,
         float rnz = re1x * re2y - re1y * re2x;
         const float rlen = std::sqrt(rnx * rnx + rny * rny + rnz * rnz);
         if (rlen > 1e-9f) {
-            rnx /= rlen; rny /= rlen; rnz /= rlen;
+            rnx /= rlen;
+            rny /= rlen;
+            rnz /= rlen;
         } else {
-            rnx = 0.0f; rny = 0.0f; rnz = 1.0f;
+            rnx = 0.0f;
+            rny = 0.0f;
+            rnz = 1.0f;
         }
-        f.normal[0] = rnx; f.normal[1] = rny; f.normal[2] = rnz;
+        f.normal[0] = rnx;
+        f.normal[1] = rny;
+        f.normal[2] = rnz;
     }
     dirty_ = true;
 }
@@ -332,7 +359,8 @@ bool HalfEdgeMesh::face_is_live(std::uint32_t f_id) const noexcept {
 
 std::array<float, 3> HalfEdgeMesh::vertex_position(std::uint32_t v_id) const {
     if (!vertex_is_live(v_id)) {
-        throw std::out_of_range("HalfEdgeMesh::vertex_position: vertex " + std::to_string(v_id) + " is not live");
+        throw std::out_of_range("HalfEdgeMesh::vertex_position: vertex " + std::to_string(v_id) +
+                                " is not live");
     }
     const auto& v = vertices_[v_id];
     return {v.pos[0], v.pos[1], v.pos[2]};
@@ -340,7 +368,8 @@ std::array<float, 3> HalfEdgeMesh::vertex_position(std::uint32_t v_id) const {
 
 std::array<std::uint32_t, 2> HalfEdgeMesh::edge_vertices(std::uint32_t e_id) const {
     if (!edge_is_live(e_id)) {
-        throw std::out_of_range("HalfEdgeMesh::edge_vertices: edge " + std::to_string(e_id) + " is not live");
+        throw std::out_of_range("HalfEdgeMesh::edge_vertices: edge " + std::to_string(e_id) +
+                                " is not live");
     }
     const std::uint32_t he_a = e_id * 2;
     const std::uint32_t he_b = he_a + 1;
@@ -349,14 +378,16 @@ std::array<std::uint32_t, 2> HalfEdgeMesh::edge_vertices(std::uint32_t e_id) con
 
 std::vector<std::uint32_t> HalfEdgeMesh::face_loop_vertices(std::uint32_t f_id) const {
     if (!face_is_live(f_id)) {
-        throw std::out_of_range("HalfEdgeMesh::face_loop_vertices: face " + std::to_string(f_id) + " is not live");
+        throw std::out_of_range("HalfEdgeMesh::face_loop_vertices: face " + std::to_string(f_id) +
+                                " is not live");
     }
     return faces_[f_id].loop;
 }
 
 std::vector<std::int32_t> HalfEdgeMesh::face_triangles(std::uint32_t f_id) const {
     if (!face_is_live(f_id)) {
-        throw std::out_of_range("HalfEdgeMesh::face_triangles: face " + std::to_string(f_id) + " is not live");
+        throw std::out_of_range("HalfEdgeMesh::face_triangles: face " + std::to_string(f_id) +
+                                " is not live");
     }
     return faces_[f_id].tris;
 }
@@ -364,17 +395,17 @@ std::vector<std::int32_t> HalfEdgeMesh::face_triangles(std::uint32_t f_id) const
 namespace {
 
 inline std::array<float, 3> sub3(std::array<float, 3> a, std::array<float, 3> b) {
-    return { a[0]-b[0], a[1]-b[1], a[2]-b[2] };
+    return {a[0] - b[0], a[1] - b[1], a[2] - b[2]};
 }
 inline std::array<float, 3> cross3(std::array<float, 3> a, std::array<float, 3> b) {
     return {
-        a[1]*b[2] - a[2]*b[1],
-        a[2]*b[0] - a[0]*b[2],
-        a[0]*b[1] - a[1]*b[0],
+        a[1] * b[2] - a[2] * b[1],
+        a[2] * b[0] - a[0] * b[2],
+        a[0] * b[1] - a[1] * b[0],
     };
 }
 inline float dot3(std::array<float, 3> a, std::array<float, 3> b) {
-    return a[0]*b[0] + a[1]*b[1] + a[2]*b[2];
+    return a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
 }
 inline float len3(std::array<float, 3> a) {
     return std::sqrt(dot3(a, a));
@@ -382,24 +413,23 @@ inline float len3(std::array<float, 3> a) {
 
 // Compute geometric face normal from the first three boundary vertices.
 // Returns zero vector if the face is degenerate (collinear or repeated vertices).
-std::array<float, 3> compute_face_normal_geometric(
-        const pluton::HalfEdgeMesh& m, std::uint32_t f_id) {
+std::array<float, 3> compute_face_normal_geometric(const pluton::HalfEdgeMesh& m,
+                                                   std::uint32_t f_id) {
     auto loop = m.face_loop_vertices(f_id);
     if (loop.size() < 3) return {0, 0, 0};
     auto p0 = m.vertex_position(loop[0]);
     auto p1 = m.vertex_position(loop[1]);
     auto p2 = m.vertex_position(loop[2]);
-    auto n  = cross3(sub3(p1, p0), sub3(p2, p0));
+    auto n = cross3(sub3(p1, p0), sub3(p2, p0));
     float L = len3(n);
     if (L < 1e-7f) return {0, 0, 0};
-    return { n[0]/L, n[1]/L, n[2]/L };
+    return {n[0] / L, n[1] / L, n[2] / L};
 }
 
 // Insert vertex w into `loop` between the adjacent pair (va, vb) (either order),
 // returning the new loop. Caller guarantees va,vb are consecutive in loop.
-std::vector<std::uint32_t> loop_with_inserted(
-        const std::vector<std::uint32_t>& loop,
-        std::uint32_t va, std::uint32_t vb, std::uint32_t w) {
+std::vector<std::uint32_t> loop_with_inserted(const std::vector<std::uint32_t>& loop,
+                                              std::uint32_t va, std::uint32_t vb, std::uint32_t w) {
     const std::size_t n = loop.size();
     std::vector<std::uint32_t> out;
     out.reserve(n + 1);
@@ -426,8 +456,8 @@ void pluton::HalfEdgeMesh::recompute_face_normal(std::uint32_t f_id) {
 
 void pluton::HalfEdgeMesh::set_vertex_position(std::uint32_t v_id, float x, float y, float z) {
     if (v_id >= vertices_.size() || !vertices_[v_id].alive) {
-        throw std::out_of_range(
-            "HalfEdgeMesh::set_vertex_position: v_id " + std::to_string(v_id) + " is not live");
+        throw std::out_of_range("HalfEdgeMesh::set_vertex_position: v_id " + std::to_string(v_id) +
+                                " is not live");
     }
     // Collapse negative zero so -0.0 and 0.0 hash identically (matches add_vertex).
     if (x == 0.0f) x = 0.0f;
@@ -437,7 +467,9 @@ void pluton::HalfEdgeMesh::set_vertex_position(std::uint32_t v_id, float x, floa
     Vertex& v = vertices_[v_id];
     // Dedup-index upkeep: drop the old packed key, install the new one.
     position_index_.erase(pack_position(v.pos[0], v.pos[1], v.pos[2]));
-    v.pos[0] = x; v.pos[1] = y; v.pos[2] = z;
+    v.pos[0] = x;
+    v.pos[1] = y;
+    v.pos[2] = z;
     position_index_[pack_position(x, y, z)] = v_id;
 
     // Recompute cached normals on every incident face. Each incident face has
@@ -451,10 +483,8 @@ void pluton::HalfEdgeMesh::set_vertex_position(std::uint32_t v_id, float x, floa
     dirty_ = true;
 }
 
-bool pluton::HalfEdgeMesh::faces_are_coplanar(std::uint32_t f1_id,
-                                              std::uint32_t f2_id,
-                                              float angle_tol_cos,
-                                              float dist_tol) const {
+bool pluton::HalfEdgeMesh::faces_are_coplanar(std::uint32_t f1_id, std::uint32_t f2_id,
+                                              float angle_tol_cos, float dist_tol) const {
     if (!face_is_live(f1_id) || !face_is_live(f2_id)) return false;
     auto n1 = compute_face_normal_geometric(*this, f1_id);
     auto n2 = compute_face_normal_geometric(*this, f2_id);
@@ -585,8 +615,8 @@ std::uint32_t pluton::HalfEdgeMesh::dissolve_edge(std::uint32_t e_id) {
     return new_face;
 }
 
-std::optional<pluton::SplitEdgeResult>
-pluton::HalfEdgeMesh::split_edge(std::uint32_t e_id, float t) {
+std::optional<pluton::SplitEdgeResult> pluton::HalfEdgeMesh::split_edge(std::uint32_t e_id,
+                                                                        float t) {
     if (!edge_is_live(e_id)) return std::nullopt;
     if (!(t > 0.0f && t < 1.0f)) return std::nullopt;
 
@@ -643,16 +673,20 @@ pluton::HalfEdgeMesh::split_edge(std::uint32_t e_id, float t) {
 }
 
 std::uint32_t HalfEdgeMesh::halfedge_origin(std::uint32_t he_id) const noexcept {
-    return he_id < halfedges_.size() && halfedges_[he_id].alive ? halfedges_[he_id].origin : INVALID_ID;
+    return he_id < halfedges_.size() && halfedges_[he_id].alive ? halfedges_[he_id].origin
+                                                                : INVALID_ID;
 }
 std::uint32_t HalfEdgeMesh::halfedge_next(std::uint32_t he_id) const noexcept {
-    return he_id < halfedges_.size() && halfedges_[he_id].alive ? halfedges_[he_id].next : INVALID_ID;
+    return he_id < halfedges_.size() && halfedges_[he_id].alive ? halfedges_[he_id].next
+                                                                : INVALID_ID;
 }
 std::uint32_t HalfEdgeMesh::halfedge_twin(std::uint32_t he_id) const noexcept {
-    return he_id < halfedges_.size() && halfedges_[he_id].alive ? halfedges_[he_id].twin : INVALID_ID;
+    return he_id < halfedges_.size() && halfedges_[he_id].alive ? halfedges_[he_id].twin
+                                                                : INVALID_ID;
 }
 std::uint32_t HalfEdgeMesh::halfedge_face(std::uint32_t he_id) const noexcept {
-    return he_id < halfedges_.size() && halfedges_[he_id].alive ? halfedges_[he_id].face : INVALID_ID;
+    return he_id < halfedges_.size() && halfedges_[he_id].alive ? halfedges_[he_id].face
+                                                                : INVALID_ID;
 }
 
 std::uint32_t HalfEdgeMesh::next_live_vertex(std::uint32_t start) const noexcept {

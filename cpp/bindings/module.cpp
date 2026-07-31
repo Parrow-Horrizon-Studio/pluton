@@ -1,5 +1,3 @@
-#include <cstdint>
-
 #include <nanobind/nanobind.h>
 #include <nanobind/ndarray.h>
 #include <nanobind/stl/array.h>
@@ -7,6 +5,8 @@
 #include <nanobind/stl/pair.h>
 #include <nanobind/stl/string.h>
 #include <nanobind/stl/vector.h>
+
+#include <cstdint>
 
 #include "pluton/gltf_import.h"
 #include "pluton/halfedge.h"
@@ -18,9 +18,9 @@
 namespace nb = nanobind;
 using pluton::HalfEdgeMesh;
 using pluton::Mesh;
+using pluton::ray_intersect_mesh;
 using pluton::RayMeshHit;
 using pluton::SplitEdgeResult;
-using pluton::ray_intersect_mesh;
 
 namespace {
 
@@ -29,19 +29,16 @@ namespace {
 // non-writable from Python. The `nb::rv_policy::reference_internal` policy
 // on the def_prop_ro call (below) keeps the owning Mesh alive as long as
 // the returned ndarray is alive.
-nb::ndarray<const float, nb::numpy, nb::shape<-1, 3>> as_vec3_array(
-    const std::vector<float>& v) {
+nb::ndarray<const float, nb::numpy, nb::shape<-1, 3>> as_vec3_array(const std::vector<float>& v) {
     const std::size_t n = v.size() / 3;
-    return nb::ndarray<const float, nb::numpy, nb::shape<-1, 3>>(
-        const_cast<float*>(v.data()),
-        {n, static_cast<std::size_t>(3)});
+    return nb::ndarray<const float, nb::numpy, nb::shape<-1, 3>>(const_cast<float*>(v.data()),
+                                                                 {n, static_cast<std::size_t>(3)});
 }
 
 nb::ndarray<const std::uint32_t, nb::numpy, nb::shape<-1>> as_index_array(
     const std::vector<std::uint32_t>& v) {
     return nb::ndarray<const std::uint32_t, nb::numpy, nb::shape<-1>>(
-        const_cast<std::uint32_t*>(v.data()),
-        {v.size()});
+        const_cast<std::uint32_t*>(v.data()), {v.size()});
 }
 
 }  // namespace
@@ -49,24 +46,20 @@ nb::ndarray<const std::uint32_t, nb::numpy, nb::shape<-1>> as_index_array(
 NB_MODULE(_core, m) {
     m.doc() = "Pluton C++ core module";
 
-    m.def("version", &pluton::version,
-          "Returns the Pluton library version as a string.");
+    m.def("version", &pluton::version, "Returns the Pluton library version as a string.");
 
     nb::class_<Mesh>(m, "Mesh", "Polygonal mesh: positions, normals, indices.")
         .def(nb::init<>())
         .def_prop_ro(
-            "positions",
-            [](Mesh& self) { return as_vec3_array(self.positions); },
+            "positions", [](Mesh& self) { return as_vec3_array(self.positions); },
             nb::rv_policy::reference_internal,
             "Vertex positions as a read-only (N, 3) float32 numpy view.")
         .def_prop_ro(
-            "normals",
-            [](Mesh& self) { return as_vec3_array(self.normals); },
+            "normals", [](Mesh& self) { return as_vec3_array(self.normals); },
             nb::rv_policy::reference_internal,
             "Vertex normals as a read-only (N, 3) float32 numpy view.")
         .def_prop_ro(
-            "indices",
-            [](Mesh& self) { return as_index_array(self.indices); },
+            "indices", [](Mesh& self) { return as_index_array(self.indices); },
             nb::rv_policy::reference_internal,
             "Triangle indices as a read-only (M,) uint32 numpy view.")
         .def_prop_ro("vertex_count", &Mesh::vertex_count)
@@ -76,7 +69,8 @@ NB_MODULE(_core, m) {
           "Create an axis-aligned cube of the given edge length, "
           "with its bottom face on the ground plane (z = 0).");
 
-    nb::class_<HalfEdgeMesh>(m, "HalfEdgeMesh", "Half-edge topology mesh — geometric source of truth")
+    nb::class_<HalfEdgeMesh>(m, "HalfEdgeMesh",
+                             "Half-edge topology mesh — geometric source of truth")
         .def(nb::init<>())
 
         // Mutators
@@ -102,22 +96,16 @@ NB_MODULE(_core, m) {
         .def("face_triangles", &HalfEdgeMesh::face_triangles)
 
         // M3c: topology editing + coplanarity
-        .def("dissolve_edge",
-             &HalfEdgeMesh::dissolve_edge,
-             nb::arg("edge_id"),
+        .def("dissolve_edge", &HalfEdgeMesh::dissolve_edge, nb::arg("edge_id"),
              "Collapse two adjacent faces sharing this edge into one merged face. "
              "Returns the new face id, or INVALID_ID if the edge is boundary/dead "
              "or the two faces share more than one edge.")
-        .def("faces_are_coplanar",
-             &HalfEdgeMesh::faces_are_coplanar,
-             nb::arg("f1_id"), nb::arg("f2_id"),
-             nb::arg("angle_tol_cos"), nb::arg("dist_tol"),
+        .def("faces_are_coplanar", &HalfEdgeMesh::faces_are_coplanar, nb::arg("f1_id"),
+             nb::arg("f2_id"), nb::arg("angle_tol_cos"), nb::arg("dist_tol"),
              "True iff |dot(n1, n2)| > angle_tol_cos AND every vertex of either "
              "face lies within dist_tol of the other face's plane. Project defaults: "
              "cos(0.5°) ≈ 0.9999619, 1e-4.")
-        .def("split_edge",
-             &HalfEdgeMesh::split_edge,
-             nb::arg("edge_id"), nb::arg("t"),
+        .def("split_edge", &HalfEdgeMesh::split_edge, nb::arg("edge_id"), nb::arg("t"),
              "Split an edge at parameter t in (0,1), inserting a vertex and "
              "rebuilding incident faces. Returns a SplitEdgeResult, or None if "
              "the edge is dead, t is out of range, or w coincides with an existing vertex.")
@@ -157,12 +145,11 @@ NB_MODULE(_core, m) {
 
     nb::class_<RayMeshHit>(m, "RayMeshHit", "Result of pluton::ray_intersect_mesh")
         .def_ro("face_id", &RayMeshHit::face_id)
-        .def_ro("t",       &RayMeshHit::t)
+        .def_ro("t", &RayMeshHit::t)
         .def_ro("point", &RayMeshHit::point, "Hit point in world coordinates (3-tuple).");
 
-    m.def("ray_intersect_mesh", &ray_intersect_mesh,
-          nb::arg("mesh"), nb::arg("origin"), nb::arg("direction"),
-          "Brute-force ray-mesh face picking. Returns RayMeshHit or None.");
+    m.def("ray_intersect_mesh", &ray_intersect_mesh, nb::arg("mesh"), nb::arg("origin"),
+          nb::arg("direction"), "Brute-force ray-mesh face picking. Returns RayMeshHit or None.");
 
     // M6c: glTF/GLB import bridge (Assimp) — neutral plain-data structs.
     nb::class_<pluton::ImportedMaterial>(m, "ImportedMaterial")

@@ -1,12 +1,12 @@
 #include "pluton/gltf_import.h"
 
-#include <stdexcept>
-#include <utility>
-
-#include <assimp/Importer.hpp>
 #include <assimp/material.h>
 #include <assimp/postprocess.h>
 #include <assimp/scene.h>
+
+#include <assimp/Importer.hpp>
+#include <stdexcept>
+#include <utility>
 
 namespace pluton {
 
@@ -33,12 +33,11 @@ void collect_nodes(const aiNode* node, int parent, std::vector<ImportedNode>& ou
 
 ImportedScene import_gltf(const std::string& path) {
     Assimp::Importer importer;
-    const aiScene* scene = importer.ReadFile(
-        path, aiProcess_Triangulate | aiProcess_JoinIdenticalVertices);
-    if (scene == nullptr || (scene->mFlags & AI_SCENE_FLAGS_INCOMPLETE) != 0
-        || scene->mRootNode == nullptr) {
-        throw std::runtime_error(std::string("glTF import failed: ")
-                                 + importer.GetErrorString());
+    const aiScene* scene =
+        importer.ReadFile(path, aiProcess_Triangulate | aiProcess_JoinIdenticalVertices);
+    if (scene == nullptr || (scene->mFlags & AI_SCENE_FLAGS_INCOMPLETE) != 0 ||
+        scene->mRootNode == nullptr) {
+        throw std::runtime_error(std::string("glTF import failed: ") + importer.GetErrorString());
     }
 
     ImportedScene result;
@@ -68,8 +67,7 @@ ImportedScene import_gltf(const std::string& path) {
         for (unsigned f = 0; f < mesh->mNumFaces; ++f) {
             const aiFace& face = mesh->mFaces[f];
             if (face.mNumIndices != 3) continue;
-            om.triangles.push_back(
-                {face.mIndices[0], face.mIndices[1], face.mIndices[2]});
+            om.triangles.push_back({face.mIndices[0], face.mIndices[1], face.mIndices[2]});
         }
         result.meshes.push_back(std::move(om));
     }

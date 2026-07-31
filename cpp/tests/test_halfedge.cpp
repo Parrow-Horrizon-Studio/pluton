@@ -93,7 +93,7 @@ TEST(HalfEdgeMeshTest, AddHalfedgePairWiresTwinsAndOrigins) {
     auto e = m.add_halfedge_pair(v1, v0);  // swapped order on input
 
     const auto verts = m.edge_vertices(e);
-    EXPECT_EQ(verts[0], std::min(v0, v1));   // canonical: v1 < v2
+    EXPECT_EQ(verts[0], std::min(v0, v1));  // canonical: v1 < v2
     EXPECT_EQ(verts[1], std::max(v0, v1));
 
     const std::uint32_t he_a = e * 2;
@@ -118,8 +118,10 @@ TEST(HalfEdgeMeshTest, AddFaceFromLoopWiresBoundaryCycle) {
     m.add_halfedge_pair(v3, v0);
 
     const std::vector<std::uint32_t> loop = {v0, v1, v2, v3};
-    const std::vector<std::int32_t> tris = {static_cast<std::int32_t>(v0), static_cast<std::int32_t>(v1), static_cast<std::int32_t>(v2),
-                                            static_cast<std::int32_t>(v0), static_cast<std::int32_t>(v2), static_cast<std::int32_t>(v3)};
+    const std::vector<std::int32_t> tris = {
+        static_cast<std::int32_t>(v0), static_cast<std::int32_t>(v1),
+        static_cast<std::int32_t>(v2), static_cast<std::int32_t>(v0),
+        static_cast<std::int32_t>(v2), static_cast<std::int32_t>(v3)};
     auto f = m.add_face_from_loop(loop, tris);
     EXPECT_EQ(f, 0u);
     EXPECT_TRUE(m.face_is_live(f));
@@ -154,7 +156,8 @@ TEST(HalfEdgeMeshTest, AddFaceFromLoopSetsHalfedgeFacePointers) {
         const std::uint32_t he_a = e * 2;
         const std::uint32_t he_b = he_a + 1;
         EXPECT_TRUE(m.halfedge_face(he_a) == f || m.halfedge_face(he_b) == f);
-        EXPECT_TRUE(m.halfedge_face(he_a) == pluton::HalfEdgeMesh::INVALID_ID || m.halfedge_face(he_b) == pluton::HalfEdgeMesh::INVALID_ID);
+        EXPECT_TRUE(m.halfedge_face(he_a) == pluton::HalfEdgeMesh::INVALID_ID ||
+                    m.halfedge_face(he_b) == pluton::HalfEdgeMesh::INVALID_ID);
     }
 }
 
@@ -166,7 +169,9 @@ TEST(HalfEdgeMeshTest, RemoveFaceTombstonesSlot) {
     m.add_halfedge_pair(v0, v1);
     m.add_halfedge_pair(v1, v2);
     m.add_halfedge_pair(v2, v0);
-    auto f = m.add_face_from_loop({v0, v1, v2}, {static_cast<std::int32_t>(v0), static_cast<std::int32_t>(v1), static_cast<std::int32_t>(v2)});
+    auto f = m.add_face_from_loop({v0, v1, v2},
+                                  {static_cast<std::int32_t>(v0), static_cast<std::int32_t>(v1),
+                                   static_cast<std::int32_t>(v2)});
     EXPECT_TRUE(m.face_is_live(f));
 
     m.remove_face(f);
@@ -319,7 +324,7 @@ TEST(HalfEdgeMeshTest, NextLiveVertexSkipsTombstones) {
 
     m.remove_vertex(v1);
     EXPECT_EQ(m.next_live_vertex(0), v0);
-    EXPECT_EQ(m.next_live_vertex(v0 + 1), v2);   // skipped v1
+    EXPECT_EQ(m.next_live_vertex(v0 + 1), v2);  // skipped v1
     EXPECT_EQ(m.next_live_vertex(v2 + 1), pluton::HalfEdgeMesh::INVALID_ID);
 }
 
@@ -352,8 +357,12 @@ TEST(HalfEdgeMeshTest, EdgeLineBufferShape) {
 
     const auto buf = m.edge_line_buffer();
     ASSERT_EQ(buf.size(), 6u);  // 2 endpoints × 3 floats
-    EXPECT_FLOAT_EQ(buf[0], 0.0f); EXPECT_FLOAT_EQ(buf[1], 0.0f); EXPECT_FLOAT_EQ(buf[2], 0.0f);
-    EXPECT_FLOAT_EQ(buf[3], 1.0f); EXPECT_FLOAT_EQ(buf[4], 0.0f); EXPECT_FLOAT_EQ(buf[5], 0.0f);
+    EXPECT_FLOAT_EQ(buf[0], 0.0f);
+    EXPECT_FLOAT_EQ(buf[1], 0.0f);
+    EXPECT_FLOAT_EQ(buf[2], 0.0f);
+    EXPECT_FLOAT_EQ(buf[3], 1.0f);
+    EXPECT_FLOAT_EQ(buf[4], 0.0f);
+    EXPECT_FLOAT_EQ(buf[5], 0.0f);
 }
 
 TEST(HalfEdgeMeshTest, EdgeLineBufferSkipsTombstones) {
@@ -423,8 +432,8 @@ TEST(HalfEdgeMeshTest, FaceNormalComputedGeometricallyYZPlane) {
     // Every vertex should share the face normal: (+1, 0, 0)
     for (std::size_t i = 0; i + 2 < normals.size(); i += 3) {
         EXPECT_NEAR(normals[i + 0], +1.0f, 1e-6f);
-        EXPECT_NEAR(normals[i + 1],  0.0f, 1e-6f);
-        EXPECT_NEAR(normals[i + 2],  0.0f, 1e-6f);
+        EXPECT_NEAR(normals[i + 1], 0.0f, 1e-6f);
+        EXPECT_NEAR(normals[i + 2], 0.0f, 1e-6f);
     }
 }
 
@@ -435,10 +444,8 @@ TEST(HalfEdgeMeshTest, FaceNormalComputedGeometricallyYZPlane) {
 namespace {
 
 // Helper: build a triangle face from 3 explicit positions, return face id.
-std::uint32_t add_triangle(pluton::HalfEdgeMesh& m,
-                           std::array<float, 3> p0,
-                           std::array<float, 3> p1,
-                           std::array<float, 3> p2) {
+std::uint32_t add_triangle(pluton::HalfEdgeMesh& m, std::array<float, 3> p0,
+                           std::array<float, 3> p1, std::array<float, 3> p2) {
     auto v0 = m.add_vertex(p0[0], p0[1], p0[2]);
     auto v1 = m.add_vertex(p1[0], p1[1], p1[2]);
     auto v2 = m.add_vertex(p2[0], p2[1], p2[2]);
@@ -448,15 +455,15 @@ std::uint32_t add_triangle(pluton::HalfEdgeMesh& m,
     return m.add_face_from_loop({v0, v1, v2}, {(int)v0, (int)v1, (int)v2});
 }
 
-constexpr float kCos05Deg = 0.99996192306f;   // cos(0.5°)
-constexpr float kDistTol  = 1.0e-4f;
+constexpr float kCos05Deg = 0.99996192306f;  // cos(0.5°)
+constexpr float kDistTol = 1.0e-4f;
 
 }  // namespace
 
 TEST(HalfEdgeMeshTest, FacesAreCoplanar_TrueForIdenticalPlanes) {
     pluton::HalfEdgeMesh m;
-    auto f1 = add_triangle(m, {0,0,0}, {1,0,0}, {0,1,0});       // XY plane
-    auto f2 = add_triangle(m, {2,2,0}, {3,2,0}, {2,3,0});       // also XY plane
+    auto f1 = add_triangle(m, {0, 0, 0}, {1, 0, 0}, {0, 1, 0});  // XY plane
+    auto f2 = add_triangle(m, {2, 2, 0}, {3, 2, 0}, {2, 3, 0});  // also XY plane
     EXPECT_TRUE(m.faces_are_coplanar(f1, f2, kCos05Deg, kDistTol));
     EXPECT_TRUE(m.faces_are_coplanar(f2, f1, kCos05Deg, kDistTol));  // symmetric
 }
@@ -464,48 +471,48 @@ TEST(HalfEdgeMeshTest, FacesAreCoplanar_TrueForIdenticalPlanes) {
 TEST(HalfEdgeMeshTest, FacesAreCoplanar_TrueWithinAngleTolerance) {
     // Two faces on planes whose normals differ by 0.3° — under the 0.5° tolerance.
     pluton::HalfEdgeMesh m;
-    auto f1 = add_triangle(m, {0,0,0}, {1,0,0}, {0,1,0});  // normal (0,0,1)
+    auto f1 = add_triangle(m, {0, 0, 0}, {1, 0, 0}, {0, 1, 0});  // normal (0,0,1)
     // Rotate the second face by 0.3° about X: normal becomes (0, -sin(0.3°), cos(0.3°))
     float c = std::cos(0.3f * 3.14159265f / 180.0f);
     float s = std::sin(0.3f * 3.14159265f / 180.0f);
-    auto f2 = add_triangle(m, {2,2,0}, {3,2,0}, {2, 2 + c, s});
+    auto f2 = add_triangle(m, {2, 2, 0}, {3, 2, 0}, {2, 2 + c, s});
     // Loosened dist_tol: 0.3° tilt on a face anchored 2 units from origin gives
     // a ~1.05e-2 worst-case plane offset in the symmetric distance check, so
     // the project default 1e-4 would fail this geometry. The angle test is
     // what's being exercised here.
-    EXPECT_TRUE(m.faces_are_coplanar(f1, f2, kCos05Deg, 2e-2f));   // looser dist
+    EXPECT_TRUE(m.faces_are_coplanar(f1, f2, kCos05Deg, 2e-2f));  // looser dist
 }
 
 TEST(HalfEdgeMeshTest, FacesAreCoplanar_FalseBeyondAngleTolerance) {
     // 1.0° apart — over the 0.5° tolerance.
     pluton::HalfEdgeMesh m;
-    auto f1 = add_triangle(m, {0,0,0}, {1,0,0}, {0,1,0});
+    auto f1 = add_triangle(m, {0, 0, 0}, {1, 0, 0}, {0, 1, 0});
     float c = std::cos(1.0f * 3.14159265f / 180.0f);
     float s = std::sin(1.0f * 3.14159265f / 180.0f);
-    auto f2 = add_triangle(m, {2,2,0}, {3,2,0}, {2, 2 + c, s});
+    auto f2 = add_triangle(m, {2, 2, 0}, {3, 2, 0}, {2, 2 + c, s});
     EXPECT_FALSE(m.faces_are_coplanar(f1, f2, kCos05Deg, 1.0f));
 }
 
 TEST(HalfEdgeMeshTest, FacesAreCoplanar_FalseBeyondDistanceTolerance) {
     // Two parallel XY planes offset by 1e-3 (over the 1e-4 dist tolerance).
     pluton::HalfEdgeMesh m;
-    auto f1 = add_triangle(m, {0,0,0}, {1,0,0}, {0,1,0});       // z = 0
-    auto f2 = add_triangle(m, {2,2,1e-3f}, {3,2,1e-3f}, {2,3,1e-3f});  // z = 0.001
+    auto f1 = add_triangle(m, {0, 0, 0}, {1, 0, 0}, {0, 1, 0});              // z = 0
+    auto f2 = add_triangle(m, {2, 2, 1e-3f}, {3, 2, 1e-3f}, {2, 3, 1e-3f});  // z = 0.001
     EXPECT_FALSE(m.faces_are_coplanar(f1, f2, kCos05Deg, kDistTol));
 }
 
 TEST(HalfEdgeMeshTest, FacesAreCoplanar_FalseForDegenerateNormal) {
     // f1 has zero area (all 3 vertices collinear). Must not crash; must return false.
     pluton::HalfEdgeMesh m;
-    auto v0 = m.add_vertex(0,0,0);
-    auto v1 = m.add_vertex(1,0,0);
-    auto v2 = m.add_vertex(2,0,0);
+    auto v0 = m.add_vertex(0, 0, 0);
+    auto v1 = m.add_vertex(1, 0, 0);
+    auto v2 = m.add_vertex(2, 0, 0);
     m.add_halfedge_pair(v0, v1);
     m.add_halfedge_pair(v1, v2);
     m.add_halfedge_pair(v2, v0);
     auto f_degen = m.add_face_from_loop({v0, v1, v2}, {(int)v0, (int)v1, (int)v2});
 
-    auto f_good = add_triangle(m, {5,0,0}, {6,0,0}, {5,1,0});
+    auto f_good = add_triangle(m, {5, 0, 0}, {6, 0, 0}, {5, 1, 0});
     EXPECT_FALSE(m.faces_are_coplanar(f_degen, f_good, kCos05Deg, kDistTol));
     EXPECT_FALSE(m.faces_are_coplanar(f_good, f_degen, kCos05Deg, kDistTol));
 }
@@ -518,12 +525,12 @@ TEST(HalfEdgeMeshTest, DissolveEdge_TwoTrianglesIntoQuad) {
     // Build two triangles sharing edge v1—v2:
     //   T1 = (v0, v1, v2)   T2 = (v1, v3, v2)   shared edge: v1—v2
     pluton::HalfEdgeMesh m;
-    auto v0 = m.add_vertex(0,0,0);
-    auto v1 = m.add_vertex(1,0,0);
-    auto v2 = m.add_vertex(1,1,0);
-    auto v3 = m.add_vertex(2,1,0);
+    auto v0 = m.add_vertex(0, 0, 0);
+    auto v1 = m.add_vertex(1, 0, 0);
+    auto v2 = m.add_vertex(1, 1, 0);
+    auto v3 = m.add_vertex(2, 1, 0);
     m.add_halfedge_pair(v0, v1);
-    m.add_halfedge_pair(v1, v2);                                       // shared
+    m.add_halfedge_pair(v1, v2);  // shared
     m.add_halfedge_pair(v2, v0);
     m.add_halfedge_pair(v1, v3);
     m.add_halfedge_pair(v3, v2);
@@ -590,10 +597,10 @@ TEST(HalfEdgeMeshTest, DissolveEdge_TombstonesEdgeId) {
     // After dissolve, the edge slot should be tombstoned (not compacted).
     // Querying the now-dead edge returns invalid; slab size unchanged.
     pluton::HalfEdgeMesh m;
-    auto v0 = m.add_vertex(0,0,0);
-    auto v1 = m.add_vertex(1,0,0);
-    auto v2 = m.add_vertex(1,1,0);
-    auto v3 = m.add_vertex(2,1,0);
+    auto v0 = m.add_vertex(0, 0, 0);
+    auto v1 = m.add_vertex(1, 0, 0);
+    auto v2 = m.add_vertex(1, 1, 0);
+    auto v3 = m.add_vertex(2, 1, 0);
     m.add_halfedge_pair(v0, v1);
     m.add_halfedge_pair(v1, v2);
     m.add_halfedge_pair(v2, v0);
@@ -614,7 +621,7 @@ TEST(HalfEdgeMeshTest, DissolveEdge_TombstonesEdgeId) {
 
     auto slab_before = m.halfedge_slab_size();
     m.dissolve_edge(shared_edge);
-    EXPECT_EQ(m.halfedge_slab_size(), slab_before);     // no compaction
+    EXPECT_EQ(m.halfedge_slab_size(), slab_before);  // no compaction
     EXPECT_FALSE(m.edge_is_live(shared_edge));
 }
 
@@ -622,12 +629,12 @@ TEST(HalfEdgeMeshTest, DissolveEdge_TwoQuadsIntoHexagon) {
     // Two quads sharing an edge — dissolve produces a 6-vertex face.
     //   Q1 = (v0, v1, v2, v3)  Q2 = (v1, v4, v5, v2)  shared: v1—v2
     pluton::HalfEdgeMesh m;
-    auto v0 = m.add_vertex(0,0,0);
-    auto v1 = m.add_vertex(1,0,0);
-    auto v2 = m.add_vertex(1,1,0);
-    auto v3 = m.add_vertex(0,1,0);
-    auto v4 = m.add_vertex(2,0,0);
-    auto v5 = m.add_vertex(2,1,0);
+    auto v0 = m.add_vertex(0, 0, 0);
+    auto v1 = m.add_vertex(1, 0, 0);
+    auto v2 = m.add_vertex(1, 1, 0);
+    auto v3 = m.add_vertex(0, 1, 0);
+    auto v4 = m.add_vertex(2, 0, 0);
+    auto v5 = m.add_vertex(2, 1, 0);
     m.add_halfedge_pair(v0, v1);
     m.add_halfedge_pair(v1, v2);
     m.add_halfedge_pair(v2, v3);
@@ -635,10 +642,8 @@ TEST(HalfEdgeMeshTest, DissolveEdge_TwoQuadsIntoHexagon) {
     m.add_halfedge_pair(v1, v4);
     m.add_halfedge_pair(v4, v5);
     m.add_halfedge_pair(v5, v2);
-    m.add_face_from_loop({v0, v1, v2, v3},
-        {(int)v0, (int)v1, (int)v2, (int)v0, (int)v2, (int)v3});
-    m.add_face_from_loop({v1, v4, v5, v2},
-        {(int)v1, (int)v4, (int)v5, (int)v1, (int)v5, (int)v2});
+    m.add_face_from_loop({v0, v1, v2, v3}, {(int)v0, (int)v1, (int)v2, (int)v0, (int)v2, (int)v3});
+    m.add_face_from_loop({v1, v4, v5, v2}, {(int)v1, (int)v4, (int)v5, (int)v1, (int)v5, (int)v2});
 
     std::uint32_t shared_edge = pluton::HalfEdgeMesh::INVALID_ID;
     for (std::uint32_t e = 0; e < m.halfedge_slab_size() / 2; ++e) {
@@ -658,22 +663,22 @@ TEST(HalfEdgeMeshTest, DissolveEdge_TwoQuadsIntoHexagon) {
 TEST(HalfEdgeMeshTest, DissolveEdge_RejectsBoundaryEdge) {
     // Single triangle — all three edges are boundary (only one half-edge each).
     pluton::HalfEdgeMesh m;
-    auto v0 = m.add_vertex(0,0,0);
-    auto v1 = m.add_vertex(1,0,0);
-    auto v2 = m.add_vertex(0,1,0);
+    auto v0 = m.add_vertex(0, 0, 0);
+    auto v1 = m.add_vertex(1, 0, 0);
+    auto v2 = m.add_vertex(0, 1, 0);
     auto e01 = m.add_halfedge_pair(v0, v1) / 2u;
     m.add_halfedge_pair(v1, v2);
     m.add_halfedge_pair(v2, v0);
     m.add_face_from_loop({v0, v1, v2}, {(int)v0, (int)v1, (int)v2});
 
     EXPECT_EQ(m.dissolve_edge(e01), pluton::HalfEdgeMesh::INVALID_ID);
-    EXPECT_TRUE(m.edge_is_live(e01));   // unchanged
+    EXPECT_TRUE(m.edge_is_live(e01));  // unchanged
 }
 
 TEST(HalfEdgeMeshTest, DissolveEdge_RejectsAlreadyTombstonedEdge) {
     pluton::HalfEdgeMesh m;
-    auto v0 = m.add_vertex(0,0,0);
-    auto v1 = m.add_vertex(1,0,0);
+    auto v0 = m.add_vertex(0, 0, 0);
+    auto v1 = m.add_vertex(1, 0, 0);
     auto e = m.add_halfedge_pair(v0, v1) / 2u;
     m.remove_edge(e);
 
@@ -712,8 +717,8 @@ pluton::HalfEdgeMesh make_two_quads(std::uint32_t& shared_edge_out) {
     m.add_halfedge_pair(v1, v4);
     m.add_halfedge_pair(v4, v5);
     m.add_halfedge_pair(v5, v2);
-    m.add_face_from_loop({v0, v1, v2, v3}, {(int)v0,(int)v1,(int)v2, (int)v0,(int)v2,(int)v3});
-    m.add_face_from_loop({v1, v4, v5, v2}, {(int)v1,(int)v4,(int)v5, (int)v1,(int)v5,(int)v2});
+    m.add_face_from_loop({v0, v1, v2, v3}, {(int)v0, (int)v1, (int)v2, (int)v0, (int)v2, (int)v3});
+    m.add_face_from_loop({v1, v4, v5, v2}, {(int)v1, (int)v4, (int)v5, (int)v1, (int)v5, (int)v2});
     return m;
 }
 }  // namespace
@@ -742,7 +747,8 @@ TEST(SplitEdge, InteriorEdgeInsertsVertexAndRebuildsBothFaces) {
     EXPECT_EQ(m.face_loop_vertices(res->face_b).size(), 5u);
 
     std::uint32_t live = 0;
-    for (auto f = m.next_live_face(0); f != pluton::HalfEdgeMesh::INVALID_ID; f = m.next_live_face(f + 1))
+    for (auto f = m.next_live_face(0); f != pluton::HalfEdgeMesh::INVALID_ID;
+         f = m.next_live_face(f + 1))
         ++live;
     EXPECT_EQ(live, 2u);
 }
@@ -757,7 +763,7 @@ TEST(SplitEdge, BoundaryEdgeSplitsTheSingleIncidentFace) {
     auto e01 = (m.add_halfedge_pair(v0, v1));  // idempotent → same edge id
     m.add_halfedge_pair(v1, v2);
     m.add_halfedge_pair(v2, v0);
-    m.add_face_from_loop({v0, v1, v2}, {(int)v0,(int)v1,(int)v2});
+    m.add_face_from_loop({v0, v1, v2}, {(int)v0, (int)v1, (int)v2});
 
     auto res = m.split_edge(e01, 0.5f);
     ASSERT_TRUE(res.has_value());
@@ -809,12 +815,19 @@ TEST(SplitEdge, RejectsSplitLandingOnExistingVertex) {
     // create degenerate topology, so split_edge must reject (return nullopt) and
     // leave the mesh unchanged.
     m.add_vertex(1.0f, 0.5f, 0.0f);
-    const std::size_t faces_before = 0u +
-        [&]{ std::uint32_t c=0; for (auto f=m.next_live_face(0); f!=pluton::HalfEdgeMesh::INVALID_ID; f=m.next_live_face(f+1)) ++c; return c; }();
+    const std::size_t faces_before = 0u + [&] {
+        std::uint32_t c = 0;
+        for (auto f = m.next_live_face(0); f != pluton::HalfEdgeMesh::INVALID_ID;
+             f = m.next_live_face(f + 1))
+            ++c;
+        return c;
+    }();
     EXPECT_FALSE(m.split_edge(e, 0.5f).has_value());
     // Mesh unchanged: still the two original faces.
     std::uint32_t faces_after = 0;
-    for (auto f=m.next_live_face(0); f!=pluton::HalfEdgeMesh::INVALID_ID; f=m.next_live_face(f+1)) ++faces_after;
+    for (auto f = m.next_live_face(0); f != pluton::HalfEdgeMesh::INVALID_ID;
+         f = m.next_live_face(f + 1))
+        ++faces_after;
     EXPECT_EQ(faces_after, faces_before);
 }
 
@@ -842,17 +855,17 @@ TEST(HalfEdgeSetVertexPosition, RecomputesIncidentFaceNormal) {
     m.add_halfedge_pair(a, b);
     m.add_halfedge_pair(b, c);
     m.add_halfedge_pair(c, a);
-    m.add_face_from_loop({a, b, c},
-        {static_cast<std::int32_t>(a), static_cast<std::int32_t>(b), static_cast<std::int32_t>(c)});
-    auto buf0 = m.face_triangle_buffer();           // (positions, normals)
+    m.add_face_from_loop({a, b, c}, {static_cast<std::int32_t>(a), static_cast<std::int32_t>(b),
+                                     static_cast<std::int32_t>(c)});
+    auto buf0 = m.face_triangle_buffer();  // (positions, normals)
     ASSERT_GE(buf0.second.size(), 3u);
-    EXPECT_NEAR(std::abs(buf0.second[2]), 1.0f, 1e-4f);   // flat in XY → |nz| ≈ 1
+    EXPECT_NEAR(std::abs(buf0.second[2]), 1.0f, 1e-4f);  // flat in XY → |nz| ≈ 1
     // Tilt the face: lift c in +Z.
     m.set_vertex_position(c, 0.0f, 1.0f, 1.0f);
     auto buf1 = m.face_triangle_buffer();
     ASSERT_GE(buf1.second.size(), 3u);
     float nx = buf1.second[0], ny = buf1.second[1];
-    EXPECT_GT(std::abs(nx) + std::abs(ny), 0.1f);   // normal now has a horizontal component
+    EXPECT_GT(std::abs(nx) + std::abs(ny), 0.1f);  // normal now has a horizontal component
 }
 
 TEST(HalfEdgeSetVertexPosition, ThrowsOnDeadVertex) {
@@ -862,7 +875,7 @@ TEST(HalfEdgeSetVertexPosition, ThrowsOnDeadVertex) {
 
 TEST(HalfEdgeSetVertexPosition, RecomputesAllIncidentFacesOfAFanVertexAndLeavesOthers) {
     pluton::HalfEdgeMesh m;
-    auto o  = m.add_vertex(0.0f, 0.0f, 0.0f);
+    auto o = m.add_vertex(0.0f, 0.0f, 0.0f);
     auto p1 = m.add_vertex(1.0f, 0.0f, 0.0f);
     auto p2 = m.add_vertex(1.0f, 1.0f, 0.0f);
     auto p3 = m.add_vertex(0.0f, 1.0f, 0.0f);
@@ -870,13 +883,13 @@ TEST(HalfEdgeSetVertexPosition, RecomputesAllIncidentFacesOfAFanVertexAndLeavesO
     m.add_halfedge_pair(o, p1);
     m.add_halfedge_pair(p1, p2);
     m.add_halfedge_pair(p2, o);
-    m.add_face_from_loop({o, p1, p2},
-        {static_cast<std::int32_t>(o), static_cast<std::int32_t>(p1), static_cast<std::int32_t>(p2)});
+    m.add_face_from_loop({o, p1, p2}, {static_cast<std::int32_t>(o), static_cast<std::int32_t>(p1),
+                                       static_cast<std::int32_t>(p2)});
     m.add_halfedge_pair(o, p2);
     m.add_halfedge_pair(p2, p3);
     m.add_halfedge_pair(p3, o);
-    m.add_face_from_loop({o, p2, p3},
-        {static_cast<std::int32_t>(o), static_cast<std::int32_t>(p2), static_cast<std::int32_t>(p3)});
+    m.add_face_from_loop({o, p2, p3}, {static_cast<std::int32_t>(o), static_cast<std::int32_t>(p2),
+                                       static_cast<std::int32_t>(p3)});
     // A separate, non-incident triangle far away (also flat in XY).
     auto q0 = m.add_vertex(5.0f, 5.0f, 0.0f);
     auto q1 = m.add_vertex(6.0f, 5.0f, 0.0f);
@@ -885,7 +898,8 @@ TEST(HalfEdgeSetVertexPosition, RecomputesAllIncidentFacesOfAFanVertexAndLeavesO
     m.add_halfedge_pair(q1, q2);
     m.add_halfedge_pair(q2, q0);
     m.add_face_from_loop({q0, q1, q2},
-        {static_cast<std::int32_t>(q0), static_cast<std::int32_t>(q1), static_cast<std::int32_t>(q2)});
+                         {static_cast<std::int32_t>(q0), static_cast<std::int32_t>(q1),
+                          static_cast<std::int32_t>(q2)});
 
     // Faces are emitted in id (creation) order; each is one triangle → 9 normal floats.
     auto before = m.face_triangle_buffer().second;

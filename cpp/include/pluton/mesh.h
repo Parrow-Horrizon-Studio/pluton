@@ -32,22 +32,20 @@ public:
     /// normals have equal lengths, positions is a whole number of XYZ
     /// triples, and indices is a whole number of triangles.
     bool is_valid() const noexcept {
-        return positions.size() == normals.size()
-            && positions.size() % 3 == 0
-            && indices.size() % 3 == 0;
+        return positions.size() == normals.size() && positions.size() % 3 == 0 &&
+               indices.size() % 3 == 0;
     }
 
     /// Number of vertices (positions.size() / 3).
     std::size_t vertex_count() const {
-        assert(positions.size() == normals.size()
-               && "Mesh invariant: positions and normals must have equal length");
+        assert(positions.size() == normals.size() &&
+               "Mesh invariant: positions and normals must have equal length");
         return positions.size() / 3;
     }
 
     /// Number of triangles (indices.size() / 3).
     std::size_t triangle_count() const {
-        assert(indices.size() % 3 == 0
-               && "Mesh invariant: indices must be a multiple of 3");
+        assert(indices.size() % 3 == 0 && "Mesh invariant: indices must be a multiple of 3");
         return indices.size() / 3;
     }
 };

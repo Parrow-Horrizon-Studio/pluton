@@ -11,13 +11,9 @@ namespace {
 //
 // Returns the t parameter (always > 0 on hit; std::nullopt on miss).
 // Backface culling is intentionally NOT applied: we're picking, not shading.
-std::optional<float> ray_triangle(
-    const std::array<float, 3>& origin,
-    const std::array<float, 3>& dir,
-    const std::array<float, 3>& v0,
-    const std::array<float, 3>& v1,
-    const std::array<float, 3>& v2) {
-
+std::optional<float> ray_triangle(const std::array<float, 3>& origin,
+                                  const std::array<float, 3>& dir, const std::array<float, 3>& v0,
+                                  const std::array<float, 3>& v1, const std::array<float, 3>& v2) {
     const float e1x = v1[0] - v0[0];
     const float e1y = v1[1] - v0[1];
     const float e1z = v1[2] - v0[2];
@@ -67,11 +63,9 @@ std::optional<float> ray_triangle(
 
 }  // namespace
 
-std::optional<RayMeshHit> ray_intersect_mesh(
-    const HalfEdgeMesh& mesh,
-    const std::array<float, 3>& origin,
-    const std::array<float, 3>& direction) {
-
+std::optional<RayMeshHit> ray_intersect_mesh(const HalfEdgeMesh& mesh,
+                                             const std::array<float, 3>& origin,
+                                             const std::array<float, 3>& direction) {
     std::optional<RayMeshHit> best;
     float best_t = std::numeric_limits<float>::infinity();
 
