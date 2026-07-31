@@ -436,7 +436,8 @@ class ScaleTool(Tool):
                 p0 = np.asarray(self._anchor, np.float32)
 
         if self._active is not None and len(self._active.axes) == 1:
-            # Single-axis grip (edge/face is >1): drag along the axis line
+            # Single-axis grip (a face grip; edge/corner grips drive >1 axis
+            # and fall to the plane branch below): drag along the axis line
             # itself rather than an arbitrary plane, so the grip tracks the
             # cursor exactly instead of sliding off-axis.
             ax = self._active.axes[0]

@@ -34,6 +34,7 @@ markers will be at the right world positions.
 
 from __future__ import annotations
 
+import math
 import types
 
 import numpy as np
@@ -42,7 +43,7 @@ from PySide6.QtCore import QEvent, QPointF, Qt
 from PySide6.QtGui import QMouseEvent
 
 from pluton.commands.command_stack import CommandStack
-from pluton.geometry.transforms import apply_mat, mat_translate
+from pluton.geometry.transforms import apply_mat, mat_compose, mat_rotate, mat_translate
 from pluton.model.model import Model
 from pluton.scene.scene import Scene
 from pluton.selection import Selection
@@ -251,6 +252,78 @@ class TestCursorWorldLocalFrame:
         assert result is not None, "_cursor_world returned None"
         assert np.allclose(result, [5.0, 5.0, 0.0], atol=1e-4), (
             f"Expected local [5,5,0], got {result}"
+        )
+
+    def test_cursor_world_local_single_axis_uses_rotated_world_axis(self):
+        """A single-axis (face) grip in LOCAL mode must project the cursor onto
+        the transform-ROTATED world axis line (scale_tool.py's
+        `if self._grips_are_local: axis_dir = wt[:3, ax]` branch), not the raw
+        local basis vector. This exercises #47's new local-mode axis-rotation
+        logic, which the plane/2-axis tests above never touch (they only use
+        2-axis grips) and which the #47 test in test_scale_tool_cursor_plane.py
+        never touches either (it uses `_grips_are_local=False`).
+
+        A PURE TRANSLATION would not discriminate this branch: translation
+        doesn't touch the transform's rotation part, so `wt[:3, ax]` would
+        equal the plain unit basis vector regardless of whether the code used
+        the (correct) rotated column or the (buggy) unrotated basis vector.
+        The rotation is therefore essential to this test having teeth.
+        """
+        # Group transform: rotate +90 deg about world Z (local +X -> world +Y),
+        # then translate +5 on world X.
+        rot = mat_rotate((0.0, 0.0, 0.0), (0.0, 0.0, 1.0), math.pi / 2.0)
+        wt = mat_compose(rot, mat_translate([5.0, 0.0, 0.0]))
+
+        model = Model()
+        grp_def = model.new_definition("Grp", is_group=True)
+        scene = grp_def.mesh
+        _, _, _, _, fid = _square(scene)
+        grp_inst = model.new_instance(grp_def, wt)
+        model.root.children.append(grp_inst)
+        model.enter(grp_inst)
+
+        sel = Selection()
+        sel.replace(faces=[fid])
+        stack = CommandStack()
+
+        # Ray straight down (-Z), offset from the axis line in world X (origin
+        # x=1, while the axis line sits at world x=4 -- see below). The offset
+        # matters: it's what makes the WRONG axis (unrotated local +X, i.e.
+        # world +X) actually pull the projected point's x away from 4. With an
+        # origin already at x=4, the wrong axis's projection would coincide
+        # with p0 by symmetry and the test would pass even when broken.
+        origin = np.array([1.0, 3.0, 100.0], np.float32)
+        direction = np.array([0.0, 0.0, -1.0], np.float32)
+        cam = self._stub_camera(origin, direction)
+
+        tool = ScaleTool()
+        tool.activate(_ctx(scene, stack, sel, model=model, camera=cam))
+        assert tool._grips_are_local, "Expected entity-mode (local grips)"
+
+        # Local single-axis (X) grip at [2, 1, 0]; its world position is
+        # rot @ [2,1,0] + [5,0,0] = [-1, 2, 0] + [5,0,0] = [4, 2, 0]. Since
+        # local +X maps to world +Y, the world axis line is x=4, z=0 (y free).
+        grip = GripSpec(
+            position=np.array([2.0, 1.0, 0.0], np.float32),
+            opposite=np.array([0.0, 1.0, 0.0], np.float32),
+            axes=(0,),
+        )
+        tool._active = grip
+
+        event = _press(400.0, 300.0)
+        local_result = tool._cursor_world(event)
+        assert local_result is not None, "_cursor_world returned None"
+
+        # _cursor_world returns LOCAL coords in entity-mode; lift back to
+        # world to check against the world-space (rotated) axis line.
+        world_result = apply_mat(
+            np.asarray(local_result, np.float64).reshape(1, 3), wt
+        )[0]
+        assert abs(float(world_result[0]) - 4.0) < 1e-4, (
+            f"world x should stay pinned to the axis line (4): {world_result}"
+        )
+        assert abs(float(world_result[2]) - 0.0) < 1e-4, (
+            f"world z should stay pinned to the axis line (0): {world_result}"
         )
 
 

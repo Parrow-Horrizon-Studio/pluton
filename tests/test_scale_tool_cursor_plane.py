@@ -57,6 +57,57 @@ def test_cursor_plane_is_camera_facing_not_world_z():
     assert abs(float(pt[0])) < 1e-4
 
 
+def test_cursor_plane_normal_matches_analytic_camera_facing_intersection():
+    # The two tests above put the anchor at camera.target and read the cursor
+    # from screen-centre. ray_from_screen's screen-centre direction is, by
+    # construction, normalize(target - position) -- i.e. the ray always
+    # passes exactly *through* the target. So when anchor == target, the
+    # ray/plane intersection lands on the anchor itself no matter which
+    # (non-perpendicular) normal is used: they cannot distinguish the correct
+    # camera-facing normal from any other plausible-but-wrong one (camera.up,
+    # world-Z, a sign flip, ...).
+    #
+    # To make the normal actually matter we need the ray to MISS the anchor,
+    # which requires both an oblique camera (view direction not axis-aligned)
+    # and an anchor offset from camera.target. We then compare the tool's
+    # answer against the analytically-computed intersection for the one
+    # correct normal, n = normalize(camera.position - camera.target).
+    cam = Camera()
+    cam.position[:] = (10.0, 10.0, 10.0)
+    cam.target[:] = (0.0, 0.0, 0.0)
+    cam.aspect = 800.0 / 600.0
+    tool = _tool_with_camera(cam)
+    p0 = np.array([2.0, 0.0, 0.0], np.float64)
+    tool._anchor = p0.astype(np.float32)
+
+    pt = tool._cursor_world(_Ev(400.0, 300.0))
+    assert pt is not None
+
+    # Reference intersection, computed independently from first principles
+    # (screen-centre ray: origin = camera.position, direction = normalize
+    # (target - position); plane through p0 with normal n).
+    origin = np.array([10.0, 10.0, 10.0], np.float64)
+    direction = np.array([0.0, 0.0, 0.0], np.float64) - origin
+    direction /= np.linalg.norm(direction)
+    n_correct = np.array([10.0, 10.0, 10.0], np.float64)
+    n_correct /= np.linalg.norm(n_correct)
+    t_correct = np.dot(p0 - origin, n_correct) / np.dot(direction, n_correct)
+    expected = origin + t_correct * direction
+
+    assert np.allclose(pt, expected, atol=1e-4), f"expected {expected}, got {pt}"
+
+    # Sanity check that this scenario is actually discriminating: a plausible
+    # wrong normal (world-Z, which would also be "camera.up" for this camera)
+    # gives a materially different point, so a wrong implementation could not
+    # accidentally satisfy the assertion above.
+    n_wrong = np.array([0.0, 0.0, 1.0])
+    t_wrong = np.dot(p0 - origin, n_wrong) / np.dot(direction, n_wrong)
+    wrong_point = origin + t_wrong * direction
+    assert not np.allclose(expected, wrong_point, atol=1e-2), (
+        "test scenario is degenerate: correct and wrong normals agree"
+    )
+
+
 def test_top_down_view_still_behaves_like_before():
     # Regression guard for the common case: with the camera overhead the
     # camera-facing normal IS world-Z, so behavior must be unchanged.
