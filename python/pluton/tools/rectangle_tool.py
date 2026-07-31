@@ -58,13 +58,13 @@ class RectangleTool(Tool):
         self._model = ctx.model
         self._reset_gesture()
 
-    def _world_transform(self):  # noqa: ANN202
+    def _world_transform(self):
         return self._model.active_world_transform if self._model is not None else None
 
     def deactivate(self) -> None:
         self._reset_gesture()
 
-    def on_mouse_move(self, event: QMouseEvent, snap) -> None:  # noqa: ANN001
+    def on_mouse_move(self, event: QMouseEvent, snap) -> None:
         from pluton.viewport.snap_engine import SnapKind
 
         if snap.kind == SnapKind.NONE:
@@ -77,7 +77,7 @@ class RectangleTool(Tool):
         if self._state == _State.DRAGGING:
             self._preview_corner = snap.world_position.copy()
 
-    def on_mouse_press(self, event: QMouseEvent, snap) -> None:  # noqa: ANN001
+    def on_mouse_press(self, event: QMouseEvent, snap) -> None:
         from pluton.viewport.snap_engine import SnapKind
 
         if snap.kind == SnapKind.NONE:
@@ -107,7 +107,11 @@ class RectangleTool(Tool):
         self._reset_gesture()
 
     def overlay(self) -> ToolOverlay:
-        if self._state == _State.DRAGGING and self._first_corner is not None and self._preview_corner is not None:
+        if (
+            self._state == _State.DRAGGING
+            and self._first_corner is not None
+            and self._preview_corner is not None
+        ):
             x0, y0 = float(self._first_corner[0]), float(self._first_corner[1])
             x1, y1 = float(self._preview_corner[0]), float(self._preview_corner[1])
             segments = np.array(
@@ -125,7 +129,9 @@ class RectangleTool(Tool):
         return ToolOverlay(
             rubber_band_segments=segments,
             rubber_band_color=_NEUTRAL_COLOR,
-            snap_marker_position=self._snap_marker_pos.copy() if self._snap_marker_pos is not None else None,
+            snap_marker_position=(
+                self._snap_marker_pos.copy() if self._snap_marker_pos is not None else None
+            ),
             snap_marker_color=self._snap_marker_color,
             snap_marker_kind=self._snap_marker_kind,
         )

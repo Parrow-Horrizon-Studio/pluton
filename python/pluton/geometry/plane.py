@@ -14,7 +14,7 @@ _DEGENERATE = 1e-9
 
 
 class DrawingPlane:
-    __slots__ = ("origin", "u", "v", "normal")
+    __slots__ = ("normal", "origin", "u", "v")
 
     def __init__(
         self,
@@ -29,7 +29,7 @@ class DrawingPlane:
         self.normal = np.asarray(normal, dtype=np.float64).reshape(3)
 
     @classmethod
-    def horizontal(cls, origin: np.ndarray) -> "DrawingPlane":
+    def horizontal(cls, origin: np.ndarray) -> DrawingPlane:
         """Ground-parallel plane (normal +Z, u=+X, v=+Y) through `origin`."""
         return cls(
             origin,
@@ -39,7 +39,7 @@ class DrawingPlane:
         )
 
     @classmethod
-    def from_normal(cls, origin: np.ndarray, normal: np.ndarray) -> "DrawingPlane":
+    def from_normal(cls, origin: np.ndarray, normal: np.ndarray) -> DrawingPlane:
         """Build a stable orthonormal in-plane basis from an arbitrary normal."""
         n = np.asarray(normal, dtype=np.float64).reshape(3)
         ln = float(np.linalg.norm(n))
@@ -55,7 +55,7 @@ class DrawingPlane:
         return cls(origin, u, v, n)
 
     @classmethod
-    def from_face(cls, scene, face_id: int, origin: np.ndarray) -> "DrawingPlane":  # noqa: ANN001
+    def from_face(cls, scene, face_id: int, origin: np.ndarray) -> DrawingPlane:
         """Plane coplanar with an existing face (normal from scene.face_normal)."""
         n = np.asarray(scene.face_normal(face_id), dtype=np.float64).reshape(3)
         return cls.from_normal(origin, n)

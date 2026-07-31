@@ -15,15 +15,15 @@ class CommandStack:
         self._on_after_redo: list = []  # list[Callable[[], None]]
         self._on_change: list = []  # list[Callable[[], None]]
 
-    def add_undo_listener(self, fn) -> None:  # noqa: ANN001
+    def add_undo_listener(self, fn) -> None:
         """Register a zero-arg callable to invoke after each successful undo."""
         self._on_after_undo.append(fn)
 
-    def add_redo_listener(self, fn) -> None:  # noqa: ANN001
+    def add_redo_listener(self, fn) -> None:
         """Register a zero-arg callable to invoke after each successful redo."""
         self._on_after_redo.append(fn)
 
-    def add_change_listener(self, fn) -> None:  # noqa: ANN001
+    def add_change_listener(self, fn) -> None:
         """Register a zero-arg callable fired after every stack mutation."""
         self._on_change.append(fn)
 
@@ -36,14 +36,14 @@ class CommandStack:
         self._undo.clear()
         self._redo.clear()
 
-    def execute(self, cmd: Command, target) -> None:  # noqa: ANN001
+    def execute(self, cmd: Command, target) -> None:
         """Run cmd.do(target), push (cmd, target) to undo stack, clear redo stack."""
         cmd.do(target)
         self._undo.append((cmd, target))
         self._redo.clear()
         self._fire_change()
 
-    def push_executed(self, cmd: Command, target) -> None:  # noqa: ANN001
+    def push_executed(self, cmd: Command, target) -> None:
         """Append a command whose do() was already called incrementally.
 
         Used by tools that build a CompositeCommand mutating the scene as

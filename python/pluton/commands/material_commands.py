@@ -7,7 +7,7 @@ from pluton.commands.command import Command
 _DEFAULT_MATERIAL_ID = 0  # == MaterialLibrary.DEFAULT_ID (the unpainted sentinel)
 
 
-def _apply(scene, f_id: int, material_id: int) -> None:  # noqa: ANN001
+def _apply(scene, f_id: int, material_id: int) -> None:
     if material_id == _DEFAULT_MATERIAL_ID:
         scene.clear_face_material(f_id)
     else:
@@ -28,9 +28,9 @@ class PaintFaceCommand(Command):
         self._new = new_material_id
         self._old: int | None = None
 
-    def do(self, scene) -> None:  # noqa: ANN001
+    def do(self, scene) -> None:
         self._old = scene.face_material(self._fid)
         _apply(scene, self._fid, self._new)
 
-    def undo(self, scene) -> None:  # noqa: ANN001
+    def undo(self, scene) -> None:
         _apply(scene, self._fid, self._old if self._old is not None else _DEFAULT_MATERIAL_ID)

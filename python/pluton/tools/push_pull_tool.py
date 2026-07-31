@@ -29,7 +29,6 @@ from pluton.commands.scene_commands import (
 )
 from pluton.tools.tool import Tool, ToolContext, ToolOverlay
 
-
 # Visual constants (RGBA).
 _HOVER_FILL_COLOR = (0.40, 0.70, 1.00, 0.20)   # light blue
 _ARMED_FILL_COLOR = (0.20, 0.50, 0.95, 0.40)   # darker blue
@@ -112,7 +111,7 @@ class PushPullTool(Tool):
 
     # ---- Event handlers -----------------------------------------------
 
-    def on_mouse_move(self, event: QMouseEvent, snap) -> None:  # noqa: ANN001
+    def on_mouse_move(self, event: QMouseEvent, snap) -> None:
         if self._state == _State.DRAGGING:
             self._update_depth_from_event(event)
             return
@@ -125,11 +124,12 @@ class PushPullTool(Tool):
             self._state = _State.HOVERING
             self._hovered_face_id = hit.face_id
 
-    def on_mouse_press(self, event: QMouseEvent, snap) -> None:  # noqa: ANN001
+    def on_mouse_press(self, event: QMouseEvent, snap) -> None:
         if self._state == _State.IDLE:
             return  # clicking empty space is a no-op
         if self._state == _State.HOVERING:
-            assert self._hovered_face_id is not None  # invariant: HOVERING implies hovered_face_id set
+            # invariant: HOVERING implies hovered_face_id set
+            assert self._hovered_face_id is not None
             self._arm_face(self._hovered_face_id)
             return
         # DRAGGING: commit if depth >= min threshold, else cancel.
@@ -355,7 +355,7 @@ class PushPullTool(Tool):
         top_vids = [c._vertex_id for c in top_vert_cmds]  # type: ignore[attr-defined]
 
         # 3. Vertical edges (V_i → V'_i).
-        for src_vid, top_vid in zip(loop, top_vids):
+        for src_vid, top_vid in zip(loop, top_vids, strict=False):
             c = AddEdgeCommand(src_vid, top_vid)
             c.do(scene)
             composite.children.append(c)

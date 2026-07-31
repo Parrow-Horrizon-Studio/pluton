@@ -19,7 +19,8 @@ from PySide6.QtCore import Qt
 from PySide6.QtGui import QKeyEvent, QMouseEvent
 
 from pluton.commands.scene_commands import TransformVerticesCommand
-from pluton.geometry.transforms import apply_mat, is_identity_transform, scale as scale_pts
+from pluton.geometry.transforms import apply_mat, is_identity_transform
+from pluton.geometry.transforms import scale as scale_pts
 from pluton.tools.tool import Tool, ToolContext, ToolOverlay
 from pluton.tools.transform_support import (
     GripSpec,
@@ -116,7 +117,7 @@ class ScaleTool(Tool):
         self._lo, self._hi = box
         self._grips = grip_specs(self._lo, self._hi)
 
-    def on_mouse_press(self, event: QMouseEvent, snap) -> None:  # noqa: ANN001
+    def on_mouse_press(self, event: QMouseEvent, snap) -> None:
         if event.button() != Qt.MouseButton.LeftButton or not self._grips:
             return
         grip = self._pick_grip(event)
@@ -131,7 +132,7 @@ class ScaleTool(Tool):
         )
         self._factor_vec = np.ones(3, np.float32)
 
-    def on_mouse_move(self, event: QMouseEvent, snap) -> None:  # noqa: ANN001
+    def on_mouse_move(self, event: QMouseEvent, snap) -> None:
         if self._active is None:
             return
         cursor = self._cursor_world(event)
@@ -141,7 +142,7 @@ class ScaleTool(Tool):
         extent = (self._hi - self._lo).astype(np.float32)
         self._factor_vec = self._factor_vec_for(self._active, self._anchor, cursor, extent, uniform)
 
-    def on_mouse_release(self, event: QMouseEvent, snap) -> None:  # noqa: ANN001
+    def on_mouse_release(self, event: QMouseEvent, snap) -> None:
         if event.button() != Qt.MouseButton.LeftButton or self._active is None:
             return
         cursor = self._cursor_world(event)
@@ -259,7 +260,7 @@ class ScaleTool(Tool):
         return "Scale: drag a handle"
 
     # ---- factor math (pure; unit-tested) ----
-    def _factors(self, grip, anchor, cursor, extent, uniform):  # noqa: ANN001
+    def _factors(self, grip, anchor, cursor, extent, uniform):
         """Test-facing alias; delegates to _factor_vec_for."""
         return self._factor_vec_for(grip, anchor, cursor, extent, uniform)
 
@@ -367,7 +368,7 @@ class ScaleTool(Tool):
             return g.position
         return apply_mat(np.asarray(g.position, np.float64).reshape(1, 3), wt)[0]
 
-    def _pick_grip(self, event) -> GripSpec | None:  # noqa: ANN001
+    def _pick_grip(self, event) -> GripSpec | None:
         if self._camera is None or self._size_provider is None:
             return None
         w, h = self._size_provider()
@@ -384,7 +385,7 @@ class ScaleTool(Tool):
                 best, best_d = g, dist
         return best
 
-    def _cursor_world(self, event):  # noqa: ANN001
+    def _cursor_world(self, event):
         """Cursor ray intersect the ground-parallel plane through the grip.
 
         Falls back to None if no camera. (M4d refines with axis-aware dragging.)

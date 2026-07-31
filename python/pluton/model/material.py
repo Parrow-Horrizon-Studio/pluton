@@ -81,7 +81,7 @@ class MaterialLibrary:
         return [{"id": m.id, "name": m.name, "color": list(m.color)} for m in self.materials()]
 
     @classmethod
-    def from_records(cls, records: list[dict], next_id: int) -> "MaterialLibrary":
+    def from_records(cls, records: list[dict], next_id: int) -> MaterialLibrary:
         """Rebuild a library authoritatively from saved records (no auto-seed)."""
         lib = cls()  # seeds default + builtins, then we overwrite
         lib._materials = {}

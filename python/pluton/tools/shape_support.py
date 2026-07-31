@@ -25,7 +25,7 @@ from pluton.viewport.picking import world_to_local_point
 _COINCIDENT_EPS = 1e-5
 
 
-def resolve_drawing_plane(snap, scene) -> DrawingPlane:  # noqa: ANN001
+def resolve_drawing_plane(snap, scene) -> DrawingPlane:
     """ON_FACE snap → that face's plane; otherwise a ground-parallel plane
     through the snapped point's height."""
     from pluton.viewport.snap_engine import SnapKind
@@ -39,7 +39,7 @@ def resolve_drawing_plane(snap, scene) -> DrawingPlane:  # noqa: ANN001
     return DrawingPlane.horizontal(origin)
 
 
-def _resolve_vertex(scene, composite: CompositeCommand, point: np.ndarray) -> int:  # noqa: ANN001
+def _resolve_vertex(scene, composite: CompositeCommand, point: np.ndarray) -> int:
     """Reuse an existing coincident vertex, else add one (recorded in composite)."""
     # Cast to float32 so the coincidence query uses the same precision the scene
     # stores vertices in.
@@ -53,7 +53,7 @@ def _resolve_vertex(scene, composite: CompositeCommand, point: np.ndarray) -> in
     return cmd._vertex_id  # type: ignore[attr-defined]
 
 
-def _resolve_ring(scene, composite, world_points):  # noqa: ANN001
+def _resolve_ring(scene, composite, world_points):
     """Resolve each point to a vertex id, dropping consecutive duplicates."""
     vids: list[int] = []
     for p in np.asarray(world_points, dtype=np.float32):
@@ -63,7 +63,7 @@ def _resolve_ring(scene, composite, world_points):  # noqa: ANN001
     return vids
 
 
-def build_closed_face(scene, world_points, name: str = "Draw Shape", world_transform=None):  # noqa: ANN001
+def build_closed_face(scene, world_points, name: str = "Draw Shape", world_transform=None):
     """Closed ring of world points → vertices + boundary edges + one face.
     Returns the CompositeCommand (already executed), or None if degenerate
     (fewer than 3 distinct vertices).
@@ -101,7 +101,7 @@ def build_closed_face(scene, world_points, name: str = "Draw Shape", world_trans
     return composite
 
 
-def build_open_polyline(scene, world_points, name: str = "Draw Curve", world_transform=None):  # noqa: ANN001
+def build_open_polyline(scene, world_points, name: str = "Draw Curve", world_transform=None):
     """Open polyline of world points → vertices + connecting edges (no face).
     Returns the CompositeCommand (already executed), or None if degenerate
     (fewer than 2 distinct vertices).

@@ -208,7 +208,7 @@ class Scene:
         self,
         origin: np.ndarray,
         direction: np.ndarray,
-    ) -> "RayMeshHit | None":
+    ) -> RayMeshHit | None:
         """Return the closest live face hit, or None.
 
         Thin wrapper around the C++ pluton._core.ray_intersect_mesh. Caller
@@ -310,10 +310,10 @@ class Scene:
         he_b = 2 * e_id + 1
         f_a = self._mesh.halfedge_face(he_a)
         f_b = self._mesh.halfedge_face(he_b)
-        INVALID = self._mesh.INVALID_ID
+        invalid_id = self._mesh.INVALID_ID
         return (
-            None if f_a == INVALID else int(f_a),
-            None if f_b == INVALID else int(f_b),
+            None if f_a == invalid_id else int(f_a),
+            None if f_b == invalid_id else int(f_b),
         )
 
     def edge_is_boundary(self, e_id: int) -> bool:
@@ -345,7 +345,7 @@ class Scene:
         t = max(0.0, min(1.0, t))
         return (pa + t * ab).astype(np.float32), t
 
-    def split_edge(self, e_id: int, t: float) -> "SplitResult | None":
+    def split_edge(self, e_id: int, t: float) -> SplitResult | None:
         """Split edge e at parameter t. Returns a SplitResult (face_* None for a
         boundary edge's empty side), or None if the split is invalid."""
         res = self._mesh.split_edge(int(e_id), float(t))

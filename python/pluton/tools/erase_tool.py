@@ -56,7 +56,7 @@ class EraserTool(Tool):
         self._stroke = None
         self._erased = set()
 
-    def _world_transform(self):  # noqa: ANN202
+    def _world_transform(self):
         return self._model.active_world_transform if self._model is not None else None
 
     def deactivate(self) -> None:
@@ -76,7 +76,10 @@ class EraserTool(Tool):
         return (float(pos.x()), float(pos.y()))
 
     def _pick_edge(self, event: QMouseEvent) -> int | None:
-        hit = pick_selectable(self._cursor(event), self._viewport_size(), self._camera, self._scene, world_transform=self._world_transform())
+        hit = pick_selectable(
+            self._cursor(event), self._viewport_size(), self._camera, self._scene,
+            world_transform=self._world_transform(),
+        )
         return hit[1] if hit is not None and hit[0] == "edge" else None
 
     def _units(self) -> Units:
@@ -119,7 +122,7 @@ class EraserTool(Tool):
         self._stroke.children.append(edge_cmd)
         self._erased.add(e_id)
 
-    def on_mouse_move(self, event: QMouseEvent, snap) -> None:  # noqa: ANN001
+    def on_mouse_move(self, event: QMouseEvent, snap) -> None:
         if event.buttons() & Qt.MouseButton.LeftButton and self._stroke is not None:
             e_id = self._pick_edge(event)
             if e_id is not None:
@@ -127,7 +130,7 @@ class EraserTool(Tool):
             return
         self._hovered_edge = self._pick_edge(event)
 
-    def on_mouse_press(self, event: QMouseEvent, snap) -> None:  # noqa: ANN001
+    def on_mouse_press(self, event: QMouseEvent, snap) -> None:
         # M7d: annotations draw on top, so a click that lands on one erases it
         # outright (a single undoable command, not part of the edge stroke)
         # and never falls through to the edge/face pick below.
@@ -144,7 +147,7 @@ class EraserTool(Tool):
         if e_id is not None:
             self._erase_edge(e_id)
 
-    def on_mouse_release(self, event: QMouseEvent, snap) -> None:  # noqa: ANN001
+    def on_mouse_release(self, event: QMouseEvent, snap) -> None:
         if self._stroke is not None and self._stroke.children and self._command_stack is not None:
             self._command_stack.push_executed(self._stroke, self._scene)
         self._stroke = None
@@ -175,7 +178,10 @@ class EraserTool(Tool):
                         continue
                     loop = self._scene.face_loop(f_id)
                     fills.append(np.array(
-                        [_to_world(np.asarray(self._scene.vertex(v).position, dtype=np.float32)) for v in loop],
+                        [
+                            _to_world(np.asarray(self._scene.vertex(v).position, dtype=np.float32))
+                            for v in loop
+                        ],
                         dtype=np.float32,
                     ))
             except KeyError:

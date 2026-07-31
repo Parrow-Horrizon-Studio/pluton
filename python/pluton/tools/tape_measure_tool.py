@@ -40,7 +40,7 @@ class TapeMeasureTool(Tool):
     def deactivate(self) -> None:
         self._reset()
 
-    def on_mouse_move(self, event: QMouseEvent, snap) -> None:  # noqa: ANN001
+    def on_mouse_move(self, event: QMouseEvent, snap) -> None:
         from pluton.viewport.snap_engine import SnapKind
         if snap.kind == SnapKind.NONE:
             self._snap_marker_pos = None
@@ -51,7 +51,7 @@ class TapeMeasureTool(Tool):
         self._snap_marker_color = MARKER_COLOR_BY_KIND.get(snap.kind, _NEUTRAL_COLOR)
         self._snap_marker_kind = int(snap.kind)
 
-    def on_mouse_press(self, event: QMouseEvent, snap) -> None:  # noqa: ANN001
+    def on_mouse_press(self, event: QMouseEvent, snap) -> None:
         from pluton.viewport.snap_engine import SnapKind
         if event.button() != Qt.MouseButton.LeftButton or snap.kind == SnapKind.NONE:
             return

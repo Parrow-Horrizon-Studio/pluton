@@ -34,7 +34,7 @@ def _unique_name(base: str, used: set[str]) -> str:
     return candidate
 
 
-def model_to_objdoc(model) -> ObjDocument:  # noqa: ANN001
+def model_to_objdoc(model) -> ObjDocument:
     """Flatten the scene graph to a world-space ObjDocument (one object per node
     with geometry). Never mutates the model."""
     vertices: list[tuple[float, float, float]] = []
@@ -85,7 +85,7 @@ def _atomic_write_text(path: Path, text: str) -> None:
             tmp.unlink()
 
 
-def export_obj(path, model) -> None:  # noqa: ANN001
+def export_obj(path, model) -> None:
     """Write the model to `path` as OBJ, with a sibling `<stem>.mtl` if it has
     painted materials. Each file is written atomically (temp + os.replace)."""
     path = Path(path)
@@ -97,7 +97,7 @@ def export_obj(path, model) -> None:  # noqa: ANN001
         _atomic_write_text(path.with_name(mtl_name), mtl_text)
 
 
-def read_obj_document(path) -> ObjDocument:  # noqa: ANN001
+def read_obj_document(path) -> ObjDocument:
     """Read a .obj (and its `mtllib` sidecar, if present next to it) and parse to
     an ObjDocument. Raises PlutonFormatError on malformed content; OSError on a
     missing/unreadable .obj propagates. A missing sidecar .mtl is non-fatal."""
@@ -133,7 +133,7 @@ class BuildResult:
     created_geometry: tuple          # (vertex_ids, edge_ids, face_ids) added to the scene (merge)
 
 
-def _ensure_materials(materials, model) -> dict:  # noqa: ANN001
+def _ensure_materials(materials, model) -> dict:
     """Add each OBJ material to the library, reusing an existing one when name AND
     color already match. Returns name -> material_id."""
     name_to_id: dict[str, int] = {}
@@ -149,7 +149,7 @@ def _ensure_materials(materials, model) -> dict:  # noqa: ANN001
     return name_to_id
 
 
-def _add_faces(mesh, faces, localmap, name_to_id) -> tuple[int, int]:  # noqa: ANN001
+def _add_faces(mesh, faces, localmap, name_to_id) -> tuple[int, int]:
     """Best-effort: build each face, skipping+counting any the kernel rejects
     or any that references an unknown/out-of-range vertex index."""
     imported = skipped = 0
@@ -171,7 +171,7 @@ def _add_faces(mesh, faces, localmap, name_to_id) -> tuple[int, int]:  # noqa: A
     return imported, skipped
 
 
-def _snapshot_ids(mesh):  # noqa: ANN001
+def _snapshot_ids(mesh):
     return (
         {v.id for v in mesh.vertices_iter()},
         {e.id for e in mesh.edges_iter()},
@@ -179,7 +179,7 @@ def _snapshot_ids(mesh):  # noqa: ANN001
     )
 
 
-def build_obj_into_model(doc: ObjDocument, model, target_context) -> BuildResult:  # noqa: ANN001
+def build_obj_into_model(doc: ObjDocument, model, target_context) -> BuildResult:
     """Build an ObjDocument into the model. Adaptive: has_object_tags -> one group
     per object in target_context; else merge into target_context.mesh. Best-effort
     face building. Returns the created ids for undo."""

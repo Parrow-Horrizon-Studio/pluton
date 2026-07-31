@@ -66,13 +66,13 @@ class ArcTool(Tool):
         self._model = ctx.model
         self._reset_gesture()
 
-    def _world_transform(self):  # noqa: ANN202
+    def _world_transform(self):
         return self._model.active_world_transform if self._model is not None else None
 
     def deactivate(self) -> None:
         self._reset_gesture()
 
-    def on_mouse_move(self, event: QMouseEvent, snap) -> None:  # noqa: ANN001
+    def on_mouse_move(self, event: QMouseEvent, snap) -> None:
         from pluton.viewport.snap_engine import SnapKind
 
         if snap.kind == SnapKind.NONE:
@@ -85,7 +85,7 @@ class ArcTool(Tool):
         if self._plane is not None and self._state != _State.IDLE:
             self._cursor_uv = self._plane.project(snap.world_position)
 
-    def on_mouse_press(self, event: QMouseEvent, snap) -> None:  # noqa: ANN001
+    def on_mouse_press(self, event: QMouseEvent, snap) -> None:
         from pluton.viewport.snap_engine import SnapKind
 
         if snap.kind == SnapKind.NONE:
@@ -116,12 +116,16 @@ class ArcTool(Tool):
         if self._end_uv is None:
             self._reset_gesture()
             return
-        bulge_uv = semicircle_snap(_ORIGIN_UV, self._end_uv, self._plane.project(snap.world_position))
+        bulge_uv = semicircle_snap(
+            _ORIGIN_UV, self._end_uv, self._plane.project(snap.world_position)
+        )
         pts_uv = arc_2pt(_ORIGIN_UV, self._end_uv, bulge_uv, _SEGMENTS)
         if len(pts_uv) < 2:
             return
         world = self._plane.to_world(pts_uv).astype(np.float32)
-        composite = build_open_polyline(s, world, name="Draw Arc", world_transform=self._world_transform())
+        composite = build_open_polyline(
+            s, world, name="Draw Arc", world_transform=self._world_transform()
+        )
         if composite is not None and self._command_stack is not None:
             self._command_stack.push_executed(composite, self._scene)
         self._reset_gesture()
@@ -146,7 +150,9 @@ class ArcTool(Tool):
         return ToolOverlay(
             rubber_band_segments=segments,
             rubber_band_color=_NEUTRAL_COLOR,
-            snap_marker_position=self._snap_marker_pos.copy() if self._snap_marker_pos is not None else None,
+            snap_marker_position=(
+                self._snap_marker_pos.copy() if self._snap_marker_pos is not None else None
+            ),
             snap_marker_color=self._snap_marker_color,
             snap_marker_kind=self._snap_marker_kind,
         )
@@ -201,7 +207,9 @@ class ArcTool(Tool):
                 self._reset_gesture()
                 return False
             world = self._plane.to_world(pts_uv).astype(np.float32)
-            composite = build_open_polyline(self._scene, world, name="Draw Arc", world_transform=self._world_transform())
+            composite = build_open_polyline(
+                self._scene, world, name="Draw Arc", world_transform=self._world_transform()
+            )
             if composite is not None and self._command_stack is not None:
                 self._command_stack.push_executed(composite, self._scene)
             self._reset_gesture()

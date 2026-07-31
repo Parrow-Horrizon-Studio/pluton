@@ -22,11 +22,15 @@ class ToolContext:
     scene: object
     command_stack: object = None  # M3a-introduced — pluton.commands.CommandStack
     camera: object = None  # M3b-introduced — pluton.viewport.camera.Camera
-    widget_size_provider: object = None  # M3b-introduced — callable () -> tuple[int, int] returning (width, height)
+    # M3b-introduced — callable () -> tuple[int, int] returning (width, height)
+    widget_size_provider: object = None
     selection: object = None  # M4b — pluton.selection.Selection (shared)
     units_provider: object = None  # M4d — callable () -> pluton.units.Units (or None)
-    model: object = None  # M4e — pluton.model.Model (the scene graph); used for active transform + enter/exit
-    request_context_rebuild: object = None  # M4e — callable () -> None; rebuilds the tool context after the active editing context changes
+    # M4e — pluton.model.Model (the scene graph); used for active transform + enter/exit
+    model: object = None
+    # M4e — callable () -> None; rebuilds the tool context after the active
+    # editing context changes
+    request_context_rebuild: object = None
     active_material_provider: object = None  # M5b — callable () -> Material (active material)
     set_active_material: object = None       # M5b — callable (int) -> None (eyedropper -> dock)
 
@@ -39,11 +43,13 @@ class ToolOverlay:
     rubber_band_color: tuple[float, float, float]
     snap_marker_position: np.ndarray | None
     snap_marker_color: tuple[float, float, float]
-    snap_marker_kind: int = 0  # SnapKind value (0=NONE/no marker); stored as int to avoid circular import
+    # SnapKind value (0=NONE/no marker); stored as int to avoid circular import
+    snap_marker_kind: int = 0
 
     # M3b: filled face overlays (hover-highlight / armed face / ghost prism faces).
     face_fill_polygons: list[np.ndarray] = field(default_factory=list)
-    # List of (N, 3) float32 world-space vertex loops. Renderer earcut-triangulates each at draw time.
+    # List of (N, 3) float32 world-space vertex loops. Renderer earcut-triangulates
+    # each at draw time.
 
     face_fill_color: tuple[float, float, float, float] = (0.4, 0.7, 1.0, 0.15)
     # RGBA. Default is M3b's "ghost prism" color (light blue, 15% alpha).
@@ -94,23 +100,28 @@ class Tool(ABC):
     @abstractmethod
     def deactivate(self) -> None: ...
 
-    def on_mouse_move(self, event: QMouseEvent, snap) -> None:  # noqa: ANN001
+    def on_mouse_move(self, event: QMouseEvent, snap) -> None:
         """Default: do nothing. Tools override as needed."""
+        return None
 
-    def on_mouse_press(self, event: QMouseEvent, snap) -> None:  # noqa: ANN001
+    def on_mouse_press(self, event: QMouseEvent, snap) -> None:
         """Default: do nothing."""
+        return None
 
-    def on_mouse_release(self, event: QMouseEvent, snap) -> None:  # noqa: ANN001
+    def on_mouse_release(self, event: QMouseEvent, snap) -> None:
         """Default: do nothing. Tools that need drag-release (e.g. box-select)
         override this."""
+        return None
 
-    def on_mouse_double_click(self, event: QMouseEvent, snap) -> None:  # noqa: ANN001
+    def on_mouse_double_click(self, event: QMouseEvent, snap) -> None:
         """Default: do nothing. SelectTool overrides to enter groups/components."""
+        return None
 
     def on_key_press(self, event: QKeyEvent) -> None:
         """Default: do nothing."""
+        return None
 
-    def apply_typed_value(self, text: str, units) -> bool:  # noqa: ANN001
+    def apply_typed_value(self, text: str, units) -> bool:
         """Apply a typed VCB value to the in-progress gesture.
 
         Returns True if the value was consumed (the tool re-resolved + committed

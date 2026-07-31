@@ -14,8 +14,6 @@ from enum import IntEnum
 import numpy as np
 
 from pluton.geometry.transforms import apply_mat, is_identity_transform, mat_invert
-from pluton.scene import Scene
-from pluton.viewport.camera import Camera
 
 
 class SnapKind(IntEnum):
@@ -102,7 +100,9 @@ class SnapEngine:
     AXIS_DEG_TOLERANCE = 5.0
     GRID_SIZE_WORLD = 1.0
 
-    def snap(self, cursor_screen, viewport_size, camera, scene, anchor=None, world_transform=None) -> SnapResult:
+    def snap(
+        self, cursor_screen, viewport_size, camera, scene, anchor=None, world_transform=None
+    ) -> SnapResult:
         """Return the chosen 3D snap for the given cursor.
 
         cursor_screen: (px, py) pixel coords. viewport_size: (width, height).
@@ -258,7 +258,9 @@ class SnapEngine:
                         edge_id=e.id, edge_t=0.5,
                     ))
             # On-Edge: closest point on the local 3D segment to the local cursor ray.
-            on_pt_local, t = _closest_point_on_segment_to_ray(ray_origin_local, ray_dir_local, p1, p2)
+            on_pt_local, t = _closest_point_on_segment_to_ray(
+                ray_origin_local, ray_dir_local, p1, p2
+            )
             on_pt_world = _to_world(on_pt_local)
             proj_e = camera.world_to_screen(on_pt_world, width, height)
             if proj_e is not None:
@@ -293,7 +295,7 @@ class SnapEngine:
 
     def _intersection_candidates(self, px, py, width, height, camera, scene, anchor):
         out: list[_Candidate] = []
-        for axis_idx, axis_dir in _AXIS_DIRS.items():
+        for _axis_idx, axis_dir in _AXIS_DIRS.items():
             for e in scene.edges_iter():
                 a = scene.vertex(e.v1_id).position
                 b = scene.vertex(e.v2_id).position

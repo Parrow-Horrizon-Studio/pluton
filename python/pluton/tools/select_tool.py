@@ -50,7 +50,8 @@ class SelectTool(Tool):
         self._is_box = False
         self._box_rect: tuple[float, float, float, float] | None = None
         self._box_window = True  # True = L->R window, False = R->L crossing
-        self._suppress_next_release = False  # M4e — set after double-click to eat the trailing release
+        # M4e — set after double-click to eat the trailing release
+        self._suppress_next_release = False
 
     def activate(self, ctx: ToolContext) -> None:
         self._scene = ctx.scene
@@ -106,11 +107,15 @@ class SelectTool(Tool):
         pos = event.position()
         return (float(pos.x()), float(pos.y()))
 
-    def on_mouse_move(self, event: QMouseEvent, snap) -> None:  # noqa: ANN001
+    def on_mouse_move(self, event: QMouseEvent, snap) -> None:
         if event.buttons() & Qt.MouseButton.LeftButton and self._press_px is not None:
             cx, cy = self._cursor(event)
             px, py = self._press_px
-            if self._is_box or abs(cx - px) >= _DRAG_THRESHOLD_PX or abs(cy - py) >= _DRAG_THRESHOLD_PX:
+            if (
+                self._is_box
+                or abs(cx - px) >= _DRAG_THRESHOLD_PX
+                or abs(cy - py) >= _DRAG_THRESHOLD_PX
+            ):
                 self._is_box = True
                 self._box_rect = (px, py, cx, cy)
                 self._box_window = (cx - px) >= 0.0
@@ -132,12 +137,12 @@ class SelectTool(Tool):
         else:
             self._hovered_instance = None
 
-    def on_mouse_press(self, event: QMouseEvent, snap) -> None:  # noqa: ANN001
+    def on_mouse_press(self, event: QMouseEvent, snap) -> None:
         self._press_px = self._cursor(event)
         self._is_box = False
         self._box_rect = None
 
-    def on_mouse_release(self, event: QMouseEvent, snap) -> None:  # noqa: ANN001
+    def on_mouse_release(self, event: QMouseEvent, snap) -> None:
         # M4e: suppress the trailing release after a double-click enter
         if self._suppress_next_release:
             self._suppress_next_release = False
@@ -195,9 +200,15 @@ class SelectTool(Tool):
                     else:
                         self._selection.clear()
             elif hit[0] == "edge":
-                self._selection.toggle_edge(hit[1]) if shift else self._selection.replace(edges=[hit[1]])
+                if shift:
+                    self._selection.toggle_edge(hit[1])
+                else:
+                    self._selection.replace(edges=[hit[1]])
             else:
-                self._selection.toggle_face(hit[1]) if shift else self._selection.replace(faces=[hit[1]])
+                if shift:
+                    self._selection.toggle_face(hit[1])
+                else:
+                    self._selection.replace(faces=[hit[1]])
         self._reset_press()
 
     def _reset_press(self) -> None:
@@ -206,7 +217,7 @@ class SelectTool(Tool):
         self._box_rect = None
         self._box_window = True
 
-    def on_mouse_double_click(self, event: QMouseEvent, snap) -> None:  # noqa: ANN001
+    def on_mouse_double_click(self, event: QMouseEvent, snap) -> None:
         """Double-click a label to reopen its text prompt; a dimension has no
         stored text and does nothing. Otherwise double-click an instance to
         enter it (group/component open for editing)."""
@@ -307,7 +318,12 @@ class SelectTool(Tool):
 
                     loop = self._scene.face_loop(ent_id)
                     fills = [np.array(
-                        [_to_world_sel(np.asarray(self._scene.vertex(v).position, dtype=np.float32)) for v in loop],
+                        [
+                            _to_world_sel(
+                                np.asarray(self._scene.vertex(v).position, dtype=np.float32)
+                            )
+                            for v in loop
+                        ],
                         dtype=np.float32,
                     )]
                 except KeyError:

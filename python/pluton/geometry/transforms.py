@@ -45,7 +45,7 @@ def scale(points: np.ndarray, anchor, factors) -> np.ndarray:
 
 
 # ---------------------------------------------------------------------------
-# 4×4 matrix helpers (M4e: world↔local coordinate conversion)
+# 4x4 matrix helpers (M4e: world↔local coordinate conversion)
 # ---------------------------------------------------------------------------
 
 def mat_translate(delta) -> np.ndarray:

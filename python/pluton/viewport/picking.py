@@ -27,7 +27,7 @@ def _point_segment_distance(px, py, ax, ay, bx, by) -> float:
 
 
 
-def ray_into_local(origin, direction, world_transform):  # noqa: ANN001
+def ray_into_local(origin, direction, world_transform):
     """Transform a world-space ray (origin point, direction vector) into the
     local frame of `world_transform`. Returns (origin, direction) unchanged when
     world_transform is None or identity (root context)."""
@@ -39,17 +39,19 @@ def ray_into_local(origin, direction, world_transform):  # noqa: ANN001
     return o, d
 
 
-def world_to_local_point(point, world_transform):  # noqa: ANN001
+def world_to_local_point(point, world_transform):
     """Convert a single world-space point (3,) into the local frame of
     world_transform. Returns the point unchanged when world_transform is None
     or identity (root context)."""
     from pluton.geometry.transforms import apply_mat, is_identity_transform, mat_invert
     if is_identity_transform(world_transform):
         return np.asarray(point, dtype=np.float32).reshape(3)
-    return apply_mat(np.asarray(point, dtype=np.float64).reshape(1, 3), mat_invert(world_transform))[0]
+    return apply_mat(
+        np.asarray(point, dtype=np.float64).reshape(1, 3), mat_invert(world_transform)
+    )[0]
 
 
-def pick_selectable(cursor_screen, viewport_size, camera, scene, world_transform=None):  # noqa: ANN001
+def pick_selectable(cursor_screen, viewport_size, camera, scene, world_transform=None):
     """Return ("edge", id) for the nearest edge within PICK_PIXEL_TOLERANCE of
     the cursor (screen-space); else ("face", id) under the cursor ray; else None.
     Edge-priority: thin targets are harder to hit, so they win over the face.
@@ -148,7 +150,7 @@ def _normalize_rect(rect):
     return (min(x0, x1), min(y0, y1), max(x0, x1), max(y0, y1))
 
 
-def entities_in_box(rect_px, mode, viewport_size, camera, scene, world_transform=None):  # noqa: ANN001
+def entities_in_box(rect_px, mode, viewport_size, camera, scene, world_transform=None):
     """Return (edge_ids: set, face_ids: set) inside rect_px under the given mode.
     mode="window": only fully-enclosed; mode="crossing": anything touched.
 

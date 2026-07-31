@@ -11,7 +11,7 @@ class MakeUniqueCommand(Command):
         self._old_def = instance.definition
         self._clone = None
 
-    def do(self, model) -> None:  # noqa: ANN001
+    def do(self, model) -> None:
         if len(self._old_def.instances) <= 1:
             return  # already unique — no-op
         if self._clone is None:
@@ -21,7 +21,7 @@ class MakeUniqueCommand(Command):
         if self._inst not in self._clone.instances:
             self._clone.instances.append(self._inst)
 
-    def undo(self, model) -> None:  # noqa: ANN001
+    def undo(self, model) -> None:
         if self._clone is None:
             return
         if self._inst in self._clone.instances:
@@ -38,13 +38,13 @@ class DeleteInstanceCommand(Command):
         self._parent = parent_definition
         self._inst = instance
 
-    def do(self, model) -> None:  # noqa: ANN001
+    def do(self, model) -> None:
         if self._inst in self._parent.children:
             self._parent.children.remove(self._inst)
         if self._inst in self._inst.definition.instances:
             self._inst.definition.instances.remove(self._inst)
 
-    def undo(self, model) -> None:  # noqa: ANN001
+    def undo(self, model) -> None:
         self._parent.children.append(self._inst)
         if self._inst not in self._inst.definition.instances:
             self._inst.definition.instances.append(self._inst)

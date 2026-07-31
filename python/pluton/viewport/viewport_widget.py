@@ -24,7 +24,7 @@ from pluton.viewport.snap_engine import SnapEngine, SnapKind
 class ViewportWidget(QOpenGLWidget):
     """The 3D viewport. Renders scene + active tool overlay; routes mouse events."""
 
-    def __init__(self, model=None, tool_manager=None, parent=None) -> None:  # noqa: ANN001
+    def __init__(self, model=None, tool_manager=None, parent=None) -> None:
         super().__init__(parent)
         self.camera = Camera()
         self.scene_renderer = SceneRenderer()
@@ -45,17 +45,17 @@ class ViewportWidget(QOpenGLWidget):
         self._dragging_modifiers: Qt.KeyboardModifier = Qt.KeyboardModifier.NoModifier
 
     @property
-    def scene(self):  # noqa: ANN201
+    def scene(self):
         """The active scene from the model (delegates to model.active_scene)."""
         return self.model.active_scene if self.model is not None else None
 
-    def set_status_bar(self, status_bar) -> None:  # noqa: ANN001
+    def set_status_bar(self, status_bar) -> None:
         self._status_bar = status_bar
 
-    def set_event_finished_callback(self, fn) -> None:  # noqa: ANN001
+    def set_event_finished_callback(self, fn) -> None:
         self._on_event_finished = fn
 
-    def set_render_style(self, style) -> None:  # noqa: ANN001
+    def set_render_style(self, style) -> None:
         """Set the viewport display style and repaint (called from the View menu)."""
         self.scene_renderer.set_render_style(style)
         self.update()

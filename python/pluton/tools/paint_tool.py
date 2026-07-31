@@ -51,7 +51,7 @@ class PaintTool(Tool):
     def deactivate(self) -> None:
         self._hovered_face = None
 
-    def _world_transform(self):  # noqa: ANN202
+    def _world_transform(self):
         return self._model.active_world_transform if self._model is not None else None
 
     def _viewport_size(self) -> tuple[int, int]:
@@ -68,15 +68,15 @@ class PaintTool(Tool):
         )
         return hit[1] if hit is not None and hit[0] == "face" else None
 
-    def _active_material(self):  # noqa: ANN202
+    def _active_material(self):
         if self._active_material_provider is None:
             return None
         return self._active_material_provider()
 
-    def on_mouse_move(self, event: QMouseEvent, snap) -> None:  # noqa: ANN001
+    def on_mouse_move(self, event: QMouseEvent, snap) -> None:
         self._hovered_face = self._pick_face(event)
 
-    def on_mouse_press(self, event: QMouseEvent, snap) -> None:  # noqa: ANN001
+    def on_mouse_press(self, event: QMouseEvent, snap) -> None:
         f_id = self._pick_face(event)
         if f_id is None or self._scene is None:
             return

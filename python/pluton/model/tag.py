@@ -76,7 +76,7 @@ class TagLibrary:
         return [{"id": t.id, "name": t.name, "visible": t.visible} for t in self.tags()]
 
     @classmethod
-    def from_records(cls, records: list[dict], next_id: int) -> "TagLibrary":
+    def from_records(cls, records: list[dict], next_id: int) -> TagLibrary:
         """Rebuild a library authoritatively from saved records (no auto-seed)."""
         lib = cls()  # seeds Untagged, then we overwrite
         lib._tags = {}

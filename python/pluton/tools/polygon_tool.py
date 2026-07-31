@@ -64,13 +64,13 @@ class PolygonTool(Tool):
         self._model = ctx.model
         self._reset_gesture()
 
-    def _world_transform(self):  # noqa: ANN202
+    def _world_transform(self):
         return self._model.active_world_transform if self._model is not None else None
 
     def deactivate(self) -> None:
         self._reset_gesture()
 
-    def on_mouse_move(self, event: QMouseEvent, snap) -> None:  # noqa: ANN001
+    def on_mouse_move(self, event: QMouseEvent, snap) -> None:
         from pluton.viewport.snap_engine import SnapKind
 
         if snap.kind == SnapKind.NONE:
@@ -85,7 +85,7 @@ class PolygonTool(Tool):
             self._radius = float(np.linalg.norm(uv))
             self._start_angle = float(np.arctan2(uv[1], uv[0]))
 
-    def on_mouse_press(self, event: QMouseEvent, snap) -> None:  # noqa: ANN001
+    def on_mouse_press(self, event: QMouseEvent, snap) -> None:
         from pluton.viewport.snap_engine import SnapKind
 
         if snap.kind == SnapKind.NONE:
@@ -108,7 +108,9 @@ class PolygonTool(Tool):
         start_angle = float(np.arctan2(uv[1], uv[0]))
         ring_uv = polygon(radius, self._sides, start_angle)
         world = self._plane.to_world(ring_uv).astype(np.float32)
-        composite = build_closed_face(s, world, name="Draw Polygon", world_transform=self._world_transform())
+        composite = build_closed_face(
+            s, world, name="Draw Polygon", world_transform=self._world_transform()
+        )
         if composite is not None and self._command_stack is not None:
             self._command_stack.push_executed(composite, self._scene)
         self._reset_gesture()
@@ -130,7 +132,9 @@ class PolygonTool(Tool):
             return False
         ring_uv = polygon(radius, self._sides, self._start_angle)
         world = self._plane.to_world(ring_uv).astype(np.float32)
-        composite = build_closed_face(self._scene, world, name="Draw Polygon", world_transform=self._world_transform())
+        composite = build_closed_face(
+            self._scene, world, name="Draw Polygon", world_transform=self._world_transform()
+        )
         if composite is not None and self._command_stack is not None:
             self._command_stack.push_executed(composite, self._scene)
         self._reset_gesture()
@@ -159,7 +163,9 @@ class PolygonTool(Tool):
         return ToolOverlay(
             rubber_band_segments=segments,
             rubber_band_color=_NEUTRAL_COLOR,
-            snap_marker_position=self._snap_marker_pos.copy() if self._snap_marker_pos is not None else None,
+            snap_marker_position=(
+                self._snap_marker_pos.copy() if self._snap_marker_pos is not None else None
+            ),
             snap_marker_color=self._snap_marker_color,
             snap_marker_kind=self._snap_marker_kind,
         )

@@ -16,7 +16,7 @@ class ExplodeInstanceCommand(Command):
         self._baked = None       # list of (new_vid_in_parent) for undo removal
         self._child_records = None  # reparented child instances (for undo)
 
-    def do(self, model) -> None:  # noqa: ANN001
+    def do(self, model) -> None:
         parent_scene = self._parent.mesh
         defn = self._inst.definition
         t = self._inst.transform
@@ -49,7 +49,7 @@ class ExplodeInstanceCommand(Command):
         if self._inst in self._parent.children:
             self._parent.children.remove(self._inst)
 
-    def undo(self, model) -> None:  # noqa: ANN001
+    def undo(self, model) -> None:
         parent_scene = self._parent.mesh
         new_vids, new_eids, new_faces = self._baked
         for nf in new_faces:

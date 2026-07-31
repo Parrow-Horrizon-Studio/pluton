@@ -18,10 +18,10 @@ class Command(ABC):
     name: str = "Command"
 
     @abstractmethod
-    def do(self, scene) -> None: ...  # noqa: ANN001
+    def do(self, scene) -> None: ...
 
     @abstractmethod
-    def undo(self, scene) -> None: ...  # noqa: ANN001
+    def undo(self, scene) -> None: ...
 
 
 @dataclass
@@ -31,10 +31,10 @@ class CompositeCommand(Command):
     name: str
     children: list[Command] = field(default_factory=list)
 
-    def do(self, scene) -> None:  # noqa: ANN001
+    def do(self, scene) -> None:
         for c in self.children:
             c.do(scene)
 
-    def undo(self, scene) -> None:  # noqa: ANN001
+    def undo(self, scene) -> None:
         for c in reversed(self.children):
             c.undo(scene)

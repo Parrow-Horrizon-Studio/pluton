@@ -49,7 +49,7 @@ class Model:
         return self.active_path[-1].definition if self.active_path else self.root
 
     @property
-    def active_scene(self):  # noqa: ANN201  (Scene)
+    def active_scene(self):
         return self.active_context.mesh
 
     @property
@@ -82,7 +82,7 @@ class Model:
         active_ids = {inst.id for inst in self.active_path}
         yield from self._traverse_visible(self.root, np.eye(4, dtype=np.float64), active_ids)
 
-    def _traverse_visible(self, definition, world, active_ids):  # noqa: ANN001
+    def _traverse_visible(self, definition, world, active_ids):
         yield definition, world
         for inst in definition.children:
             if inst.id not in active_ids and not self.tags.is_visible(inst.tag_id):
@@ -164,7 +164,7 @@ class Model:
             best_t = hit.t
         return best
 
-    def load_from(self, other: "Model") -> None:
+    def load_from(self, other: Model) -> None:
         """Replace this model's contents with another's, in place (keeps identity).
 
         Lets the viewport / tool context keep their existing Model reference while

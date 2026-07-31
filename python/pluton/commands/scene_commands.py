@@ -16,7 +16,7 @@ class AddVertexCommand(Command):
         self._position = np.asarray(position, dtype=np.float32).reshape(3).copy()
         self._vertex_id: int | None = None
 
-    def do(self, scene) -> None:  # noqa: ANN001
+    def do(self, scene) -> None:
         if self._vertex_id is None:
             # First execution — allocate a new slot.
             self._vertex_id = scene.add_vertex(self._position)
@@ -24,7 +24,7 @@ class AddVertexCommand(Command):
             # Redo — restore the previously-allocated slot to preserve the ID.
             scene.restore_vertex(self._vertex_id, self._position)
 
-    def undo(self, scene) -> None:  # noqa: ANN001
+    def undo(self, scene) -> None:
         assert self._vertex_id is not None, "AddVertexCommand.undo before do"
         scene.remove_vertex(self._vertex_id)
 
@@ -36,7 +36,7 @@ class AddEdgeCommand(Command):
         self._v1, self._v2 = v1_id, v2_id
         self._edge_id: int | None = None
 
-    def do(self, scene) -> None:  # noqa: ANN001
+    def do(self, scene) -> None:
         if self._edge_id is None:
             # First execution — allocate a new slot.
             self._edge_id = scene.add_edge(self._v1, self._v2)
@@ -44,7 +44,7 @@ class AddEdgeCommand(Command):
             # Redo — restore the previously-allocated slot to preserve the ID.
             scene.restore_edge(self._edge_id, self._v1, self._v2)
 
-    def undo(self, scene) -> None:  # noqa: ANN001
+    def undo(self, scene) -> None:
         assert self._edge_id is not None, "AddEdgeCommand.undo before do"
         scene.remove_edge(self._edge_id)
 
@@ -56,7 +56,7 @@ class AddFaceCommand(Command):
         self._loop = tuple(loop)
         self._face_id: int | None = None
 
-    def do(self, scene) -> None:  # noqa: ANN001
+    def do(self, scene) -> None:
         if self._face_id is None:
             # First execution — allocate a new slot.
             self._face_id = scene.add_face_from_loop(self._loop)
@@ -64,7 +64,7 @@ class AddFaceCommand(Command):
             # Redo — restore the previously-allocated slot to preserve the ID.
             scene.restore_face(self._face_id, self._loop)
 
-    def undo(self, scene) -> None:  # noqa: ANN001
+    def undo(self, scene) -> None:
         assert self._face_id is not None, "AddFaceCommand.undo before do"
         scene.remove_face(self._face_id)
 
@@ -76,11 +76,11 @@ class RemoveFaceCommand(Command):
         self._face_id = face_id
         self._captured_loop: tuple[int, ...] | None = None
 
-    def do(self, scene) -> None:  # noqa: ANN001
+    def do(self, scene) -> None:
         self._captured_loop = tuple(scene.face(self._face_id).loop_vertex_ids)
         scene.remove_face(self._face_id)
 
-    def undo(self, scene) -> None:  # noqa: ANN001
+    def undo(self, scene) -> None:
         assert self._captured_loop is not None, "RemoveFaceCommand.undo before do"
         scene.restore_face(self._face_id, self._captured_loop)
 
@@ -92,12 +92,12 @@ class RemoveEdgeCommand(Command):
         self._edge_id = edge_id
         self._captured: tuple[int, int] | None = None
 
-    def do(self, scene) -> None:  # noqa: ANN001
+    def do(self, scene) -> None:
         e = scene.edge(self._edge_id)
         self._captured = (e.v1_id, e.v2_id)
         scene.remove_edge(self._edge_id)
 
-    def undo(self, scene) -> None:  # noqa: ANN001
+    def undo(self, scene) -> None:
         assert self._captured is not None, "RemoveEdgeCommand.undo before do"
         scene.restore_edge(self._edge_id, self._captured[0], self._captured[1])
 
@@ -109,11 +109,11 @@ class RemoveVertexCommand(Command):
         self._vertex_id = vertex_id
         self._captured_pos: np.ndarray | None = None
 
-    def do(self, scene) -> None:  # noqa: ANN001
+    def do(self, scene) -> None:
         self._captured_pos = scene.vertex(self._vertex_id).position.copy()
         scene.remove_vertex(self._vertex_id)
 
-    def undo(self, scene) -> None:  # noqa: ANN001
+    def undo(self, scene) -> None:
         assert self._captured_pos is not None, "RemoveVertexCommand.undo before do"
         scene.restore_vertex(self._vertex_id, self._captured_pos)
 
@@ -131,10 +131,10 @@ class _AddVertexAtId(Command):
         self._v_id = v_id
         self._position = np.asarray(position, dtype=np.float32).reshape(3).copy()
 
-    def do(self, scene) -> None:  # noqa: ANN001
+    def do(self, scene) -> None:
         scene.add_vertex(self._position)
 
-    def undo(self, scene) -> None:  # noqa: ANN001
+    def undo(self, scene) -> None:
         scene.remove_vertex(self._v_id)
 
 
@@ -145,10 +145,10 @@ class _AddEdgeAtId(Command):
         self._e_id = e_id
         self._v1, self._v2 = v1_id, v2_id
 
-    def do(self, scene) -> None:  # noqa: ANN001
+    def do(self, scene) -> None:
         scene.add_edge(self._v1, self._v2)
 
-    def undo(self, scene) -> None:  # noqa: ANN001
+    def undo(self, scene) -> None:
         scene.remove_edge(self._e_id)
 
 
@@ -159,10 +159,10 @@ class _AddFaceAtId(Command):
         self._f_id = f_id
         self._loop = tuple(loop)
 
-    def do(self, scene) -> None:  # noqa: ANN001
+    def do(self, scene) -> None:
         scene.add_face_from_loop(self._loop)
 
-    def undo(self, scene) -> None:  # noqa: ANN001
+    def undo(self, scene) -> None:
         scene.remove_face(self._f_id)
 
 
@@ -174,7 +174,7 @@ class ClearSceneCommand(Command):
     def __init__(self) -> None:
         self._captured: list[Command] | None = None
 
-    def do(self, scene) -> None:  # noqa: ANN001
+    def do(self, scene) -> None:
         captured: list[Command] = []
         for v in scene.vertices_iter():
             captured.append(_AddVertexAtId(v.id, v.position))
@@ -185,7 +185,7 @@ class ClearSceneCommand(Command):
         self._captured = captured
         scene.clear()
 
-    def undo(self, scene) -> None:  # noqa: ANN001
+    def undo(self, scene) -> None:
         assert self._captured is not None, "ClearSceneCommand.undo before do"
         for cmd in self._captured:
             cmd.do(scene)
@@ -220,7 +220,7 @@ class DissolveEdgeCommand(Command):
         self._merged_face_id: int | None = None
         self._was_noop: bool = False
 
-    def do(self, scene) -> None:  # noqa: ANN001
+    def do(self, scene) -> None:
         if self._captured_f1 is None:
             # First execution — validate + capture descriptors for undo/redo.
             try:
@@ -261,7 +261,7 @@ class DissolveEdgeCommand(Command):
         self._was_noop = False
         self._merged_face_id = result
 
-    def undo(self, scene) -> None:  # noqa: ANN001
+    def undo(self, scene) -> None:
         if self._was_noop:
             return
         assert self._merged_face_id is not None, "DissolveEdgeCommand.undo before do"
@@ -311,13 +311,13 @@ class SplitEdgeCommand(Command):
         self._e2: int | None = None
         self._new_faces: list[tuple[int, tuple[int, ...]]] = []  # (id, loop-with-w)
 
-    def do(self, scene) -> None:  # noqa: ANN001
+    def do(self, scene) -> None:
         if not self._done_once:
             self._first_do(scene)
         else:
             self._redo(scene)
 
-    def _first_do(self, scene) -> None:  # noqa: ANN001
+    def _first_do(self, scene) -> None:
         try:
             e = scene.edge(self._edge_id)
         except KeyError:
@@ -349,7 +349,7 @@ class SplitEdgeCommand(Command):
         self._done_once = True
         self._was_noop = False
 
-    def _redo(self, scene) -> None:  # noqa: ANN001
+    def _redo(self, scene) -> None:
         if self._was_noop:
             return
         assert self._orig_verts is not None and self._w_pos is not None
@@ -365,7 +365,7 @@ class SplitEdgeCommand(Command):
         for fid, loop in self._new_faces:
             scene.restore_face(fid, loop)
 
-    def undo(self, scene) -> None:  # noqa: ANN001
+    def undo(self, scene) -> None:
         if self._was_noop:
             return
         assert self._orig_verts is not None

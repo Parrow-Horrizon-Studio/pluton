@@ -20,7 +20,7 @@ class MakeGroupCommand(Command):
         self.created_instance = None
         self._captured = None  # (verts, edges, faces) descriptors for undo
 
-    def do(self, model) -> None:  # noqa: ANN001
+    def do(self, model) -> None:
         if self._captured is not None:
             self._redo(model)
             return
@@ -75,7 +75,7 @@ class MakeGroupCommand(Command):
         self._parent.children.append(inst)
         self.created_instance = inst
 
-    def _redo(self, model) -> None:  # noqa: ANN001
+    def _redo(self, model) -> None:
         parent_scene = self._parent.mesh
         verts, edges, faces = self._captured
         for f, _loop in faces:
@@ -95,7 +95,7 @@ class MakeGroupCommand(Command):
             inst.definition.instances.append(inst)
         self._parent.children.append(inst)
 
-    def undo(self, model) -> None:  # noqa: ANN001
+    def undo(self, model) -> None:
         parent_scene = self._parent.mesh
         verts, edges, faces = self._captured
         # Remove the instance + definition.

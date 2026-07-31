@@ -31,7 +31,6 @@ from pluton.io.document_codec import CameraState
 from pluton.model import Model
 from pluton.model.tag import TagLibrary
 from pluton.selection import Selection
-from pluton.ui.document_controller import DocumentController
 from pluton.tools import (
     ArcTool,
     CircleTool,
@@ -54,6 +53,7 @@ from pluton.tools.paint_tool import PaintTool
 from pluton.tools.roof_tool import RoofTool
 from pluton.tools.text_tool import TextTool
 from pluton.tools.wall_tool import WallTool
+from pluton.ui.document_controller import DocumentController
 from pluton.ui.materials_dock import MaterialsDock
 from pluton.ui.opening_options_bar import OpeningOptionsBar
 from pluton.ui.roof_options_bar import RoofOptionsBar
@@ -230,8 +230,13 @@ class MainWindow(QMainWindow):
         QShortcut(QKeySequence("N"), self, activated=lambda: self._activate("N"))
         QShortcut(QKeySequence(Qt.Key.Key_Delete), self, activated=self._on_delete_selection)
         QShortcut(QKeySequence(Qt.Key.Key_Backspace), self, activated=self._on_delete_selection)
-        QShortcut(QKeySequence(Qt.Key.Key_Up), self, activated=lambda: self._on_tool_key(Qt.Key.Key_Up))
-        QShortcut(QKeySequence(Qt.Key.Key_Down), self, activated=lambda: self._on_tool_key(Qt.Key.Key_Down))
+        QShortcut(
+            QKeySequence(Qt.Key.Key_Up), self, activated=lambda: self._on_tool_key(Qt.Key.Key_Up)
+        )
+        QShortcut(
+            QKeySequence(Qt.Key.Key_Down), self,
+            activated=lambda: self._on_tool_key(Qt.Key.Key_Down),
+        )
         QShortcut(QKeySequence("Esc"), self, activated=self._on_escape)
         QShortcut(QKeySequence(Qt.Key.Key_Return), self, activated=self._on_finish_gesture)
         QShortcut(QKeySequence(Qt.Key.Key_Enter), self, activated=self._on_finish_gesture)
@@ -373,7 +378,7 @@ class MainWindow(QMainWindow):
     # --- Scene graph back-compat property --------------------------------
 
     @property
-    def scene(self):  # noqa: ANN201
+    def scene(self):
         """Back-compat: the active scene from the model (root mesh by default)."""
         return self._model.active_scene
 
@@ -502,7 +507,9 @@ class MainWindow(QMainWindow):
         if active.has_active_gesture:
             from PySide6.QtGui import QKeyEvent
 
-            ev = QKeyEvent(QKeyEvent.Type.KeyPress, Qt.Key.Key_Escape, Qt.KeyboardModifier.NoModifier)
+            ev = QKeyEvent(
+                QKeyEvent.Type.KeyPress, Qt.Key.Key_Escape, Qt.KeyboardModifier.NoModifier
+            )
             active.on_key_press(ev)
         elif self._model.active_path:
             # M4e: inside a group/component with no active gesture — Esc exits one
@@ -530,7 +537,7 @@ class MainWindow(QMainWindow):
         self._refresh_status_text()
         self._viewport.update()
 
-    def _on_tool_key(self, qt_key) -> None:  # noqa: ANN001
+    def _on_tool_key(self, qt_key) -> None:
         """Forward a non-text key (e.g. Up/Down for polygon sides) to the active
         tool, but only while it has a live gesture (so arrows are inert otherwise)."""
         active = self._tool_manager.active
@@ -951,7 +958,7 @@ class MainWindow(QMainWindow):
         path, _ = QFileDialog.getSaveFileName(self, title, "", file_filter)
         return path or None
 
-    def _save_to(self, path) -> bool:  # noqa: ANN001
+    def _save_to(self, path) -> bool:
         path = str(path)
         if not path.endswith(".pluton"):
             path += ".pluton"
@@ -1008,13 +1015,13 @@ class MainWindow(QMainWindow):
             return True
         return False
 
-    def closeEvent(self, event):  # noqa: N802, ANN001
+    def closeEvent(self, event):  # noqa: N802
         if self._confirm_discard_if_dirty():
             event.accept()
         else:
             event.ignore()
 
-    def _reset_document(self, model, camera_state, units, style, path) -> None:  # noqa: ANN001
+    def _reset_document(self, model, camera_state, units, style, path) -> None:
         """Adopt a (model, camera, units, render style) into the live window, in place."""
         from dataclasses import replace
         self._model.load_from(model)

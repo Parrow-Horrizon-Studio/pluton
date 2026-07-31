@@ -83,7 +83,7 @@ class RotateTool(Tool):
     def _world_vec_to_local(self, world_vec: np.ndarray) -> np.ndarray:
         """Convert a world-space DIRECTION/VECTOR into the active context's local frame.
 
-        Only the inverse 3×3 block is applied (translation does not affect vectors).
+        Only the inverse 3x3 block is applied (translation does not affect vectors).
         Returns the vector unchanged at identity/None (root context).
         """
         wt = self._world_transform()
@@ -105,7 +105,7 @@ class RotateTool(Tool):
     def deactivate(self) -> None:
         self._reset()
 
-    def on_mouse_press(self, event: QMouseEvent, snap) -> None:  # noqa: ANN001
+    def on_mouse_press(self, event: QMouseEvent, snap) -> None:
         from pluton.viewport.snap_engine import SnapKind
         if event.button() != Qt.MouseButton.LeftButton:
             return
@@ -150,7 +150,7 @@ class RotateTool(Tool):
                 self._stack.execute(cmd, self._scene)
         self._reset()
 
-    def on_mouse_move(self, event: QMouseEvent, snap) -> None:  # noqa: ANN001
+    def on_mouse_move(self, event: QMouseEvent, snap) -> None:
         from pluton.viewport.snap_engine import SnapKind
         if self._stage != _Stage.HAVE_START or snap.kind == SnapKind.NONE:
             return
@@ -280,7 +280,7 @@ class RotateTool(Tool):
         if self._stack is not None and self._model is not None:
             self._stack.execute(cmd, self._model)
 
-    def _pick_plane_normal(self, event) -> np.ndarray:  # noqa: ANN001
+    def _pick_plane_normal(self, event) -> np.ndarray:
         """Normal of the face under the cursor (in WORLD space), or +Z if none/no camera.
 
         The ray is converted to the active context's LOCAL frame before the face
@@ -303,9 +303,9 @@ class RotateTool(Tool):
             wt = self._world_transform()
             if is_identity_transform(wt):
                 return local_n
-            # Normals transform by the inverse-transpose of the 3×3 block.
-            inv3_T = mat_invert(np.asarray(wt, np.float64))[:3, :3].T
-            world_n = (inv3_T @ local_n.astype(np.float64)).astype(np.float32)
+            # Normals transform by the inverse-transpose of the 3x3 block.
+            inv3_t = mat_invert(np.asarray(wt, np.float64))[:3, :3].T
+            world_n = (inv3_t @ local_n.astype(np.float64)).astype(np.float32)
             ln = float(np.linalg.norm(world_n))
             return (world_n / ln) if ln > 1e-9 else np.array([0, 0, 1], np.float32)
         except (KeyError, ValueError):
@@ -345,7 +345,7 @@ class RotateTool(Tool):
         pts = np.array([self._orig[v] for v in ids], np.float32)
         # Convert world center → local point.
         local_center = world_to_local_point(self._center, self._world_transform())
-        # Convert world normal → local vector (inverse 3×3, then renormalize).
+        # Convert world normal → local vector (inverse 3x3, then renormalize).
         local_normal = self._world_vec_to_local(self._normal)
         ln = float(np.linalg.norm(local_normal))
         if ln > 1e-9:

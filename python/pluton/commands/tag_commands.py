@@ -21,11 +21,11 @@ class TagInstancesCommand(Command):
         self._new = int(new_tag_id)
         self._old: dict[int, int] = {}
 
-    def do(self, model) -> None:  # noqa: ANN001
+    def do(self, model) -> None:
         for inst in self._instances:
             self._old[inst.id] = inst.tag_id
             inst.tag_id = self._new
 
-    def undo(self, model) -> None:  # noqa: ANN001
+    def undo(self, model) -> None:
         for inst in self._instances:
             inst.tag_id = self._old.get(inst.id, _UNTAGGED_ID)

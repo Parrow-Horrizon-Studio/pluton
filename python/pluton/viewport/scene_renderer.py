@@ -29,7 +29,7 @@ from pluton.viewport.render_style import (
 from pluton.viewport.snap_engine import SnapKind
 
 
-def definition_is_dimmed(definition, model) -> bool:  # noqa: ANN001
+def definition_is_dimmed(definition, model) -> bool:
     """True when `definition` should render dimmed (recede) — i.e. you are
     inside a group (active_path is non-empty) and this definition is not the
     active editing context. At the root context, nothing is dimmed."""
@@ -76,14 +76,14 @@ def aabb_world_edges(lo, hi, world_transform) -> np.ndarray:
     world_corners = apply_mat(corners, world_transform)  # (8, 3) float32
 
     # 12 edges — each edge is a pair of corner indices
-    _EDGES = [
+    _edges = [
         (0, 1), (1, 2), (2, 3), (3, 0),  # bottom face
         (4, 5), (5, 6), (6, 7), (7, 4),  # top face
         (0, 4), (1, 5), (2, 6), (3, 7),  # vertical pillars
     ]
 
     out = np.empty((24, 3), dtype=np.float32)
-    for i, (a, b) in enumerate(_EDGES):
+    for i, (a, b) in enumerate(_edges):
         out[2 * i] = world_corners[a]
         out[2 * i + 1] = world_corners[b]
     return out
@@ -263,7 +263,7 @@ def _snap_marker_vertices(kind: int, p) -> np.ndarray:
     )
 
 
-def _selection_face_polygons(scene, selection) -> list[np.ndarray]:  # noqa: ANN001
+def _selection_face_polygons(scene, selection) -> list[np.ndarray]:
     """World-space loops (N,3 float32) for each LIVE selected face."""
     polys: list[np.ndarray] = []
     for f_id in selection.faces:
@@ -276,7 +276,7 @@ def _selection_face_polygons(scene, selection) -> list[np.ndarray]:  # noqa: ANN
     return polys
 
 
-def _selection_edge_segments(scene, selection) -> np.ndarray:  # noqa: ANN001
+def _selection_edge_segments(scene, selection) -> np.ndarray:
     """(2E,3) float32 endpoint pairs for each LIVE selected edge."""
     out: list[np.ndarray] = []
     for e_id in selection.edges:
@@ -426,7 +426,7 @@ class SceneRenderer:
         """Set the active display style (called by the viewport from the View menu)."""
         self._render_style = replace(style)
 
-    def render(self, camera: Camera, model=None, tool_overlay=None, selection=None) -> None:  # noqa: ANN001
+    def render(self, camera: Camera, model=None, tool_overlay=None, selection=None) -> None:
         """Draw the full scene: grid + axes + user geometry (all definitions) + tool overlay.
 
         Iterates model.traverse() to draw each definition's geometry with its
@@ -650,7 +650,7 @@ class SceneRenderer:
         GL.glBindVertexArray(0)
         GL.glUseProgram(0)
 
-    def _upload_definition(self, definition) -> _DefBuffers:  # noqa: ANN001
+    def _upload_definition(self, definition) -> _DefBuffers:
         """Build or update GL buffers for a single definition's mesh.
 
         Looks up (or allocates) a _DefBuffers entry for this definition,
@@ -799,7 +799,7 @@ class SceneRenderer:
 
     def _draw_tool_overlay(
         self,
-        overlay,  # noqa: ANN001
+        overlay,
         view: np.ndarray,
         projection: np.ndarray,
     ) -> None:
@@ -838,7 +838,9 @@ class SceneRenderer:
                 n = pos.shape[0]
                 cr, cg, cb = overlay.snap_marker_color
                 colors = np.tile(np.array([cr, cg, cb], dtype=np.float32), (n, 1))
-                data = np.ascontiguousarray(np.concatenate([pos, colors], axis=1).astype(np.float32))
+                data = np.ascontiguousarray(
+                    np.concatenate([pos, colors], axis=1).astype(np.float32)
+                )
 
                 GL.glBindBuffer(GL.GL_ARRAY_BUFFER, self._overlay_marker_vbo)
                 GL.glBufferData(GL.GL_ARRAY_BUFFER, data.nbytes, data, GL.GL_DYNAMIC_DRAW)
@@ -851,7 +853,7 @@ class SceneRenderer:
             GL.glEnable(GL.GL_DEPTH_TEST)
         GL.glUseProgram(0)
 
-    def _draw_world_segments(self, segs, color, width, view, projection) -> None:  # noqa: ANN001
+    def _draw_world_segments(self, segs, color, width, view, projection) -> None:
         """Draw (2N,3) world-space GL_LINES in a flat color, on top (depth off).
         Reuses the overlay line VBO."""
         if segs.shape[0] == 0:
@@ -876,7 +878,7 @@ class SceneRenderer:
             GL.glEnable(GL.GL_DEPTH_TEST)
         GL.glUseProgram(0)
 
-    def _draw_screen_space_lines(self, segs, color, width) -> None:  # noqa: ANN001
+    def _draw_screen_space_lines(self, segs, color, width) -> None:
         """Draw (2N,3) NDC GL_LINES with identity view/projection (NDC positions
         render directly); depth test off, line width restored to 1.0 afterward.
 
@@ -904,20 +906,20 @@ class SceneRenderer:
             GL.glEnable(GL.GL_DEPTH_TEST)
         GL.glUseProgram(0)
 
-    def _draw_box_rect(self, box_rect, color) -> None:  # noqa: ANN001
+    def _draw_box_rect(self, box_rect, color) -> None:
         """Draw the screen-space box-select outline using identity view/projection
         (NDC positions render directly); depth test off."""
         segs = _box_rect_ndc_segments(box_rect, self._viewport_w, self._viewport_h)
         self._draw_screen_space_lines(segs, color, 1.5)
 
-    def _draw_world_polylines(self, polylines, view, projection) -> None:  # noqa: ANN001
+    def _draw_world_polylines(self, polylines, view, projection) -> None:
         """Draw each (segments, color, width) as world-space line segments."""
         for segs, color, width in polylines:
             arr = np.asarray(segs, dtype=np.float32).reshape(-1, 3)
             if arr.shape[0] >= 2:
                 self._draw_world_segments(arr, color, float(width), view, projection)
 
-    def _draw_screen_markers(self, camera, markers, width, height) -> None:  # noqa: ANN001
+    def _draw_screen_markers(self, camera, markers, width, height) -> None:
         """Project each (world_pos, size_px, color) and draw an outlined square
         in screen space (identity matrices), like the box-select rectangle."""
         if not markers:
@@ -935,7 +937,7 @@ class SceneRenderer:
                 loop[2 * i + 1, 0:2] = quad[(i + 1) % 4]
             self._draw_screen_space_lines(loop, color, 1.5)
 
-    def _draw_selection(  # noqa: ANN001
+    def _draw_selection(
         self, scene, selection, view, projection, world_transform=None
     ) -> None:
         if selection is None:

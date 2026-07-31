@@ -29,7 +29,6 @@ from pluton.commands.scene_commands import TransformVerticesCommand
 from pluton.geometry.transforms import apply_mat, is_identity_transform, mat_invert, translate
 from pluton.tools.tool import Tool, ToolContext, ToolOverlay
 from pluton.tools.transform_support import selection_vertices
-from pluton.viewport.picking import world_to_local_point
 
 _NEUTRAL = (0.85, 0.85, 0.85)
 _GHOST = (0.30, 0.65, 1.0)
@@ -65,7 +64,7 @@ class MoveTool(Tool):
     def _world_vec_to_local(self, world_vec: np.ndarray) -> np.ndarray:
         """Convert a world-space DIRECTION/VECTOR into the active context's local frame.
 
-        Translation has no effect on vectors — only the 3×3 rotation/scale block
+        Translation has no effect on vectors — only the 3x3 rotation/scale block
         of the inverse is applied.  Returns the vector unchanged when the active
         transform is None or identity (root context).
         """
@@ -86,7 +85,7 @@ class MoveTool(Tool):
     def deactivate(self) -> None:
         self._reset()
 
-    def on_mouse_press(self, event: QMouseEvent, snap) -> None:  # noqa: ANN001
+    def on_mouse_press(self, event: QMouseEvent, snap) -> None:
         from pluton.viewport.snap_engine import SnapKind
         if event.button() != Qt.MouseButton.LeftButton:
             return
@@ -117,13 +116,13 @@ class MoveTool(Tool):
             self._delta = np.zeros(3, dtype=np.float32)
             self._dragging = True
 
-    def on_mouse_move(self, event: QMouseEvent, snap) -> None:  # noqa: ANN001
+    def on_mouse_move(self, event: QMouseEvent, snap) -> None:
         from pluton.viewport.snap_engine import SnapKind
         if not self._dragging or self._grab is None or snap.kind == SnapKind.NONE:
             return
         self._delta = (np.asarray(snap.world_position, np.float32) - self._grab).astype(np.float32)
 
-    def on_mouse_release(self, event: QMouseEvent, snap) -> None:  # noqa: ANN001
+    def on_mouse_release(self, event: QMouseEvent, snap) -> None:
         if event.button() != Qt.MouseButton.LeftButton or not self._dragging:
             return
         from pluton.viewport.snap_engine import SnapKind
@@ -215,7 +214,8 @@ class MoveTool(Tool):
         ]
 
     def _commit_instance_move(self, delta: np.ndarray, move_copy: bool = False) -> None:
-        """Emit TransformInstanceCommand(s) or CreateInstanceCommand(s) for the current instance selection.
+        """Emit TransformInstanceCommand(s) or CreateInstanceCommand(s) for the
+        current instance selection.
 
         If *move_copy* is True the originals stay put and new instances are created at the
         translated transform (Ctrl-during-Move behaviour).
@@ -223,7 +223,7 @@ class MoveTool(Tool):
         `delta` arrives in WORLD space.  When the active context has a non-identity world
         transform (i.e. we are editing INSIDE a moved group), instance transforms are
         expressed in the ACTIVE CONTEXT's LOCAL frame, so we must convert the world delta
-        to that frame (inverse 3×3 block) before building the translation matrix.
+        to that frame (inverse 3x3 block) before building the translation matrix.
         At the root context (identity) the conversion is a no-op.
         """
         from pluton.commands.command import CompositeCommand

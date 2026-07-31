@@ -14,17 +14,17 @@ class ImportObjCommand(Command):
 
     name = "Import OBJ"
 
-    def __init__(self, doc, target_context) -> None:  # noqa: ANN001
+    def __init__(self, doc, target_context) -> None:
         self._doc = doc
         self._target = target_context
         self._result = None
         self.summary = None
 
-    def do(self, model) -> None:  # noqa: ANN001
+    def do(self, model) -> None:
         self._result = build_obj_into_model(self._doc, model, self._target)
         self.summary = self._result.summary
 
-    def undo(self, model) -> None:  # noqa: ANN001
+    def undo(self, model) -> None:
         result = self._result
         if result is None:
             return
