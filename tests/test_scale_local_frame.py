@@ -184,7 +184,11 @@ class TestCursorWorldLocalFrame:
             ray_from_screen=lambda x, y, w, h: (
                 np.asarray(origin, np.float32),
                 np.asarray(direction, np.float32),
-            )
+            ),
+            # Top-down camera: view direction is +Z, so the camera-facing cursor
+            # plane normal equals world-Z — the frame these local tests assert in.
+            position=np.array([0.0, 0.0, 100.0], np.float32),
+            target=np.array([0.0, 0.0, 0.0], np.float32),
         )
         return cam
 

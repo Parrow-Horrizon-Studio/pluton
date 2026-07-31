@@ -456,19 +456,13 @@ class ScaleTool(Tool):
             # Corner/uniform or edge grips (and the no-active-grip case): a
             # plane through p0 facing the camera is correct in every
             # orientation and can never be edge-on to the cursor ray.
-            # (Minimal camera doubles that stub only ray_from_screen and don't
-            # expose position/target keep the prior ground plane so their
-            # fixtures are unaffected.)
-            if hasattr(self._camera, "position") and hasattr(self._camera, "target"):
-                view_dir = np.asarray(self._camera.position, np.float64) - np.asarray(
-                    self._camera.target, np.float64
-                )
-                view_norm = float(np.linalg.norm(view_dir))
-                if view_norm < 1e-9:
-                    return None
-                n = (view_dir / view_norm).astype(np.float32)
-            else:
-                n = np.array([0.0, 0.0, 1.0], np.float32)
+            view_dir = np.asarray(self._camera.position, np.float64) - np.asarray(
+                self._camera.target, np.float64
+            )
+            view_norm = float(np.linalg.norm(view_dir))
+            if view_norm < 1e-9:
+                return None
+            n = (view_dir / view_norm).astype(np.float32)
             denom = float(np.dot(direction, n))
             if abs(denom) < 1e-9:
                 return None
