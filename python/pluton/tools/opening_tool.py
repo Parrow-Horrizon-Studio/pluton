@@ -4,6 +4,7 @@ Pick a wall face; a framed door/window Component is placed flush to it,
 upright, floor-anchored (window at a sill height), horizontally following the
 cursor. Identical openings share one Component. The wall is not cut.
 """
+
 from __future__ import annotations
 
 import itertools
@@ -26,9 +27,9 @@ class DoorWindowTool(Tool):
         self._command_stack = None
         self._camera = None
         self._size_provider = None
-        self._preview = None            # (transform 4x4) or None
+        self._preview = None  # (transform 4x4) or None
         self.kind = "door"
-        self.width = 0.9                # meters
+        self.width = 0.9  # meters
         self.height = 2.1
         self.sill = 0.0
         self.depth = 0.1
@@ -84,8 +85,12 @@ class DoorWindowTool(Tool):
         if transform is None:
             return
         cmd = PlaceOpeningCommand(
-            self.kind, self.width, self.height, self.depth,
-            transform, self._model.active_context,
+            self.kind,
+            self.width,
+            self.height,
+            self.depth,
+            transform,
+            self._model.active_context,
         )
         self._command_stack.execute(cmd, self._model)
 
@@ -106,10 +111,15 @@ class DoorWindowTool(Tool):
         segments = np.zeros((0, 3), dtype=np.float32)
         if self._preview is not None:
             hx = self.width / 2.0
-            corners = np.array([
-                [-hx, 0.0, 0.0], [hx, 0.0, 0.0],
-                [hx, 0.0, self.height], [-hx, 0.0, self.height],
-            ], dtype=np.float64)
+            corners = np.array(
+                [
+                    [-hx, 0.0, 0.0],
+                    [hx, 0.0, 0.0],
+                    [hx, 0.0, self.height],
+                    [-hx, 0.0, self.height],
+                ],
+                dtype=np.float64,
+            )
             w = self._model.active_world_transform
             world = [(w @ self._preview @ np.append(c, 1.0))[:3] for c in corners]
             loop = [*world, world[0]]

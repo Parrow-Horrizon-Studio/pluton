@@ -57,10 +57,10 @@ def _project_loop_to_2d_for_earcut(positions_3d: np.ndarray) -> np.ndarray:
     n = np.cross(e1, e2)
     ax, ay, az = abs(float(n[0])), abs(float(n[1])), abs(float(n[2]))
     if az >= ax and az >= ay:
-        return positions_3d[:, :2].astype(np.float32)              # XY
+        return positions_3d[:, :2].astype(np.float32)  # XY
     if ax >= ay:
         return np.stack([positions_3d[:, 1], positions_3d[:, 2]], axis=1).astype(np.float32)  # YZ
-    return np.stack([positions_3d[:, 0], positions_3d[:, 2]], axis=1).astype(np.float32)      # XZ
+    return np.stack([positions_3d[:, 0], positions_3d[:, 2]], axis=1).astype(np.float32)  # XZ
 
 
 class Scene:
@@ -243,9 +243,7 @@ class Scene:
         n = np.cross(p1 - p0, p2 - p0).astype(np.float32)
         length = float(np.linalg.norm(n))
         if length < 1e-9:
-            raise ValueError(
-                f"face_normal: face {f_id} is degenerate (first 3 vertices collinear)"
-            )
+            raise ValueError(f"face_normal: face {f_id} is degenerate (first 3 vertices collinear)")
         return (n / length).astype(np.float32)
 
     def face_center(self, f_id: int) -> np.ndarray:
@@ -278,9 +276,14 @@ class Scene:
 
     def faces_are_coplanar(self, f1_id: int, f2_id: int) -> bool:
         """Project-default tolerances applied. See HalfEdgeMesh.faces_are_coplanar."""
-        return bool(self._mesh.faces_are_coplanar(
-            f1_id, f2_id, self._ANGLE_TOL_COS, self._DIST_TOL,
-        ))
+        return bool(
+            self._mesh.faces_are_coplanar(
+                f1_id,
+                f2_id,
+                self._ANGLE_TOL_COS,
+                self._DIST_TOL,
+            )
+        )
 
     def face_edges(self, f_id: int) -> list[int]:
         """Edge IDs around the face's boundary loop, in order.
@@ -330,9 +333,7 @@ class Scene:
         pb = self.vertex(e.v2_id).position
         return (pa + float(t) * (pb - pa)).astype(np.float32)
 
-    def closest_point_on_edge(
-        self, e_id: int, world_point: np.ndarray
-    ) -> tuple[np.ndarray, float]:
+    def closest_point_on_edge(self, e_id: int, world_point: np.ndarray) -> tuple[np.ndarray, float]:
         """Closest point on edge segment to `world_point`, plus its clamped t∈[0,1]."""
         e = self.edge(e_id)
         pa = self.vertex(e.v1_id).position

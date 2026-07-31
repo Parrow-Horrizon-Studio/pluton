@@ -87,6 +87,7 @@ class MoveTool(Tool):
 
     def on_mouse_press(self, event: QMouseEvent, snap) -> None:
         from pluton.viewport.snap_engine import SnapKind
+
         if event.button() != Qt.MouseButton.LeftButton:
             return
         if self._selection is None or self._selection.is_empty():
@@ -118,6 +119,7 @@ class MoveTool(Tool):
 
     def on_mouse_move(self, event: QMouseEvent, snap) -> None:
         from pluton.viewport.snap_engine import SnapKind
+
         if not self._dragging or self._grab is None or snap.kind == SnapKind.NONE:
             return
         self._delta = (np.asarray(snap.world_position, np.float32) - self._grab).astype(np.float32)
@@ -126,8 +128,13 @@ class MoveTool(Tool):
         if event.button() != Qt.MouseButton.LeftButton or not self._dragging:
             return
         from pluton.viewport.snap_engine import SnapKind
-        if snap is not None and getattr(snap, "world_position", None) is not None \
-                and snap.kind != SnapKind.NONE and self._grab is not None:
+
+        if (
+            snap is not None
+            and getattr(snap, "world_position", None) is not None
+            and snap.kind != SnapKind.NONE
+            and self._grab is not None
+        ):
             dest = np.asarray(snap.world_position, np.float32)
             self._delta = (dest - self._grab).astype(np.float32)
 
@@ -144,6 +151,7 @@ class MoveTool(Tool):
 
     def apply_typed_value(self, text, units) -> bool:
         from pluton.units import parse_length
+
         if not self._dragging or self._grab is None:
             return False
         dist = parse_length(text, units)
@@ -197,6 +205,7 @@ class MoveTool(Tool):
             dist = float(np.linalg.norm(self._delta))
             if self._units_provider is not None:
                 from pluton.units import format_length
+
                 return f"Move {format_length(dist, self._units_provider())}"
             return f"Move {dist:.3f}"
         return "Move: pick a grab point"
@@ -208,10 +217,7 @@ class MoveTool(Tool):
         if self._model is None or self._selection is None:
             return []
         inst_ids = self._selection.instances
-        return [
-            inst for inst in self._model.active_context.children
-            if inst.id in inst_ids
-        ]
+        return [inst for inst in self._model.active_context.children if inst.id in inst_ids]
 
     def _commit_instance_move(self, delta: np.ndarray, move_copy: bool = False) -> None:
         """Emit TransformInstanceCommand(s) or CreateInstanceCommand(s) for the
@@ -267,11 +273,13 @@ class MoveTool(Tool):
             # reuses local_delta above verbatim rather than recomputing it.
             has_ann_sel = self._selection is not None and self._selection.annotations
             if has_ann_sel and self._model is not None:
-                cmds.append(MoveAnnotationsCommand(
-                    list(self._selection.annotations),
-                    tuple(float(x) for x in local_delta),
-                    self._model.active_context,
-                ))
+                cmds.append(
+                    MoveAnnotationsCommand(
+                        list(self._selection.annotations),
+                        tuple(float(x) for x in local_delta),
+                        self._model.active_context,
+                    )
+                )
             if not cmds:
                 return
             if len(cmds) == 1:
@@ -307,11 +315,13 @@ class MoveTool(Tool):
 
         has_ann_sel = self._selection is not None and self._selection.annotations
         if has_ann_sel and self._model is not None:
-            children.append(MoveAnnotationsCommand(
-                list(self._selection.annotations),
-                tuple(float(x) for x in local_delta),
-                self._model.active_context,
-            ))
+            children.append(
+                MoveAnnotationsCommand(
+                    list(self._selection.annotations),
+                    tuple(float(x) for x in local_delta),
+                    self._model.active_context,
+                )
+            )
 
         if not children or self._stack is None:
             return

@@ -6,6 +6,7 @@ Pure data — no Model/Scene/Qt/GL imports. A dimension's measurement text is
 NOT stored; it is derived at draw time from the world distance and the
 document's units.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass

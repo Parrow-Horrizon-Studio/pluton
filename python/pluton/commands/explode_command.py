@@ -13,7 +13,7 @@ class ExplodeInstanceCommand(Command):
     def __init__(self, parent_definition, instance) -> None:
         self._parent = parent_definition
         self._inst = instance
-        self._baked = None       # list of (new_vid_in_parent) for undo removal
+        self._baked = None  # list of (new_vid_in_parent) for undo removal
         self._child_records = None  # reparented child instances (for undo)
 
     def do(self, model) -> None:

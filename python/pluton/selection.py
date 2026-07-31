@@ -124,12 +124,7 @@ class Selection:
         return a_id in self._annotations
 
     def is_empty(self) -> bool:
-        return (
-            not self._edges
-            and not self._faces
-            and not self._instances
-            and not self._annotations
-        )
+        return not self._edges and not self._faces and not self._instances and not self._annotations
 
     def counts(self) -> tuple[int, int, int, int]:
         return (

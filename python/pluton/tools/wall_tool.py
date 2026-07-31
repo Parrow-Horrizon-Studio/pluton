@@ -4,6 +4,7 @@ Chaining polyline of baked solid-box walls. Click to start; each later click
 commits one wall (CreateWallCommand) and chains. Esc/Enter ends the chain.
 Thickness/height are tool settings (meters) driven by the WallOptionsBar.
 """
+
 from __future__ import annotations
 
 import numpy as np
@@ -56,9 +57,7 @@ class WallTool(Tool):
         return self._model.active_world_transform if self._model is not None else None
 
     def _to_local_ground(self, world_pt) -> np.ndarray:
-        local = np.asarray(
-            world_to_local_point(world_pt, self._world_transform()), np.float64
-        )
+        local = np.asarray(world_to_local_point(world_pt, self._world_transform()), np.float64)
         local[2] = 0.0  # base sits on the context ground plane
         return local
 
@@ -70,9 +69,7 @@ class WallTool(Tool):
             # points differ only in height): wall_box would return empty, so
             # skip rather than push a no-op command onto the undo stack.
             return
-        cmd = CreateWallCommand(
-            start, end, self.thickness, self.height, self._model.active_context
-        )
+        cmd = CreateWallCommand(start, end, self.thickness, self.height, self._model.active_context)
         self._command_stack.execute(cmd, self._model)
         self._anchor = np.asarray(endpoint_world, np.float32).copy()
         self._preview_tip = np.asarray(endpoint_world, np.float32).copy()
@@ -108,9 +105,7 @@ class WallTool(Tool):
         length = parse_length(text, units)
         if length is None or length <= 0:
             return False
-        direction = np.asarray(self._preview_tip, np.float64) - np.asarray(
-            self._anchor, np.float64
-        )
+        direction = np.asarray(self._preview_tip, np.float64) - np.asarray(self._anchor, np.float64)
         norm = float(np.linalg.norm(direction))
         if norm < 1e-9:
             return False

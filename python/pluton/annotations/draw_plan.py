@@ -8,6 +8,7 @@ what the user can click is exactly what they can see.
 Numpy only: no Qt, no GL, no Model imports. All sizes are in pixels, so the
 annotation keeps a constant on-screen size at any zoom.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -18,14 +19,14 @@ from pluton.units import format_length
 
 # Pixel constants (annotation styling is fixed in M7d — see design D11).
 FONT_PX = 12.0
-CHAR_W_PX = 0.55 * FONT_PX      # rough advance width, enough for hit boxes
-_TEXT_GAP_PX = 5.0            # text sits this far above the dimension line
-_EXT_GAP_PX = 4.0             # extension line starts this far off the geometry
-_EXT_OVERSHOOT_PX = 6.0       # ...and runs this far past the dimension line
-_TICK_PX = 6.0                # half-length of a 45-degree tick
-_LANDING_PX = 26.0            # horizontal landing under the text
-_ARROW_PX = 9.0               # arrowhead stroke length
-_ARROW_SPREAD = 0.42          # radians each side of the leader direction
+CHAR_W_PX = 0.55 * FONT_PX  # rough advance width, enough for hit boxes
+_TEXT_GAP_PX = 5.0  # text sits this far above the dimension line
+_EXT_GAP_PX = 4.0  # extension line starts this far off the geometry
+_EXT_OVERSHOOT_PX = 6.0  # ...and runs this far past the dimension line
+_TICK_PX = 6.0  # half-length of a 45-degree tick
+_LANDING_PX = 26.0  # horizontal landing under the text
+_ARROW_PX = 9.0  # arrowhead stroke length
+_ARROW_SPREAD = 0.42  # radians each side of the leader direction
 _EPS = 1e-9
 
 
@@ -34,15 +35,15 @@ class TextDraw:
     text: str
     x: float
     y: float
-    align: str = "center"      # "center" | "left" | "right"
+    align: str = "center"  # "center" | "left" | "right"
 
 
 @dataclass
 class AnnotationDraw:
     annotation_id: int
-    segments_px: list = field(default_factory=list)   # (x1, y1, x2, y2)
-    texts: list = field(default_factory=list)         # TextDraw
-    hit_boxes: list = field(default_factory=list)     # (x0, y0, x1, y1)
+    segments_px: list = field(default_factory=list)  # (x1, y1, x2, y2)
+    texts: list = field(default_factory=list)  # TextDraw
+    hit_boxes: list = field(default_factory=list)  # (x0, y0, x1, y1)
 
 
 def _to_world(point, world_transform):
@@ -128,9 +129,7 @@ def _plan_dimension(dim, world_transform, camera, width, height, units):
             continue
         start = geom_px + direction * _EXT_GAP_PX
         end = dim_px + direction * _EXT_OVERSHOOT_PX
-        plan.segments_px.append(
-            (float(start[0]), float(start[1]), float(end[0]), float(end[1]))
-        )
+        plan.segments_px.append((float(start[0]), float(start[1]), float(end[0]), float(end[1])))
 
     # 45-degree tick terminators, bisecting along/perp at each end
     tick_dir = _unit(along + perp)
@@ -178,8 +177,9 @@ def _plan_label(label, world_transform, camera, width, height):
     if direction is not None:
         for spread in (_ARROW_SPREAD, -_ARROW_SPREAD):
             c, s = float(np.cos(spread)), float(np.sin(spread))
-            rotated = np.array([direction[0] * c - direction[1] * s,
-                                direction[0] * s + direction[1] * c])
+            rotated = np.array(
+                [direction[0] * c - direction[1] * s, direction[0] * s + direction[1] * c]
+            )
             tail = anchor_px + rotated * _ARROW_PX
             plan.segments_px.append(
                 (float(anchor_px[0]), float(anchor_px[1]), float(tail[0]), float(tail[1]))

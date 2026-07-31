@@ -18,8 +18,8 @@ class FaceBatch:
     """A contiguous run of same-material vertices in the (reordered) face VBO."""
 
     material_id: int
-    first: int   # first vertex index
-    count: int   # vertex count (a multiple of 3)
+    first: int  # first vertex index
+    count: int  # vertex count (a multiple of 3)
 
 
 def plan_face_batches(
@@ -43,7 +43,7 @@ def plan_face_batches(
     if t == 0:
         return np.zeros(0, dtype=np.int64), []
 
-    tri_order = np.argsort(tri_mats, kind="stable")          # stable: keeps in-group order
+    tri_order = np.argsort(tri_mats, kind="stable")  # stable: keeps in-group order
     sorted_mats = tri_mats[tri_order]
     vertex_order = (tri_order[:, None] * 3 + np.arange(3)).reshape(-1).astype(np.int64)
 

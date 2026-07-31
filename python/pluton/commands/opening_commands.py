@@ -1,4 +1,5 @@
 """PlaceOpeningCommand (M7b): place a framed door/window Component on a wall."""
+
 from __future__ import annotations
 
 import numpy as np

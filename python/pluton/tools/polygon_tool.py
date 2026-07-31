@@ -127,6 +127,7 @@ class PolygonTool(Tool):
             self._sides = max(_MIN_SIDES, min(_MAX_SIDES, n))
             return True
         from pluton.units import parse_length
+
         radius = parse_length(t, units)
         if radius is None or radius < _MIN_RADIUS:
             return False
@@ -185,6 +186,7 @@ class PolygonTool(Tool):
         if self._state == _State.DRAWING:
             if self._units_provider is not None:
                 from pluton.units import format_length
+
                 r = format_length(self._radius, self._units_provider())
                 return f"Radius: {r}   Sides: {self._sides}"
             return f"Radius: {self._radius:.3f}   Sides: {self._sides}"

@@ -234,7 +234,8 @@ class MainWindow(QMainWindow):
             QKeySequence(Qt.Key.Key_Up), self, activated=lambda: self._on_tool_key(Qt.Key.Key_Up)
         )
         QShortcut(
-            QKeySequence(Qt.Key.Key_Down), self,
+            QKeySequence(Qt.Key.Key_Down),
+            self,
             activated=lambda: self._on_tool_key(Qt.Key.Key_Down),
         )
         QShortcut(QKeySequence("Esc"), self, activated=self._on_escape)
@@ -255,6 +256,7 @@ class MainWindow(QMainWindow):
         # key events (and ShortcutOverride) before any QShortcut fires.
         # Guard for None so headless unit tests without a QApplication still work.
         from PySide6.QtWidgets import QApplication
+
         _app = QApplication.instance()
         if _app is not None:
             _app.installEventFilter(self)
@@ -348,8 +350,9 @@ class MainWindow(QMainWindow):
         self._active_tag_id = tag_id
 
     def _update_selection_tag_indicator(self) -> None:
-        insts = [i for i in self._model.active_context.children
-                 if i.id in self._selection.instances]
+        insts = [
+            i for i in self._model.active_context.children if i.id in self._selection.instances
+        ]
         if not insts:
             self._tags_dock.set_selection_tag(None)
             return
@@ -363,8 +366,9 @@ class MainWindow(QMainWindow):
         from pluton.commands.tag_commands import TagInstancesCommand
 
         sel = self._selection
-        selected = [inst for inst in self._model.active_context.children
-                    if inst.id in sel.instances]
+        selected = [
+            inst for inst in self._model.active_context.children if inst.id in sel.instances
+        ]
         if not selected:
             self._status_bar.set_status("Select objects to assign a tag.")
             return
@@ -464,9 +468,11 @@ class MainWindow(QMainWindow):
 
     def eventFilter(self, obj, event):  # noqa: N802
         from PySide6.QtCore import QEvent
+
         if event.type() in (QEvent.Type.KeyPress, QEvent.Type.ShortcutOverride):
-            if self._vcb.active or (event.type() == QEvent.Type.KeyPress
-                                    and event.text() in set("0123456789")):
+            if self._vcb.active or (
+                event.type() == QEvent.Type.KeyPress and event.text() in set("0123456789")
+            ):
                 if self._vcb_handle_key(event):
                     event.accept()
                     return True
@@ -568,8 +574,9 @@ class MainWindow(QMainWindow):
         vertex_ids = selection_vertices(self._model.active_scene, sel)
         edge_ids = list(sel.edges)
         face_ids = list(sel.faces)
-        cmd = MakeGroupCommand(self._model.active_context, vertex_ids, edge_ids, face_ids,
-                               tag_id=self._active_tag_id)
+        cmd = MakeGroupCommand(
+            self._model.active_context, vertex_ids, edge_ids, face_ids, tag_id=self._active_tag_id
+        )
         self._command_stack.execute(cmd, self._model)
         sel.replace(instances=[cmd.created_instance.id])
         self._refresh_selection_status()
@@ -579,6 +586,7 @@ class MainWindow(QMainWindow):
     def _prompt_component_name(self, default: str) -> str | None:
         """Show a dialog to get a component name. Overridable for testing."""
         from PySide6.QtWidgets import QInputDialog
+
         name, ok = QInputDialog.getText(self, "Make Component", "Component name:", text=default)
         return name if ok else None
 
@@ -597,8 +605,14 @@ class MainWindow(QMainWindow):
         vertex_ids = selection_vertices(self._model.active_scene, sel)
         edge_ids = list(sel.edges)
         face_ids = list(sel.faces)
-        cmd = MakeComponentCommand(self._model.active_context, vertex_ids, edge_ids, face_ids,
-                                   name=name, tag_id=self._active_tag_id)
+        cmd = MakeComponentCommand(
+            self._model.active_context,
+            vertex_ids,
+            edge_ids,
+            face_ids,
+            name=name,
+            tag_id=self._active_tag_id,
+        )
         self._command_stack.execute(cmd, self._model)
         sel.replace(instances=[cmd.created_instance.id])
         self._refresh_selection_status()
@@ -619,10 +633,13 @@ class MainWindow(QMainWindow):
         if inst is None:
             return
         if len(inst.definition.instances) > 1:
-            cmd = CompositeCommand(name="Explode", children=[
-                MakeUniqueCommand(inst),
-                ExplodeInstanceCommand(self._model.active_context, inst),
-            ])
+            cmd = CompositeCommand(
+                name="Explode",
+                children=[
+                    MakeUniqueCommand(inst),
+                    ExplodeInstanceCommand(self._model.active_context, inst),
+                ],
+            )
         else:
             cmd = ExplodeInstanceCommand(self._model.active_context, inst)
         self._command_stack.execute(cmd, self._model)
@@ -802,8 +819,13 @@ class MainWindow(QMainWindow):
 
     def _on_create_view(self) -> None:
         name = f"Scene {len(self._model.views.views()) + 1}"
-        view = capture_view(self._model.views.next_id, name, self._viewport.camera,
-                            self._model.tags, self._render_style)
+        view = capture_view(
+            self._model.views.next_id,
+            name,
+            self._viewport.camera,
+            self._model.tags,
+            self._render_style,
+        )
         self._command_stack.execute(CreateViewCommand(view), self._model)
         self._scenes_dock.refresh(select_id=view.id)
 
@@ -811,8 +833,9 @@ class MainWindow(QMainWindow):
         old = self._model.views.get(int(view_id))
         if old is None:
             return
-        new_view = capture_view(old.id, old.name, self._viewport.camera,
-                                self._model.tags, self._render_style)
+        new_view = capture_view(
+            old.id, old.name, self._viewport.camera, self._model.tags, self._render_style
+        )
         self._command_stack.execute(UpdateViewCommand(old.id, new_view), self._model)
         self._scenes_dock.refresh(select_id=old.id)
 
@@ -832,8 +855,7 @@ class MainWindow(QMainWindow):
         self._scenes_dock.refresh(select_id=int(view_id))
 
     def _on_reorder_view(self, view_id: int, direction: int) -> None:
-        self._command_stack.execute(
-            ReorderViewCommand(int(view_id), int(direction)), self._model)
+        self._command_stack.execute(ReorderViewCommand(int(view_id), int(direction)), self._model)
         self._scenes_dock.refresh(select_id=int(view_id))
 
     def _on_recall_view(self, view_id: int) -> None:
@@ -888,6 +910,7 @@ class MainWindow(QMainWindow):
             export_obj(path, self._model)
         except OSError as e:
             from PySide6.QtWidgets import QMessageBox
+
             QMessageBox.critical(self, "Export failed", str(e))
             return
         self._status_bar.set_status(f"Exported {Path(path).name}")
@@ -900,9 +923,11 @@ class MainWindow(QMainWindow):
             doc = read_obj_document(path)
         except (PlutonIOError, OSError) as e:
             from PySide6.QtWidgets import QMessageBox
+
             QMessageBox.critical(self, "Import failed", str(e))
             return
         from pluton.commands.obj_commands import ImportObjCommand
+
         cmd = ImportObjCommand(doc, self._model.active_context)
         self._command_stack.execute(cmd, self._model)
         s = cmd.summary
@@ -926,6 +951,7 @@ class MainWindow(QMainWindow):
             export_gltf(self._model, path)
         except OSError as e:
             from PySide6.QtWidgets import QMessageBox
+
             QMessageBox.critical(self, "Export failed", str(e))
             return
         self._status_bar.set_status(f"Exported {Path(path).name}")
@@ -938,9 +964,11 @@ class MainWindow(QMainWindow):
             scene = read_gltf_scene(path)
         except (PlutonIOError, OSError) as e:
             from PySide6.QtWidgets import QMessageBox
+
             QMessageBox.critical(self, "Import failed", str(e))
             return
         from pluton.commands.gltf_commands import ImportGltfCommand
+
         cmd = ImportGltfCommand(scene, self._model.active_context, root_name=Path(path).stem)
         self._command_stack.execute(cmd, self._model)
         s = cmd.summary
@@ -951,10 +979,12 @@ class MainWindow(QMainWindow):
         self._refresh_breadcrumb()
         self._viewport.update()
 
-    def _prompt_save_path(self, file_filter: str = "Pluton files (*.pluton)",
-                          title: str = "Save As") -> str | None:
+    def _prompt_save_path(
+        self, file_filter: str = "Pluton files (*.pluton)", title: str = "Save As"
+    ) -> str | None:
         """Return a chosen save path (or None). Overridable for testing."""
         from PySide6.QtWidgets import QFileDialog
+
         path, _ = QFileDialog.getSaveFileName(self, title, "", file_filter)
         return path or None
 
@@ -966,6 +996,7 @@ class MainWindow(QMainWindow):
             save_document(path, self._model, self._viewport.camera, self._doc, self._render_style)
         except OSError as e:
             from PySide6.QtWidgets import QMessageBox
+
             QMessageBox.critical(self, "Save failed", str(e))
             return False
         self._doc_controller.set_path(path)
@@ -988,14 +1019,20 @@ class MainWindow(QMainWindow):
     def _prompt_discard(self) -> str:
         """Return 'save' | 'discard' | 'cancel'. Overridable for testing."""
         from PySide6.QtWidgets import QMessageBox
-        name = (self._doc_controller.current_path.name
-                if self._doc_controller.current_path else "Untitled")
+
+        name = (
+            self._doc_controller.current_path.name
+            if self._doc_controller.current_path
+            else "Untitled"
+        )
         box = QMessageBox(self)
         box.setWindowTitle("Unsaved changes")
         box.setText(f"Save changes to {name}?")
-        box.setStandardButtons(QMessageBox.StandardButton.Save
-                               | QMessageBox.StandardButton.Discard
-                               | QMessageBox.StandardButton.Cancel)
+        box.setStandardButtons(
+            QMessageBox.StandardButton.Save
+            | QMessageBox.StandardButton.Discard
+            | QMessageBox.StandardButton.Cancel
+        )
         box.setDefaultButton(QMessageBox.StandardButton.Save)
         choice = box.exec()
         if choice == QMessageBox.StandardButton.Save:
@@ -1024,6 +1061,7 @@ class MainWindow(QMainWindow):
     def _reset_document(self, model, camera_state, units, style, path) -> None:
         """Adopt a (model, camera, units, render style) into the live window, in place."""
         from dataclasses import replace
+
         self._model.load_from(model)
         self._materials_dock.set_library(self._model.materials)
         self._tags_dock.set_library(self._model.tags)
@@ -1050,13 +1088,17 @@ class MainWindow(QMainWindow):
             return
         from pluton.units import Units
         from pluton.viewport.camera import Camera
-        self._reset_document(Model(), CameraState.from_camera(Camera()), Units(),
-                            RenderStyle(), None)
 
-    def _prompt_open_path(self, file_filter: str = "Pluton files (*.pluton)",
-                          title: str = "Open") -> str | None:
+        self._reset_document(
+            Model(), CameraState.from_camera(Camera()), Units(), RenderStyle(), None
+        )
+
+    def _prompt_open_path(
+        self, file_filter: str = "Pluton files (*.pluton)", title: str = "Open"
+    ) -> str | None:
         """Return a chosen open path (or None). Overridable for testing."""
         from PySide6.QtWidgets import QFileDialog
+
         path, _ = QFileDialog.getOpenFileName(self, title, "", file_filter)
         return path or None
 
@@ -1070,7 +1112,7 @@ class MainWindow(QMainWindow):
             loaded = load_document(path)
         except (PlutonIOError, OSError) as e:
             from PySide6.QtWidgets import QMessageBox
+
             QMessageBox.critical(self, "Open failed", str(e))
             return
-        self._reset_document(loaded.model, loaded.camera_state, loaded.units,
-                            loaded.style, path)
+        self._reset_document(loaded.model, loaded.camera_state, loaded.units, loaded.style, path)

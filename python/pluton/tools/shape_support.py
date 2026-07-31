@@ -72,6 +72,7 @@ def build_closed_face(scene, world_points, name: str = "Draw Shape", world_trans
     to the local frame before writing (so geometry lands at the correct position
     when drawing inside a moved group/component)."""
     from pluton.geometry.transforms import is_identity_transform
+
     if not is_identity_transform(world_transform):
         world_points = [world_to_local_point(p, world_transform) for p in world_points]
     composite = CompositeCommand(name=name)
@@ -110,6 +111,7 @@ def build_open_polyline(scene, world_points, name: str = "Draw Curve", world_tra
     to the local frame before writing (so geometry lands at the correct position
     when drawing inside a moved group/component)."""
     from pluton.geometry.transforms import is_identity_transform
+
     if not is_identity_transform(world_transform):
         world_points = [world_to_local_point(p, world_transform) for p in world_points]
     composite = CompositeCommand(name=name)

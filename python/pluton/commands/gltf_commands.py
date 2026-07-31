@@ -1,4 +1,5 @@
 """ImportGltfCommand (M6c): undoable wrapper around build_gltf_into_model."""
+
 from __future__ import annotations
 
 from pluton.commands.command import Command
@@ -22,7 +23,8 @@ class ImportGltfCommand(Command):
 
     def do(self, model) -> None:
         self._result = build_gltf_into_model(
-            self._scene, model, self._target, root_name=self._root_name)
+            self._scene, model, self._target, root_name=self._root_name
+        )
         self.summary = self._result.summary
 
     def undo(self, model) -> None:

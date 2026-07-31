@@ -19,10 +19,10 @@ from pluton.viewport.picking import pick_selectable
 _HOVER_EDGE_COLOR = (0.45, 0.70, 1.00)
 _HOVER_FILL_COLOR = (0.40, 0.70, 1.00, 0.18)
 _NEUTRAL_COLOR = (0.85, 0.85, 0.85)
-_BOX_WINDOW_COLOR = (0.25, 0.50, 0.95)   # left->right, enclose-only
+_BOX_WINDOW_COLOR = (0.25, 0.50, 0.95)  # left->right, enclose-only
 _BOX_CROSSING_COLOR = (0.15, 0.65, 0.30)  # right->left, touch
 _DRAG_THRESHOLD_PX = 4.0
-_HOVER_BBOX_COLOR = (0.60, 0.78, 1.00)   # Task 15: lighter blue for hover silhouette bbox
+_HOVER_BBOX_COLOR = (0.60, 0.78, 1.00)  # Task 15: lighter blue for hover silhouette bbox
 
 
 class SelectTool(Tool):
@@ -121,7 +121,10 @@ class SelectTool(Tool):
                 self._box_window = (cx - px) >= 0.0
             return
         self._hovered = pick_selectable(
-            self._cursor(event), self._viewport_size(), self._camera, self._scene,
+            self._cursor(event),
+            self._viewport_size(),
+            self._camera,
+            self._scene,
             world_transform=self._world_transform(),
         )
         # M7d: also track the hovered annotation (drawn on top, so hover-picked first)
@@ -154,9 +157,14 @@ class SelectTool(Tool):
         shift = bool(event.modifiers() & Qt.KeyboardModifier.ShiftModifier)
         if self._is_box and self._box_rect is not None:
             from pluton.viewport.picking import entities_in_box
+
             mode = "window" if self._box_window else "crossing"
             edges, faces = entities_in_box(
-                self._box_rect, mode, self._viewport_size(), self._camera, self._scene,
+                self._box_rect,
+                mode,
+                self._viewport_size(),
+                self._camera,
+                self._scene,
                 world_transform=self._world_transform(),
             )
             if shift:
@@ -189,7 +197,10 @@ class SelectTool(Tool):
                     return
             # Fall through to entity pick
             hit = pick_selectable(
-                self._cursor(event), self._viewport_size(), self._camera, self._scene,
+                self._cursor(event),
+                self._viewport_size(),
+                self._camera,
+                self._scene,
                 world_transform=self._world_transform(),
             )
             if hit is None:
@@ -263,6 +274,7 @@ class SelectTool(Tool):
         if self._stack is None:
             return
         from pluton.commands.annotation_commands import EditLabelTextCommand
+
         self._stack.execute(
             EditLabelTextCommand(ann_id, text.strip(), self._model.active_context),
             self._model,
@@ -307,6 +319,7 @@ class SelectTool(Tool):
             else:  # face
                 try:
                     from pluton.geometry.transforms import apply_mat, is_identity_transform
+
                     wt = self._world_transform()
                     use_wt = wt is not None and not is_identity_transform(wt)
                     wt_arr = np.asarray(wt, dtype=np.float64) if use_wt else None
@@ -317,29 +330,28 @@ class SelectTool(Tool):
                         return apply_mat(local_pos.reshape(1, 3), wt_arr)[0]
 
                     loop = self._scene.face_loop(ent_id)
-                    fills = [np.array(
-                        [
-                            _to_world_sel(
-                                np.asarray(self._scene.vertex(v).position, dtype=np.float32)
-                            )
-                            for v in loop
-                        ],
-                        dtype=np.float32,
-                    )]
+                    fills = [
+                        np.array(
+                            [
+                                _to_world_sel(
+                                    np.asarray(self._scene.vertex(v).position, dtype=np.float32)
+                                )
+                                for v in loop
+                            ],
+                            dtype=np.float32,
+                        )
+                    ]
                 except KeyError:
                     pass
 
         # Task 15: hover silhouette — draw the hovered instance's bbox as a
         # lighter-blue world polyline so it renders via the existing overlay path.
         world_polylines: list = []
-        if (
-            not self._is_box
-            and self._hovered_instance is not None
-            and self._model is not None
-        ):
+        if not self._is_box and self._hovered_instance is not None and self._model is not None:
             aabb = self._hovered_instance.definition.local_aabb()
             if aabb is not None:
                 from pluton.viewport.scene_renderer import aabb_world_edges
+
                 lo, hi = aabb
                 active_world = self._model.active_world_transform
                 world_t = active_world @ self._hovered_instance.transform

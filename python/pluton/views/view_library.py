@@ -81,27 +81,33 @@ class ViewLibrary:
     def to_records(self) -> list[dict]:
         records = []
         for v in self._views:
-            records.append({
-                "id": int(v.id),
-                "name": str(v.name),
-                "camera": v.camera.to_dict(),
-                "tag_visibility": {str(k): bool(vis) for k, vis in v.tag_visibility.items()},
-                "face_style": str(v.face_style),
-                "xray": bool(v.xray),
-            })
+            records.append(
+                {
+                    "id": int(v.id),
+                    "name": str(v.name),
+                    "camera": v.camera.to_dict(),
+                    "tag_visibility": {str(k): bool(vis) for k, vis in v.tag_visibility.items()},
+                    "face_style": str(v.face_style),
+                    "xray": bool(v.xray),
+                }
+            )
         return records
 
     @classmethod
     def from_records(cls, records: list[dict], next_id: int) -> ViewLibrary:
         lib = cls()
         for r in records:
-            lib._views.append(SavedView(
-                id=int(r["id"]),
-                name=str(r["name"]),
-                camera=CameraState.from_dict(r["camera"]),
-                tag_visibility={int(k): bool(v) for k, v in r.get("tag_visibility", {}).items()},
-                face_style=str(r["face_style"]),
-                xray=bool(r["xray"]),
-            ))
+            lib._views.append(
+                SavedView(
+                    id=int(r["id"]),
+                    name=str(r["name"]),
+                    camera=CameraState.from_dict(r["camera"]),
+                    tag_visibility={
+                        int(k): bool(v) for k, v in r.get("tag_visibility", {}).items()
+                    },
+                    face_style=str(r["face_style"]),
+                    xray=bool(r["xray"]),
+                )
+            )
         lib._next_id = int(next_id)
         return lib

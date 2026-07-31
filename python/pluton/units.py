@@ -23,8 +23,8 @@ class UnitSystem(Enum):
 @dataclass(frozen=True)
 class Units:
     system: UnitSystem = UnitSystem.METRIC
-    metric_unit: str = "m"          # "mm" | "cm" | "m"
-    metric_precision: int = 3       # decimal places when formatting metric
+    metric_unit: str = "m"  # "mm" | "cm" | "m"
+    metric_precision: int = 3  # decimal places when formatting metric
     imperial_denominator: int = 16  # smallest fraction denominator (…/16")
 
 
@@ -61,10 +61,10 @@ def _parse_metric(text: str, units: Units) -> float | None:
 
 
 _IMPERIAL_RE = re.compile(
-    r"^\s*(?:(\d+(?:\.\d+)?)\s*')?"           # optional feet
-    r"\s*(?:(\d+)\s*)?"                        # optional whole inches
-    r"(?:(\d+)\s*/\s*(\d+)\s*)?"               # optional fraction
-    r'"?\s*$'                                  # optional close-quote
+    r"^\s*(?:(\d+(?:\.\d+)?)\s*')?"  # optional feet
+    r"\s*(?:(\d+)\s*)?"  # optional whole inches
+    r"(?:(\d+)\s*/\s*(\d+)\s*)?"  # optional fraction
+    r'"?\s*$'  # optional close-quote
 )
 
 
@@ -96,24 +96,27 @@ def _format_imperial(meters: float, units: Units) -> str:
     # Round to the nearest 1/den inch up-front, then split.
     sixteenths = round(total_in * den)
     feet = sixteenths // (12 * den)
-    rem = sixteenths - feet * 12 * den          # in 1/den inches
+    rem = sixteenths - feet * 12 * den  # in 1/den inches
     whole_in = rem // den
-    frac_units = rem - whole_in * den           # numerator over den
+    frac_units = rem - whole_in * den  # numerator over den
     parts: list[str] = []
     if feet:
         parts.append(f"{feet}'")
     inch_str = ""
     if whole_in or frac_units:
         if frac_units:
-            fr = Fraction(frac_units, den)        # reduces
-            inch_str = (f"{whole_in} {fr.numerator}/{fr.denominator}\""
-                        if whole_in else f"{fr.numerator}/{fr.denominator}\"")
+            fr = Fraction(frac_units, den)  # reduces
+            inch_str = (
+                f'{whole_in} {fr.numerator}/{fr.denominator}"'
+                if whole_in
+                else f'{fr.numerator}/{fr.denominator}"'
+            )
         else:
-            inch_str = f"{whole_in}\""
+            inch_str = f'{whole_in}"'
     if inch_str:
         parts.append(inch_str)
     if not parts:
-        return "0\""
+        return '0"'
     return " ".join(parts)
 
 
@@ -136,7 +139,7 @@ def format_angle(degrees: float, precision: int = 1) -> str:
 
 def format_length(meters: float, units: Units) -> str:
     if units.system is UnitSystem.IMPERIAL:
-        return _format_imperial(meters, units)   # Task 3
+        return _format_imperial(meters, units)  # Task 3
     factor = _METRIC_FACTOR.get(units.metric_unit, 1.0)
     value = meters / factor
     s = f"{value:.{units.metric_precision}f}"

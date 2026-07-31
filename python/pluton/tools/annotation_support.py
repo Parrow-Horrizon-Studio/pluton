@@ -9,6 +9,7 @@ group/component moves. `world_to_active_local` is the single conversion point
 both tools call when committing a click to storage, so the two tools cannot
 drift out of sync on how that world-to-local conversion is done.
 """
+
 from __future__ import annotations
 
 import numpy as np

@@ -20,5 +20,5 @@ class SavedView:
     name: str
     camera: CameraState
     tag_visibility: dict  # dict[int, bool] — {tag_id: visible} at capture time
-    face_style: str       # FaceStyle member name, e.g. "SHADED"
+    face_style: str  # FaceStyle member name, e.g. "SHADED"
     xray: bool

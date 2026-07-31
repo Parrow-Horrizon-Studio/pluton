@@ -32,12 +32,8 @@ class Camera:
     position: np.ndarray = field(
         default_factory=lambda: np.array([8.0, -8.0, 6.0], dtype=np.float32)
     )
-    target: np.ndarray = field(
-        default_factory=lambda: np.array([0.0, 0.0, 0.5], dtype=np.float32)
-    )
-    up: np.ndarray = field(
-        default_factory=lambda: np.array([0.0, 0.0, 1.0], dtype=np.float32)
-    )
+    target: np.ndarray = field(default_factory=lambda: np.array([0.0, 0.0, 0.5], dtype=np.float32))
+    up: np.ndarray = field(default_factory=lambda: np.array([0.0, 0.0, 1.0], dtype=np.float32))
 
     fov_y_deg: float = 45.0
     aspect: float = 1.0
@@ -177,9 +173,7 @@ class Camera:
 
         # Camera-space direction for the (nx, ny) cursor.
         cam_dir = (
-            forward
-            + right * (nx * tan_half_fovy * self.aspect)
-            + cam_up * (ny * tan_half_fovy)
+            forward + right * (nx * tan_half_fovy * self.aspect) + cam_up * (ny * tan_half_fovy)
         )
         direction = _normalize(cam_dir).astype(np.float32)
         origin = self.position.astype(np.float32)

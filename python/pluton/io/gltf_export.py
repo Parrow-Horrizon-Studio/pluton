@@ -7,6 +7,7 @@ by material into primitives, and a Z-up -> Y-up conversion baked at the
 export root. This is the only glTF export module that knows about
 Model/Scene.
 """
+
 from __future__ import annotations
 
 import os
@@ -21,10 +22,7 @@ from pluton.io.gltf_codec import GltfAsset
 def _zup_to_yup() -> np.ndarray:
     """Rx(-90°): Pluton Z-up -> glTF Y-up. (x, y, z) -> (x, z, -y)."""
     return np.array(
-        [[1.0, 0.0, 0.0, 0.0],
-         [0.0, 0.0, 1.0, 0.0],
-         [0.0, -1.0, 0.0, 0.0],
-         [0.0, 0.0, 0.0, 1.0]],
+        [[1.0, 0.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0], [0.0, -1.0, 0.0, 0.0], [0.0, 0.0, 0.0, 1.0]],
         dtype=np.float64,
     )
 
@@ -45,7 +43,7 @@ def _definition_primitives(defn, gltf_material_for):
     by_mat: dict = defaultdict(list)
     for f in mesh.faces_iter():
         gmat = gltf_material_for(mesh.face_material(f.id))
-        for a, b, c in f.triangles:            # kernel earcut triangulation (concave-safe)
+        for a, b, c in f.triangles:  # kernel earcut triangulation (concave-safe)
             by_mat[gmat].extend([idmap[int(a)], idmap[int(b)], idmap[int(c)]])
     return [(positions, indices, gmat) for gmat, indices in by_mat.items()]
 
@@ -79,8 +77,7 @@ def model_to_gltf(model) -> GltfAsset:
         m = mesh_for(defn)
         children = [emit(child) for child in defn.children]
         matrix = np.asarray(inst.transform, dtype=np.float64).flatten(order="F")
-        return asset.add_node(name=defn.name, matrix=matrix, mesh=m,
-                              children=children or None)
+        return asset.add_node(name=defn.name, matrix=matrix, mesh=m, children=children or None)
 
     root_mesh = mesh_for(model.root)
     root_children = [emit(inst) for inst in model.root.children]

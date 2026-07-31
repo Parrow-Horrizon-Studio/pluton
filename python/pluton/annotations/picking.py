@@ -3,6 +3,7 @@
 Hit-tests the SAME draw plan the painter renders, so anything visible is
 clickable and nothing invisible is.
 """
+
 from __future__ import annotations
 
 from pluton.annotations.draw_plan import plan_annotation

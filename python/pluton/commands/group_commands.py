@@ -8,8 +8,17 @@ class MakeGroupCommand(Command):
 
     name = "Make Group"
 
-    def __init__(self, parent_definition, vertex_ids, edge_ids, face_ids,
-                 *, is_group: bool = True, name: str | None = None, tag_id: int = 0) -> None:
+    def __init__(
+        self,
+        parent_definition,
+        vertex_ids,
+        edge_ids,
+        face_ids,
+        *,
+        is_group: bool = True,
+        name: str | None = None,
+        tag_id: int = 0,
+    ) -> None:
         self._parent = parent_definition
         self._vids = list(vertex_ids)
         self._eids = list(edge_ids)
@@ -35,16 +44,19 @@ class MakeGroupCommand(Command):
             for e in parent_scene.face_edges(f):
                 edge_id_set.add(e)
         all_edge_ids = sorted(edge_id_set)
-        edges = [(e, parent_scene.edge(e).v1_id, parent_scene.edge(e).v2_id)
-                 for e in all_edge_ids]
+        edges = [(e, parent_scene.edge(e).v1_id, parent_scene.edge(e).v2_id) for e in all_edge_ids]
 
         faces = [(f, tuple(parent_scene.face(f).loop_vertex_ids)) for f in self._fids]
         self._captured = (verts, edges, faces)
 
         # 2. Create the definition + copy geometry into it (fresh ids in child mesh).
         defn = model.new_definition(
-            self._name or (f"Group #{model._next_def_id}" if self._is_group
-                           else f"Component #{model._next_def_id}"),
+            self._name
+            or (
+                f"Group #{model._next_def_id}"
+                if self._is_group
+                else f"Component #{model._next_def_id}"
+            ),
             is_group=self._is_group,
         )
         idmap = {}
@@ -116,7 +128,15 @@ class MakeGroupCommand(Command):
 class MakeComponentCommand(MakeGroupCommand):
     name = "Make Component"
 
-    def __init__(self, parent_definition, vertex_ids, edge_ids, face_ids,
-                 *, name: str, tag_id: int = 0) -> None:
-        super().__init__(parent_definition, vertex_ids, edge_ids, face_ids,
-                         is_group=False, name=name, tag_id=tag_id)
+    def __init__(
+        self, parent_definition, vertex_ids, edge_ids, face_ids, *, name: str, tag_id: int = 0
+    ) -> None:
+        super().__init__(
+            parent_definition,
+            vertex_ids,
+            edge_ids,
+            face_ids,
+            is_group=False,
+            name=name,
+            tag_id=tag_id,
+        )

@@ -14,6 +14,7 @@ Frame handling (the two things this project has repeatedly got wrong):
   before. The offset's perpendicular decomposition happens in that same
   local frame, since it is a local vector once stored.
 """
+
 from __future__ import annotations
 
 import numpy as np
@@ -114,7 +115,7 @@ class DimensionTool(Tool):
 
         if self._p2_world is None:
             if float(np.linalg.norm(pt_world - self._p1_world)) < _EPS:
-                self._reset()   # degenerate measurement: zero-length axis
+                self._reset()  # degenerate measurement: zero-length axis
                 return
             self._p2_world = pt_world
             return
@@ -152,16 +153,20 @@ class DimensionTool(Tool):
                     d1 = self._p1_world + offset_world
                     d2 = self._p2_world + offset_world
                     pts = [
-                        self._p1_world, self._p2_world,   # measured segment
-                        self._p1_world, d1,                # extension line 1
-                        self._p2_world, d2,                # extension line 2
-                        d1, d2,                             # dimension line
+                        self._p1_world,
+                        self._p2_world,  # measured segment
+                        self._p1_world,
+                        d1,  # extension line 1
+                        self._p2_world,
+                        d2,  # extension line 2
+                        d1,
+                        d2,  # dimension line
                     ]
             segments = np.array(pts, dtype=np.float32).reshape(-1, 3)
         elif self._p1_world is not None and self._cursor_world is not None:
-            segments = np.array(
-                [self._p1_world, self._cursor_world], dtype=np.float32
-            ).reshape(-1, 3)
+            segments = np.array([self._p1_world, self._cursor_world], dtype=np.float32).reshape(
+                -1, 3
+            )
         return ToolOverlay(
             rubber_band_segments=segments,
             rubber_band_color=NEUTRAL_PREVIEW_COLOR,

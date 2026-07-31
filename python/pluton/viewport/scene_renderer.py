@@ -40,6 +40,7 @@ def definition_is_dimmed(definition, model) -> bool:
 
 # --- AABB helpers (Task 15) -------------------------------------------------
 
+
 def aabb_world_edges(lo, hi, world_transform) -> np.ndarray:
     """Return (24, 3) float32 array of 12 AABB edge endpoint pairs in world space.
 
@@ -61,25 +62,37 @@ def aabb_world_edges(lo, hi, world_transform) -> np.ndarray:
     hx, hy, hz = float(hi[0]), float(hi[1]), float(hi[2])
 
     # 8 corners of the box
-    corners = np.array([
-        [lx, ly, lz],  # 0 — low-low-low
-        [hx, ly, lz],  # 1 — high-low-low
-        [hx, hy, lz],  # 2 — high-high-low
-        [lx, hy, lz],  # 3 — low-high-low
-        [lx, ly, hz],  # 4 — low-low-high
-        [hx, ly, hz],  # 5 — high-low-high
-        [hx, hy, hz],  # 6 — high-high-high
-        [lx, hy, hz],  # 7 — low-high-high
-    ], dtype=np.float64)
+    corners = np.array(
+        [
+            [lx, ly, lz],  # 0 — low-low-low
+            [hx, ly, lz],  # 1 — high-low-low
+            [hx, hy, lz],  # 2 — high-high-low
+            [lx, hy, lz],  # 3 — low-high-low
+            [lx, ly, hz],  # 4 — low-low-high
+            [hx, ly, hz],  # 5 — high-low-high
+            [hx, hy, hz],  # 6 — high-high-high
+            [lx, hy, hz],  # 7 — low-high-high
+        ],
+        dtype=np.float64,
+    )
 
     # Transform all corners at once
     world_corners = apply_mat(corners, world_transform)  # (8, 3) float32
 
     # 12 edges — each edge is a pair of corner indices
     _edges = [
-        (0, 1), (1, 2), (2, 3), (3, 0),  # bottom face
-        (4, 5), (5, 6), (6, 7), (7, 4),  # top face
-        (0, 4), (1, 5), (2, 6), (3, 7),  # vertical pillars
+        (0, 1),
+        (1, 2),
+        (2, 3),
+        (3, 0),  # bottom face
+        (4, 5),
+        (5, 6),
+        (6, 7),
+        (7, 4),  # top face
+        (0, 4),
+        (1, 5),
+        (2, 6),
+        (3, 7),  # vertical pillars
     ]
 
     out = np.empty((24, 3), dtype=np.float32)
@@ -119,21 +132,27 @@ _BG_COLOR = (0.15, 0.15, 0.18, 1.0)
 
 # Edge / overlay colors (per-vertex, packed into the VBO alongside positions).
 _USER_EDGE_COLOR = (0.85, 0.85, 0.85)
-_SELECTION_FILL_COLOR = (0.20, 0.50, 0.95, 0.25)   # selected faces (blue, 25% alpha)
-_SELECTION_EDGE_COLOR = (0.20, 0.55, 1.00)         # selected edges (bright blue)
+_SELECTION_FILL_COLOR = (0.20, 0.50, 0.95, 0.25)  # selected faces (blue, 25% alpha)
+_SELECTION_EDGE_COLOR = (0.20, 0.55, 1.00)  # selected edges (bright blue)
 
 # Task 15 — dim pass + instance bbox colors.
-_DIM_AMBIENT = (0.30, 0.30, 0.31)   # desaturated ambient for dimmed definitions
-_DIM_DIFFUSE = (0.40, 0.40, 0.42)   # desaturated diffuse for dimmed definitions
-_DIM_ALPHA_BLEND = 0.35             # alpha for dimmed geometry (blended toward bg)
-_INSTANCE_BBOX_COLOR = (0.30, 0.55, 0.95)   # selection-blue bbox for selected instances
+_DIM_AMBIENT = (0.30, 0.30, 0.31)  # desaturated ambient for dimmed definitions
+_DIM_DIFFUSE = (0.40, 0.40, 0.42)  # desaturated diffuse for dimmed definitions
+_DIM_ALPHA_BLEND = 0.35  # alpha for dimmed geometry (blended toward bg)
+_INSTANCE_BBOX_COLOR = (0.30, 0.55, 0.95)  # selection-blue bbox for selected instances
 _INSTANCE_BBOX_WIDTH = 2.0
 # Uniform names looked up once per program in initialize_gl().
 _PHONG_UNIFORMS = (
-    "u_view", "u_projection", "u_model", "u_camera_pos",
-    "u_light_dir", "u_light_color",
-    "u_material_ambient", "u_material_diffuse",
-    "u_material_specular", "u_material_shininess",
+    "u_view",
+    "u_projection",
+    "u_model",
+    "u_camera_pos",
+    "u_light_dir",
+    "u_light_color",
+    "u_material_ambient",
+    "u_material_diffuse",
+    "u_material_specular",
+    "u_material_shininess",
     "u_alpha",
 )
 _LINE_UNIFORMS = ("u_view", "u_projection")
@@ -143,6 +162,7 @@ _GHOST_FILL_UNIFORMS = ("u_view", "u_projection", "u_color")
 @dataclass
 class _DefBuffers:
     """Per-definition GL buffer handles and vertex counts."""
+
     face_vao: int = 0
     face_vbo: int = 0
     face_count: int = 0  # number of triangle vertices
@@ -234,31 +254,47 @@ def _snap_marker_vertices(kind: int, p) -> np.ndarray:
     x, y, z = float(p[0]), float(p[1]), float(p[2])
     if kind == int(SnapKind.MIDPOINT):
         return np.array(
-            [[x - s, y - s, z], [x + s, y - s, z],
-             [x + s, y - s, z], [x, y + s, z],
-             [x, y + s, z], [x - s, y - s, z]],
+            [
+                [x - s, y - s, z],
+                [x + s, y - s, z],
+                [x + s, y - s, z],
+                [x, y + s, z],
+                [x, y + s, z],
+                [x - s, y - s, z],
+            ],
             dtype=np.float32,
         )
     if kind == int(SnapKind.ON_EDGE):  # diamond
         return np.array(
-            [[x, y + s, z], [x + s, y, z],
-             [x + s, y, z], [x, y - s, z],
-             [x, y - s, z], [x - s, y, z],
-             [x - s, y, z], [x, y + s, z]],
+            [
+                [x, y + s, z],
+                [x + s, y, z],
+                [x + s, y, z],
+                [x, y - s, z],
+                [x, y - s, z],
+                [x - s, y, z],
+                [x - s, y, z],
+                [x, y + s, z],
+            ],
             dtype=np.float32,
         )
     if kind == int(SnapKind.INTERSECTION):  # X
         return np.array(
-            [[x - s, y - s, z], [x + s, y + s, z],
-             [x - s, y + s, z], [x + s, y - s, z]],
+            [[x - s, y - s, z], [x + s, y + s, z], [x - s, y + s, z], [x + s, y - s, z]],
             dtype=np.float32,
         )
     # default: square
     return np.array(
-        [[x - s, y - s, z], [x + s, y - s, z],
-         [x + s, y - s, z], [x + s, y + s, z],
-         [x + s, y + s, z], [x - s, y + s, z],
-         [x - s, y + s, z], [x - s, y - s, z]],
+        [
+            [x - s, y - s, z],
+            [x + s, y - s, z],
+            [x + s, y - s, z],
+            [x + s, y + s, z],
+            [x + s, y + s, z],
+            [x - s, y + s, z],
+            [x - s, y + s, z],
+            [x - s, y - s, z],
+        ],
         dtype=np.float32,
     )
 
@@ -480,8 +516,14 @@ class SceneRenderer:
                     )
                     if resolved.draw_faces and batch.count > 0:
                         self._draw_definition_faces(
-                            buf, view, projection, camera.position, model_mat,
-                            resolved=resolved, first=batch.first, count=batch.count,
+                            buf,
+                            view,
+                            projection,
+                            camera.position,
+                            model_mat,
+                            resolved=resolved,
+                            first=batch.first,
+                            count=batch.count,
                         )
                 if buf.edge_count > 0:
                     self._draw_definition_edges(buf, view, projection, model_mat, dimmed=dimmed)
@@ -491,7 +533,10 @@ class SceneRenderer:
             if selection is not None:
                 active_scene = model.active_scene
                 self._draw_selection(
-                    active_scene, selection, view, projection,
+                    active_scene,
+                    selection,
+                    view,
+                    projection,
                     world_transform=model.active_world_transform,
                 )
 
@@ -531,8 +576,9 @@ class SceneRenderer:
             if getattr(tool_overlay, "world_polylines", None):
                 self._draw_world_polylines(tool_overlay.world_polylines, view, projection)
             if getattr(tool_overlay, "screen_markers", None):
-                self._draw_screen_markers(camera, tool_overlay.screen_markers,
-                                          self._viewport_w, self._viewport_h)
+                self._draw_screen_markers(
+                    camera, tool_overlay.screen_markers, self._viewport_w, self._viewport_h
+                )
 
     # --- Init helpers -----------------------------------------------------
 
@@ -572,7 +618,11 @@ class SceneRenderer:
         GL.glVertexAttribPointer(0, 3, GL.GL_FLOAT, GL.GL_FALSE, stride, ctypes.c_void_p(0))
         GL.glEnableVertexAttribArray(0)
         GL.glVertexAttribPointer(
-            1, 3, GL.GL_FLOAT, GL.GL_FALSE, stride,
+            1,
+            3,
+            GL.GL_FLOAT,
+            GL.GL_FALSE,
+            stride,
             ctypes.c_void_p(3 * ctypes.sizeof(ctypes.c_float)),
         )
         GL.glEnableVertexAttribArray(1)
@@ -595,7 +645,11 @@ class SceneRenderer:
         GL.glVertexAttribPointer(0, 3, GL.GL_FLOAT, GL.GL_FALSE, stride, ctypes.c_void_p(0))
         GL.glEnableVertexAttribArray(0)
         GL.glVertexAttribPointer(
-            1, 3, GL.GL_FLOAT, GL.GL_FALSE, stride,
+            1,
+            3,
+            GL.GL_FLOAT,
+            GL.GL_FALSE,
+            stride,
             ctypes.c_void_p(3 * ctypes.sizeof(ctypes.c_float)),
         )
         GL.glEnableVertexAttribArray(1)
@@ -610,7 +664,11 @@ class SceneRenderer:
         GL.glVertexAttribPointer(0, 3, GL.GL_FLOAT, GL.GL_FALSE, stride, ctypes.c_void_p(0))
         GL.glEnableVertexAttribArray(0)
         GL.glVertexAttribPointer(
-            1, 3, GL.GL_FLOAT, GL.GL_FALSE, stride,
+            1,
+            3,
+            GL.GL_FLOAT,
+            GL.GL_FALSE,
+            stride,
             ctypes.c_void_p(3 * ctypes.sizeof(ctypes.c_float)),
         )
         GL.glEnableVertexAttribArray(1)
@@ -631,7 +689,11 @@ class SceneRenderer:
         # color (vec3) at offset 3 floats
         GL.glEnableVertexAttribArray(1)
         GL.glVertexAttribPointer(
-            1, 3, GL.GL_FLOAT, GL.GL_FALSE, stride,
+            1,
+            3,
+            GL.GL_FLOAT,
+            GL.GL_FALSE,
+            stride,
             ctypes.c_void_p(3 * ctypes.sizeof(ctypes.c_float)),
         )
         GL.glBindBuffer(GL.GL_ARRAY_BUFFER, 0)
@@ -688,9 +750,7 @@ class SceneRenderer:
         if edges.shape[0] > 0:
             n = int(edges.shape[0])
             colors = np.tile(np.array(_USER_EDGE_COLOR, dtype=np.float32), (n, 1))
-            data = np.ascontiguousarray(
-                np.concatenate([edges.astype(np.float32), colors], axis=1)
-            )
+            data = np.ascontiguousarray(np.concatenate([edges.astype(np.float32), colors], axis=1))
             GL.glBindBuffer(GL.GL_ARRAY_BUFFER, buf.edge_vbo)
             GL.glBufferData(GL.GL_ARRAY_BUFFER, data.nbytes, data, GL.GL_DYNAMIC_DRAW)
             buf.edge_count = n
@@ -815,9 +875,7 @@ class SceneRenderer:
             segs = overlay.rubber_band_segments
             if segs.shape[0] > 0:
                 n = int(segs.shape[0])
-                colors = np.tile(
-                    np.array(overlay.rubber_band_color, dtype=np.float32), (n, 1)
-                )
+                colors = np.tile(np.array(overlay.rubber_band_color, dtype=np.float32), (n, 1))
                 data = np.ascontiguousarray(
                     np.concatenate([segs.astype(np.float32), colors], axis=1)
                 )
@@ -937,9 +995,7 @@ class SceneRenderer:
                 loop[2 * i + 1, 0:2] = quad[(i + 1) % 4]
             self._draw_screen_space_lines(loop, color, 1.5)
 
-    def _draw_selection(
-        self, scene, selection, view, projection, world_transform=None
-    ) -> None:
+    def _draw_selection(self, scene, selection, view, projection, world_transform=None) -> None:
         if selection is None:
             return
         need_transform = not is_identity_transform(world_transform)
@@ -1068,6 +1124,7 @@ class SceneRenderer:
 # These take a uniform `loc` (pre-cached via _cache_uniform_locations) instead
 # of looking it up per-call. A `loc` of -1 means the uniform isn't present in
 # the linked program (e.g., optimized out) — silently skipped.
+
 
 def _set_mat4(loc: int, m: np.ndarray) -> None:
     if loc < 0:

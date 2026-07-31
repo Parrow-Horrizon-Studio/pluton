@@ -1,4 +1,5 @@
 """Undoable annotation commands (M7d)."""
+
 from __future__ import annotations
 
 from pluton.commands.command import Command
@@ -51,7 +52,7 @@ class DeleteAnnotationsCommand(Command):
     def __init__(self, annotation_ids, target_context) -> None:
         self._ids = list(annotation_ids)
         self._target = target_context
-        self._removed = []   # (index, annotation), ascending by index
+        self._removed = []  # (index, annotation), ascending by index
 
     def do(self, model) -> None:
         self._removed = []

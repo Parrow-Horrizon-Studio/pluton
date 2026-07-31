@@ -9,6 +9,7 @@ _rot_z is a small 4x4 Z-rotation helper the tool uses to orient the canonical
 roof onto the drawn footprint (kept here so the geometry frame conventions live
 in one place).
 """
+
 from __future__ import annotations
 
 import numpy as np
@@ -46,30 +47,38 @@ def roof_solid(kind, width, depth, angle):
     if kind == "shed":
         big_h = w * t
         verts = [
-            (-hw, -hd, 0.0), (hw, -hd, 0.0), (hw, hd, 0.0), (-hw, hd, 0.0),  # base 0..3
-            (hw, -hd, big_h), (hw, hd, big_h),                              # high edge 4,5
+            (-hw, -hd, 0.0),
+            (hw, -hd, 0.0),
+            (hw, hd, 0.0),
+            (-hw, hd, 0.0),  # base 0..3
+            (hw, -hd, big_h),
+            (hw, hd, big_h),  # high edge 4,5
         ]
         faces = [
-            (0, 3, 2, 1),      # base (-Z)
-            (0, 4, 5, 3),      # sloped top
-            (1, 2, 5, 4),      # high wall (+X)
-            (0, 1, 4),         # -Y side
-            (2, 3, 5),         # +Y side
+            (0, 3, 2, 1),  # base (-Z)
+            (0, 4, 5, 3),  # sloped top
+            (1, 2, 5, 4),  # high wall (+X)
+            (0, 1, 4),  # -Y side
+            (2, 3, 5),  # +Y side
         ]
         return _finish(verts), faces
 
     if kind == "gable":
         h = hw * t
         verts = [
-            (-hw, -hd, 0.0), (hw, -hd, 0.0), (hw, hd, 0.0), (-hw, hd, 0.0),  # base 0..3
-            (0.0, -hd, h), (0.0, hd, h),                                    # ridge 4,5
+            (-hw, -hd, 0.0),
+            (hw, -hd, 0.0),
+            (hw, hd, 0.0),
+            (-hw, hd, 0.0),  # base 0..3
+            (0.0, -hd, h),
+            (0.0, hd, h),  # ridge 4,5
         ]
         faces = [
-            (0, 3, 2, 1),      # base
-            (1, 2, 5, 4),      # +X slope
-            (3, 0, 4, 5),      # -X slope
-            (0, 1, 4),         # -Y gable end
-            (2, 3, 5),         # +Y gable end
+            (0, 3, 2, 1),  # base
+            (1, 2, 5, 4),  # +X slope
+            (3, 0, 4, 5),  # -X slope
+            (0, 1, 4),  # -Y gable end
+            (2, 3, 5),  # +Y gable end
         ]
         return _finish(verts), faces
 

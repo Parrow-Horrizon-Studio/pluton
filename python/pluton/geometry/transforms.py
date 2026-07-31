@@ -48,6 +48,7 @@ def scale(points: np.ndarray, anchor, factors) -> np.ndarray:
 # 4x4 matrix helpers (M4e: world↔local coordinate conversion)
 # ---------------------------------------------------------------------------
 
+
 def mat_translate(delta) -> np.ndarray:
     m = np.eye(4, dtype=np.float64)
     m[:3, 3] = np.asarray(delta, dtype=np.float64).reshape(3)
@@ -72,11 +73,14 @@ def mat_rotate(center, axis, angle_rad: float) -> np.ndarray:
     k = k / norm
     x, y, z = k
     ca, sa = np.cos(angle_rad), np.sin(angle_rad)
-    r = np.array([
-        [ca + x * x * (1 - ca), x * y * (1 - ca) - z * sa, x * z * (1 - ca) + y * sa],
-        [y * x * (1 - ca) + z * sa, ca + y * y * (1 - ca), y * z * (1 - ca) - x * sa],
-        [z * x * (1 - ca) - y * sa, z * y * (1 - ca) + x * sa, ca + z * z * (1 - ca)],
-    ], dtype=np.float64)
+    r = np.array(
+        [
+            [ca + x * x * (1 - ca), x * y * (1 - ca) - z * sa, x * z * (1 - ca) + y * sa],
+            [y * x * (1 - ca) + z * sa, ca + y * y * (1 - ca), y * z * (1 - ca) - x * sa],
+            [z * x * (1 - ca) - y * sa, z * y * (1 - ca) + x * sa, ca + z * z * (1 - ca)],
+        ],
+        dtype=np.float64,
+    )
     m = np.eye(4, dtype=np.float64)
     m[:3, :3] = r
     m[:3, 3] = c - r @ c  # rotate about the line through center

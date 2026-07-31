@@ -42,6 +42,7 @@ class TapeMeasureTool(Tool):
 
     def on_mouse_move(self, event: QMouseEvent, snap) -> None:
         from pluton.viewport.snap_engine import SnapKind
+
         if snap.kind == SnapKind.NONE:
             self._snap_marker_pos = None
             self._snap_marker_kind = 0
@@ -53,6 +54,7 @@ class TapeMeasureTool(Tool):
 
     def on_mouse_press(self, event: QMouseEvent, snap) -> None:
         from pluton.viewport.snap_engine import SnapKind
+
         if event.button() != Qt.MouseButton.LeftButton or snap.kind == SnapKind.NONE:
             return
         p = np.asarray(snap.world_position, np.float32).copy()
@@ -101,6 +103,7 @@ class TapeMeasureTool(Tool):
         dist = float(np.linalg.norm(delta))
         if self._units_provider is not None:
             from pluton.units import format_length
+
             d = format_length(dist, self._units_provider())
             dx = format_length(abs(float(delta[0])), self._units_provider())
             dy = format_length(abs(float(delta[1])), self._units_provider())

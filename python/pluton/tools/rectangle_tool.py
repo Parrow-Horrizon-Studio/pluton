@@ -116,10 +116,14 @@ class RectangleTool(Tool):
             x1, y1 = float(self._preview_corner[0]), float(self._preview_corner[1])
             segments = np.array(
                 [
-                    [x0, y0, 0.0], [x1, y0, 0.0],
-                    [x1, y0, 0.0], [x1, y1, 0.0],
-                    [x1, y1, 0.0], [x0, y1, 0.0],
-                    [x0, y1, 0.0], [x0, y0, 0.0],
+                    [x0, y0, 0.0],
+                    [x1, y0, 0.0],
+                    [x1, y0, 0.0],
+                    [x1, y1, 0.0],
+                    [x1, y1, 0.0],
+                    [x0, y1, 0.0],
+                    [x0, y1, 0.0],
+                    [x0, y0, 0.0],
                 ],
                 dtype=np.float32,
             )
@@ -146,6 +150,7 @@ class RectangleTool(Tool):
 
     def apply_typed_value(self, text, units) -> bool:
         from pluton.units import parse_length
+
         if (
             self._state != _State.DRAGGING
             or self._first_corner is None

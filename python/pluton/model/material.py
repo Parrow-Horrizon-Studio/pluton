@@ -88,8 +88,9 @@ class MaterialLibrary:
         lib._order = []
         for r in records:
             color = r["color"]
-            mat = Material(int(r["id"]), str(r["name"]),
-                           (float(color[0]), float(color[1]), float(color[2])))
+            mat = Material(
+                int(r["id"]), str(r["name"]), (float(color[0]), float(color[1]), float(color[2]))
+            )
             lib._materials[mat.id] = mat
             lib._order.append(mat.id)
         lib._default = lib._materials.get(cls.DEFAULT_ID, lib._default)

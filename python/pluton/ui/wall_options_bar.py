@@ -1,4 +1,5 @@
 """WallOptionsBar (M7a): thickness/height settings row for the Wall tool."""
+
 from __future__ import annotations
 
 from PySide6.QtWidgets import QHBoxLayout, QLabel, QLineEdit, QWidget

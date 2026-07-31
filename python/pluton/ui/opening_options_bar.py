@@ -1,4 +1,5 @@
 """OpeningOptionsBar (M7b): Door|Window toggle + size fields for the tool."""
+
 from __future__ import annotations
 
 from PySide6.QtWidgets import (

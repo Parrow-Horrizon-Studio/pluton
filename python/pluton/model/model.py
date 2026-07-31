@@ -18,11 +18,12 @@ class Model:
         self.active_path: list[Instance] = []
         self.materials = MaterialLibrary()
         self.tags = TagLibrary()
-        self.opening_definitions = {}   # M7b: (kind, w, h, depth) -> shared Component Definition
-        self._next_annotation_id = 0   # M7d: model-wide unique annotation ids
+        self.opening_definitions = {}  # M7b: (kind, w, h, depth) -> shared Component Definition
+        self._next_annotation_id = 0  # M7d: model-wide unique annotation ids
         # M7e: saved Scenes (camera + tags + style). Imported here, not at module
         # top, to avoid a model <-> io.document_codec import cycle.
         from pluton.views.view_library import ViewLibrary
+
         self.views = ViewLibrary()
 
     # --- construction ---
@@ -158,7 +159,7 @@ class Model:
             p_c = np.asarray(hit.point, np.float64)
             p_a = (inst.transform @ np.append(p_c, 1.0))[:3]
             n_a = inst.transform[:3, :3] @ n_c
-            if np.dot(n_a, d_a) > 0.0:      # orient toward the viewer (against the ray)
+            if np.dot(n_a, d_a) > 0.0:  # orient toward the viewer (against the ray)
                 n_a = -n_a
             best = (p_a, n_a)
             best_t = hit.t

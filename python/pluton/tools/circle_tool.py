@@ -115,6 +115,7 @@ class CircleTool(Tool):
 
     def apply_typed_value(self, text, units) -> bool:
         from pluton.units import parse_length
+
         if self._state != _State.DRAWING or self._plane is None:
             return False
         radius = parse_length(text, units)
@@ -170,6 +171,7 @@ class CircleTool(Tool):
         if self._state == _State.DRAWING:
             if self._units_provider is not None:
                 from pluton.units import format_length
+
                 return f"Radius: {format_length(self._radius, self._units_provider())}"
             return f"Radius: {self._radius:.3f}"
         return None

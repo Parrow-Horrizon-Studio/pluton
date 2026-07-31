@@ -91,8 +91,11 @@ class ScaleTool(Tool):
 
     def _rebuild_box(self) -> None:
         self._reset_drag()
-        if self._selection is not None and not self._selection.is_empty() \
-                and self._selection.instances:
+        if (
+            self._selection is not None
+            and not self._selection.is_empty()
+            and self._selection.instances
+        ):
             # Instance mode: compute AABB from world bboxes of selected instances.
             # Grips end up in WORLD space.
             self._instance_mode = True
@@ -196,6 +199,7 @@ class ScaleTool(Tool):
         new = scale_pts(pts, self._anchor, out)
         moves = {v: (self._orig[v], new[i]) for i, v in enumerate(ids)}
         from pluton.commands.scene_commands import TransformVerticesCommand
+
         cmd = TransformVerticesCommand(moves)
         if not cmd.is_empty() and self._stack is not None:
             self._stack.execute(cmd, self._scene)
@@ -226,8 +230,8 @@ class ScaleTool(Tool):
                 box_segs = self._box_segments(preview_lo, preview_hi)
             polylines.append((box_segs, _BOX_COLOR, 1.5))
             for g in self._grips:
-                is_active = (
-                    self._active is not None and np.allclose(g.position, self._active.position)
+                is_active = self._active is not None and np.allclose(
+                    g.position, self._active.position
                 )
                 color = _ACTIVE_COLOR if is_active else _GRIP_COLOR
                 # Markers must be in WORLD space; lift local grips to world.
@@ -264,9 +268,7 @@ class ScaleTool(Tool):
         """Test-facing alias; delegates to _factor_vec_for."""
         return self._factor_vec_for(grip, anchor, cursor, extent, uniform)
 
-    def _factor_vec_for(
-        self, grip: GripSpec, anchor, cursor, extent, uniform: bool
-    ) -> np.ndarray:
+    def _factor_vec_for(self, grip: GripSpec, anchor, cursor, extent, uniform: bool) -> np.ndarray:
         anchor = np.asarray(anchor, np.float32)
         cursor = np.asarray(cursor, np.float32)
         extent = np.asarray(extent, np.float32)
@@ -299,10 +301,7 @@ class ScaleTool(Tool):
         if self._model is None or self._selection is None:
             return []
         inst_ids = self._selection.instances
-        return [
-            inst for inst in self._model.active_context.children
-            if inst.id in inst_ids
-        ]
+        return [inst for inst in self._model.active_context.children if inst.id in inst_ids]
 
     def _instance_world_aabb(self) -> tuple[np.ndarray, np.ndarray] | None:
         """Union of world bounding boxes for all selected instances."""
@@ -316,12 +315,19 @@ class ScaleTool(Tool):
                 continue
             lo, hi = local_box
             # 8 corners of the local AABB
-            corners = np.array([
-                [lo[0], lo[1], lo[2]], [hi[0], lo[1], lo[2]],
-                [hi[0], hi[1], lo[2]], [lo[0], hi[1], lo[2]],
-                [lo[0], lo[1], hi[2]], [hi[0], lo[1], hi[2]],
-                [hi[0], hi[1], hi[2]], [lo[0], hi[1], hi[2]],
-            ], dtype=np.float64)
+            corners = np.array(
+                [
+                    [lo[0], lo[1], lo[2]],
+                    [hi[0], lo[1], lo[2]],
+                    [hi[0], hi[1], lo[2]],
+                    [lo[0], hi[1], lo[2]],
+                    [lo[0], lo[1], hi[2]],
+                    [hi[0], lo[1], hi[2]],
+                    [hi[0], hi[1], hi[2]],
+                    [lo[0], hi[1], hi[2]],
+                ],
+                dtype=np.float64,
+            )
             world_mat = world0 @ inst.transform
             # transform corners: (8,4) @ (4,4).T -> (8,4)
             hom = np.hstack([corners, np.ones((8, 1))])
@@ -340,8 +346,7 @@ class ScaleTool(Tool):
 
         delta_mat = mat_scale(anchor, factor_vec)
         cmds = [
-            TransformInstanceCommand(inst, delta_mat @ inst.transform)
-            for inst in self._instances
+            TransformInstanceCommand(inst, delta_mat @ inst.transform) for inst in self._instances
         ]
         if not cmds:
             return
@@ -433,13 +438,29 @@ class ScaleTool(Tool):
         lo = np.asarray(lo, np.float32)
         hi = np.asarray(hi, np.float32)
         c = [
-            [lo[0], lo[1], lo[2]], [hi[0], lo[1], lo[2]],
-            [hi[0], hi[1], lo[2]], [lo[0], hi[1], lo[2]],
-            [lo[0], lo[1], hi[2]], [hi[0], lo[1], hi[2]],
-            [hi[0], hi[1], hi[2]], [lo[0], hi[1], hi[2]],
+            [lo[0], lo[1], lo[2]],
+            [hi[0], lo[1], lo[2]],
+            [hi[0], hi[1], lo[2]],
+            [lo[0], hi[1], lo[2]],
+            [lo[0], lo[1], hi[2]],
+            [hi[0], lo[1], hi[2]],
+            [hi[0], hi[1], hi[2]],
+            [lo[0], hi[1], hi[2]],
         ]
-        edges = [(0, 1), (1, 2), (2, 3), (3, 0), (4, 5), (5, 6), (6, 7), (7, 4),
-                 (0, 4), (1, 5), (2, 6), (3, 7)]
+        edges = [
+            (0, 1),
+            (1, 2),
+            (2, 3),
+            (3, 0),
+            (4, 5),
+            (5, 6),
+            (6, 7),
+            (7, 4),
+            (0, 4),
+            (1, 5),
+            (2, 6),
+            (3, 7),
+        ]
         segs = np.empty((2 * len(edges), 3), np.float32)
         for i, (u, v) in enumerate(edges):
             segs[2 * i] = c[u]

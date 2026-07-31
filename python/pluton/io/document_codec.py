@@ -45,8 +45,7 @@ def geometry_to_dict(scene: Scene) -> dict:
         if mat != _DEFAULT_MATERIAL_ID:
             face_materials[str(face_index)] = int(mat)
 
-    return {"vertices": vertices, "edges": edges, "faces": faces,
-            "face_materials": face_materials}
+    return {"vertices": vertices, "edges": edges, "faces": faces, "face_materials": face_materials}
 
 
 def geometry_from_dict(scene: Scene, data: dict) -> None:
@@ -128,20 +127,24 @@ def model_to_dict(model: Model) -> dict:
 
     definitions = []
     for d in defs_by_id.values():
-        definitions.append({
-            "id": d.id,
-            "name": d.name,
-            "is_group": d.is_group,
-            "geometry": geometry_to_dict(d.mesh),
-            "annotations": [annotation_to_dict(a) for a in d.annotations],
-            "children": [
-                {"id": inst.id,
-                 "definition_id": inst.definition.id,
-                 "transform": [float(x) for x in inst.transform.flatten()],
-                 "tag_id": int(inst.tag_id)}
-                for inst in d.children
-            ],
-        })
+        definitions.append(
+            {
+                "id": d.id,
+                "name": d.name,
+                "is_group": d.is_group,
+                "geometry": geometry_to_dict(d.mesh),
+                "annotations": [annotation_to_dict(a) for a in d.annotations],
+                "children": [
+                    {
+                        "id": inst.id,
+                        "definition_id": inst.definition.id,
+                        "transform": [float(x) for x in inst.transform.flatten()],
+                        "tag_id": int(inst.tag_id),
+                    }
+                    for inst in d.children
+                ],
+            }
+        )
 
     return {
         "next_def_id": model._next_def_id,
@@ -173,8 +176,11 @@ def model_from_dict(data: dict) -> Model:
             transform = crec["transform"]
             if len(transform) != 16:
                 raise PlutonFormatError(f"transform must have 16 numbers, got {len(transform)}")
-            inst = Instance(int(crec["id"]), defs_by_id[def_id],
-                            np.asarray(transform, dtype=np.float64).reshape(4, 4))
+            inst = Instance(
+                int(crec["id"]),
+                defs_by_id[def_id],
+                np.asarray(transform, dtype=np.float64).reshape(4, 4),
+            )
             inst.tag_id = int(crec["tag_id"])
             d.children.append(inst)
             inst.definition.instances.append(inst)
@@ -228,8 +234,12 @@ class CameraState:
         )
 
     def to_dict(self) -> dict:
-        return {"position": list(self.position), "target": list(self.target),
-                "up": list(self.up), "fov_y_deg": self.fov_y_deg}
+        return {
+            "position": list(self.position),
+            "target": list(self.target),
+            "up": list(self.up),
+            "fov_y_deg": self.fov_y_deg,
+        }
 
     @classmethod
     def from_dict(cls, d: dict) -> CameraState:
@@ -261,8 +271,7 @@ def document_to_dict(model: Model, camera, doc, render_style) -> dict:
     return {
         "units": units_to_dict(doc.units),
         "camera": CameraState.from_camera(camera).to_dict(),
-        "materials": {"next_id": model.materials.next_id,
-                      "items": model.materials.to_records()},
+        "materials": {"next_id": model.materials.next_id, "items": model.materials.to_records()},
         "tags": {"next_id": model.tags.next_id, "items": model.tags.to_records()},
         "scenes": {"next_id": model.views.next_id, "items": model.views.to_records()},
         "style": render_style_to_dict(render_style),
@@ -275,15 +284,15 @@ def document_from_dict(data: dict) -> LoadedDocument:
     document (including in nested geometry/model data) is normalized into
     PlutonFormatError — the only exception callers need to catch."""
     from pluton.views.view_library import ViewLibrary  # function-level: breaks import cycle
+
     try:
         model = model_from_dict(data["model"])
         model.materials = MaterialLibrary.from_records(
-            data["materials"]["items"], data["materials"]["next_id"])
-        model.tags = TagLibrary.from_records(
-            data["tags"]["items"], data["tags"]["next_id"])
+            data["materials"]["items"], data["materials"]["next_id"]
+        )
+        model.tags = TagLibrary.from_records(data["tags"]["items"], data["tags"]["next_id"])
         scenes = data.get("scenes", {})
-        model.views = ViewLibrary.from_records(
-            scenes.get("items", []), scenes.get("next_id", 0))
+        model.views = ViewLibrary.from_records(scenes.get("items", []), scenes.get("next_id", 0))
         camera_state = CameraState.from_dict(data["camera"])
         units = units_from_dict(data["units"])
         style = render_style_from_dict(data.get("style"))

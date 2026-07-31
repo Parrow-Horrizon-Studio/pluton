@@ -63,7 +63,10 @@ class PaintTool(Tool):
 
     def _pick_face(self, event: QMouseEvent) -> int | None:
         hit = pick_selectable(
-            self._cursor(event), self._viewport_size(), self._camera, self._scene,
+            self._cursor(event),
+            self._viewport_size(),
+            self._camera,
+            self._scene,
             world_transform=self._world_transform(),
         )
         return hit[1] if hit is not None and hit[0] == "face" else None
@@ -100,6 +103,7 @@ class PaintTool(Tool):
         if self._hovered_face is not None and self._scene is not None:
             try:
                 from pluton.geometry.transforms import apply_mat, is_identity_transform
+
                 wt = self._world_transform()
                 use_wt = not is_identity_transform(wt)
                 wt_arr = np.asarray(wt, dtype=np.float64) if use_wt else None
@@ -110,11 +114,15 @@ class PaintTool(Tool):
                     return apply_mat(local_pos.reshape(1, 3), wt_arr)[0]
 
                 loop = self._scene.face_loop(self._hovered_face)
-                fills.append(np.array(
-                    [_to_world(np.asarray(self._scene.vertex(v).position, dtype=np.float32))
-                     for v in loop],
-                    dtype=np.float32,
-                ))
+                fills.append(
+                    np.array(
+                        [
+                            _to_world(np.asarray(self._scene.vertex(v).position, dtype=np.float32))
+                            for v in loop
+                        ],
+                        dtype=np.float32,
+                    )
+                )
             except KeyError:
                 pass
         return ToolOverlay(

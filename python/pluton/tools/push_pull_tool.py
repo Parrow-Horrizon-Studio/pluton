@@ -30,9 +30,9 @@ from pluton.commands.scene_commands import (
 from pluton.tools.tool import Tool, ToolContext, ToolOverlay
 
 # Visual constants (RGBA).
-_HOVER_FILL_COLOR = (0.40, 0.70, 1.00, 0.20)   # light blue
-_ARMED_FILL_COLOR = (0.20, 0.50, 0.95, 0.40)   # darker blue
-_GHOST_FILL_COLOR = (0.40, 0.70, 1.00, 0.15)   # light blue, fainter
+_HOVER_FILL_COLOR = (0.40, 0.70, 1.00, 0.20)  # light blue
+_ARMED_FILL_COLOR = (0.20, 0.50, 0.95, 0.40)  # darker blue
+_GHOST_FILL_COLOR = (0.40, 0.70, 1.00, 0.15)  # light blue, fainter
 
 _MIN_COMMIT_DEPTH = 1e-3  # world units; below this is treated as cancel
 _DEGENERATE_VIEW_EPSILON = 1e-4  # |1 - (d·n)²| below this freezes depth
@@ -90,6 +90,7 @@ class PushPullTool(Tool):
         if self._state == _State.DRAGGING:
             if self._units_provider is not None:
                 from pluton.units import format_length
+
                 return f"depth: {format_length(self._current_depth, self._units_provider())}"
             return f"depth: {self._current_depth:.3f}"
         return None
@@ -170,11 +171,11 @@ class PushPullTool(Tool):
         # At root the world transform is identity → this is a no-op.
         if polygons:
             from pluton.geometry.transforms import apply_mat, is_identity_transform
+
             wt = self._world_transform()
             if wt is not None and not is_identity_transform(wt):
                 polygons = [
-                    apply_mat(np.asarray(p, np.float64), wt).astype(np.float32)
-                    for p in polygons
+                    apply_mat(np.asarray(p, np.float64), wt).astype(np.float32) for p in polygons
                 ]
 
         return ToolOverlay(
@@ -199,6 +200,7 @@ class PushPullTool(Tool):
             float(pos.x()), float(pos.y()), int(width), int(height)
         )
         from pluton.viewport.picking import ray_into_local
+
         origin, direction = ray_into_local(origin, direction, self._world_transform())
         return self._scene.ray_pick_face(origin, direction)
 
@@ -237,6 +239,7 @@ class PushPullTool(Tool):
             float(pos.x()), float(pos.y()), int(width), int(height)
         )
         from pluton.viewport.picking import ray_into_local
+
         origin, direction = ray_into_local(origin, direction, self._world_transform())
         d_norm = float(np.linalg.norm(direction))
         if d_norm < 1e-9:
@@ -402,6 +405,7 @@ class PushPullTool(Tool):
 
     def apply_typed_value(self, text, units) -> bool:
         from pluton.units import parse_length
+
         if self._state != _State.DRAGGING or self._armed_face_id is None:
             return False
         depth = parse_length(text, units)

@@ -23,9 +23,9 @@ class FaceStyle(Enum):
 class FaceShading(Enum):
     """How a drawn face pass is shaded."""
 
-    LIT = auto()       # phong lighting with the (default) material color → Shaded
-    UNIFORM = auto()   # phong lighting, but one fixed monochrome color    → Monochrome
-    FLAT_BG = auto()   # unlit; filled with the background color           → Hidden Line
+    LIT = auto()  # phong lighting with the (default) material color → Shaded
+    UNIFORM = auto()  # phong lighting, but one fixed monochrome color    → Monochrome
+    FLAT_BG = auto()  # unlit; filled with the background color           → Hidden Line
 
 
 @dataclass(frozen=True)
@@ -51,7 +51,7 @@ FACE_STYLE_TABLE: dict[FaceStyle, FaceStyleDescriptor] = {
 
 # Tunable look constants (revisited in the Task 7 visual pass).
 MONO_COLOR = (0.72, 0.72, 0.74)  # uniform diffuse gray for Monochrome
-XRAY_ALPHA = 0.35                # face opacity when X-Ray is on
+XRAY_ALPHA = 0.35  # face opacity when X-Ray is on
 
 
 @dataclass(frozen=True)
@@ -112,7 +112,7 @@ class ResolvedFacePass:
     specular: tuple[float, float, float]
     shininess: float
     alpha: float
-    blend: bool        # enable SRC_ALPHA blending (alpha < 1.0)
+    blend: bool  # enable SRC_ALPHA blending (alpha < 1.0)
     depth_write: bool  # False ⇒ glDepthMask(GL_FALSE) (X-Ray only)
 
 
@@ -136,8 +136,13 @@ def resolve_face_pass(
     if not desc.draw_faces:
         return ResolvedFacePass(
             draw_faces=False,
-            ambient=(0.0, 0.0, 0.0), diffuse=(0.0, 0.0, 0.0), specular=(0.0, 0.0, 0.0),
-            shininess=1.0, alpha=1.0, blend=False, depth_write=True,
+            ambient=(0.0, 0.0, 0.0),
+            diffuse=(0.0, 0.0, 0.0),
+            specular=(0.0, 0.0, 0.0),
+            shininess=1.0,
+            alpha=1.0,
+            blend=False,
+            depth_write=True,
         )
     fu = face_uniforms(desc.shading, bg=bg, material=material, xray=style.xray)
     if dimmed:
@@ -146,8 +151,13 @@ def resolve_face_pass(
         ambient, diffuse, alpha = fu.ambient, fu.diffuse, fu.alpha
     return ResolvedFacePass(
         draw_faces=True,
-        ambient=ambient, diffuse=diffuse, specular=fu.specular, shininess=fu.shininess,
-        alpha=alpha, blend=(alpha < 1.0), depth_write=(not style.xray),
+        ambient=ambient,
+        diffuse=diffuse,
+        specular=fu.specular,
+        shininess=fu.shininess,
+        alpha=alpha,
+        blend=(alpha < 1.0),
+        depth_write=(not style.xray),
     )
 
 

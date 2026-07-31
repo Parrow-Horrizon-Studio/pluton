@@ -37,9 +37,11 @@ _ANGLE_SNAP_RAD = math.radians(15.0)
 _DISK_COLOR_RGBA = (0.30, 0.55, 0.95, 0.18)
 _DISK_OUTLINE = (0.30, 0.55, 0.95)
 _RAY_COLOR = (0.95, 0.80, 0.20)
-_AXES = (np.array([1, 0, 0], np.float32),
-         np.array([0, 1, 0], np.float32),
-         np.array([0, 0, 1], np.float32))
+_AXES = (
+    np.array([1, 0, 0], np.float32),
+    np.array([0, 1, 0], np.float32),
+    np.array([0, 0, 1], np.float32),
+)
 
 
 class _Stage(Enum):
@@ -107,6 +109,7 @@ class RotateTool(Tool):
 
     def on_mouse_press(self, event: QMouseEvent, snap) -> None:
         from pluton.viewport.snap_engine import SnapKind
+
         if event.button() != Qt.MouseButton.LeftButton:
             return
         if self._selection is None or self._selection.is_empty() or snap.kind == SnapKind.NONE:
@@ -152,6 +155,7 @@ class RotateTool(Tool):
 
     def on_mouse_move(self, event: QMouseEvent, snap) -> None:
         from pluton.viewport.snap_engine import SnapKind
+
         if self._stage != _Stage.HAVE_START or snap.kind == SnapKind.NONE:
             return
         d = self._project_to_plane(np.asarray(snap.world_position, np.float32) - self._center)
@@ -172,6 +176,7 @@ class RotateTool(Tool):
 
     def apply_typed_value(self, text, units) -> bool:
         from pluton.units import parse_angle
+
         if self._stage != _Stage.HAVE_START:
             return False
         deg = parse_angle(text)
@@ -187,6 +192,7 @@ class RotateTool(Tool):
 
         moves = self._compute_moves(angle)
         from pluton.commands.scene_commands import TransformVerticesCommand
+
         cmd = TransformVerticesCommand(moves)
         if not cmd.is_empty() and self._stack is not None:
             self._stack.execute(cmd, self._scene)
@@ -234,6 +240,7 @@ class RotateTool(Tool):
             return "Rotate: click the start direction"
         if self._units_provider is not None:
             from pluton.units import format_angle
+
             return f"Rotate: {format_angle(math.degrees(self._swept_angle_from_cur()))} (15° snap)"
         return f"Rotate: {math.degrees(self._swept_angle_from_cur()):.0f} deg (15 deg snap)"
 
@@ -244,10 +251,7 @@ class RotateTool(Tool):
         if self._model is None or self._selection is None:
             return []
         inst_ids = self._selection.instances
-        return [
-            inst for inst in self._model.active_context.children
-            if inst.id in inst_ids
-        ]
+        return [inst for inst in self._model.active_context.children if inst.id in inst_ids]
 
     def _commit_instance_rotate(self, angle: float) -> None:
         """Emit TransformInstanceCommand(s) for the rotate gesture.
@@ -268,8 +272,7 @@ class RotateTool(Tool):
             local_normal = local_normal / ln
         delta_mat = mat_rotate(local_center, local_normal, angle)
         cmds = [
-            TransformInstanceCommand(inst, delta_mat @ inst.transform)
-            for inst in self._instances
+            TransformInstanceCommand(inst, delta_mat @ inst.transform) for inst in self._instances
         ]
         if not cmds:
             return
@@ -364,6 +367,7 @@ class RotateTool(Tool):
         # computing distances so the protractor radius is correct inside a
         # translated/rotated group.
         from pluton.viewport.picking import world_to_local_point
+
         local_center = world_to_local_point(self._center, self._world_transform())
         r = float(np.max(np.linalg.norm(pts - local_center, axis=1)))
         return max(r, 0.5)

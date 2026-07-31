@@ -4,6 +4,7 @@ Pure dataclasses mirroring the C++ bridge structs 1:1 — no Model, no _core, no
 Assimp. This lets the import-mapping layer be unit-tested with hand-built
 fixtures.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass

@@ -47,9 +47,9 @@ def selection_aabb(scene, vertex_ids):
 
 @dataclass(frozen=True)
 class GripSpec:
-    position: np.ndarray            # world handle position (3,) float32
-    opposite: np.ndarray            # the anchor: opposite handle position (3,) float32
-    axes: tuple[int, ...]           # which axes this grip drives (subset of {0,1,2})
+    position: np.ndarray  # world handle position (3,) float32
+    opposite: np.ndarray  # the anchor: opposite handle position (3,) float32
+    axes: tuple[int, ...]  # which axes this grip drives (subset of {0,1,2})
 
 
 def grip_specs(lo: np.ndarray, hi: np.ndarray) -> list[GripSpec]:
@@ -63,7 +63,7 @@ def grip_specs(lo: np.ndarray, hi: np.ndarray) -> list[GripSpec]:
     lo = np.asarray(lo, dtype=np.float32)
     hi = np.asarray(hi, dtype=np.float32)
     mid = (lo + hi) * 0.5
-    coord = (lo, mid, hi)   # per-axis index: 0=lo, 1=mid, 2=hi
+    coord = (lo, mid, hi)  # per-axis index: 0=lo, 1=mid, 2=hi
     degenerate = tuple(bool(hi[ax] == lo[ax]) for ax in (0, 1, 2))
     out: dict[tuple, GripSpec] = {}
     for ix in (0, 1, 2):

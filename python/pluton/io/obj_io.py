@@ -121,7 +121,7 @@ def read_obj_document(path) -> ObjDocument:
 
 @dataclass(frozen=True)
 class ImportSummary:
-    objects: int          # groups created (0 for the merge case)
+    objects: int  # groups created (0 for the merge case)
     faces_imported: int
     faces_skipped: int
 
@@ -129,8 +129,8 @@ class ImportSummary:
 @dataclass
 class BuildResult:
     summary: ImportSummary
-    created_instances: list          # Instances added to target_context (group case)
-    created_geometry: tuple          # (vertex_ids, edge_ids, face_ids) added to the scene (merge)
+    created_instances: list  # Instances added to target_context (group case)
+    created_geometry: tuple  # (vertex_ids, edge_ids, face_ids) added to the scene (merge)
 
 
 def _ensure_materials(materials, model) -> dict:
@@ -156,7 +156,7 @@ def _add_faces(mesh, faces, localmap, name_to_id) -> tuple[int, int]:
     for face in faces:
         try:
             loop = [localmap[gi] for gi in face.vertex_indices]
-            if len(set(loop)) < 3:                       # degenerate: < 3 unique verts
+            if len(set(loop)) < 3:  # degenerate: < 3 unique verts
                 skipped += 1
                 continue
             fid = mesh.add_face_from_loop(loop)
@@ -189,8 +189,9 @@ def build_obj_into_model(doc: ObjDocument, model, target_context) -> BuildResult
         created_instances: list = []
         imported = skipped = 0
         for obj in doc.objects:
-            used = sorted({gi for f in obj.faces for gi in f.vertex_indices
-                           if 0 <= gi < len(doc.vertices)})
+            used = sorted(
+                {gi for f in obj.faces for gi in f.vertex_indices if 0 <= gi < len(doc.vertices)}
+            )
             defn = model.new_definition(obj.name or "Imported", is_group=True)
             localmap = {}
             for gi in used:

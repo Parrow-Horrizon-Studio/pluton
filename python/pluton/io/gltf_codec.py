@@ -6,6 +6,7 @@ accessors packed into one binary buffer) and serialize to .glb bytes or
 SCALAR/UNSIGNED_INT. Node matrices are glTF column-major 16-float arrays
 (the caller supplies column-major order).
 """
+
 from __future__ import annotations
 
 import json
@@ -37,24 +38,30 @@ class GltfAsset:
     scene_roots: list = field(default_factory=list)
 
     def add_material(self, name, color) -> int:
-        self.materials.append({
-            "name": name,
-            "pbrMetallicRoughness": {
-                "baseColorFactor": [float(color[0]), float(color[1]), float(color[2]), 1.0],
-                "metallicFactor": 0.0,
-                "roughnessFactor": 1.0,
-            },
-        })
+        self.materials.append(
+            {
+                "name": name,
+                "pbrMetallicRoughness": {
+                    "baseColorFactor": [float(color[0]), float(color[1]), float(color[2]), 1.0],
+                    "metallicFactor": 0.0,
+                    "roughnessFactor": 1.0,
+                },
+            }
+        )
         return len(self.materials) - 1
 
     def _add_buffer_view(self, data: bytes, target: int) -> int:
         self._buffer.extend(b"\x00" * _pad4(len(self._buffer)))
         offset = len(self._buffer)
         self._buffer.extend(data)
-        self.buffer_views.append({
-            "buffer": 0, "byteOffset": offset,
-            "byteLength": len(data), "target": target,
-        })
+        self.buffer_views.append(
+            {
+                "buffer": 0,
+                "byteOffset": offset,
+                "byteLength": len(data),
+                "target": target,
+            }
+        )
         return len(self.buffer_views) - 1
 
     def _add_position_accessor(self, positions) -> int:
@@ -65,21 +72,29 @@ class GltfAsset:
         xs = [p[0] for p in positions]
         ys = [p[1] for p in positions]
         zs = [p[2] for p in positions]
-        self.accessors.append({
-            "bufferView": bv, "componentType": _FLOAT, "count": len(positions),
-            "type": "VEC3",
-            "min": [min(xs), min(ys), min(zs)],
-            "max": [max(xs), max(ys), max(zs)],
-        })
+        self.accessors.append(
+            {
+                "bufferView": bv,
+                "componentType": _FLOAT,
+                "count": len(positions),
+                "type": "VEC3",
+                "min": [min(xs), min(ys), min(zs)],
+                "max": [max(xs), max(ys), max(zs)],
+            }
+        )
         return len(self.accessors) - 1
 
     def _add_index_accessor(self, indices) -> int:
         data = struct.pack(f"<{len(indices)}I", *indices)
         bv = self._add_buffer_view(data, _ELEMENT_ARRAY_BUFFER)
-        self.accessors.append({
-            "bufferView": bv, "componentType": _UINT, "count": len(indices),
-            "type": "SCALAR",
-        })
+        self.accessors.append(
+            {
+                "bufferView": bv,
+                "componentType": _UINT,
+                "count": len(indices),
+                "type": "SCALAR",
+            }
+        )
         return len(self.accessors) - 1
 
     def add_mesh(self, primitives) -> int:

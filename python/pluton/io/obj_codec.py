@@ -15,8 +15,8 @@ from pluton.io.errors import PlutonFormatError
 
 @dataclass(frozen=True)
 class ObjFace:
-    vertex_indices: tuple[int, ...]      # 0-based, into ObjDocument.vertices
-    material: str | None = None          # sanitized material name, or None (unpainted)
+    vertex_indices: tuple[int, ...]  # 0-based, into ObjDocument.vertices
+    material: str | None = None  # sanitized material name, or None (unpainted)
 
 
 @dataclass(frozen=True)

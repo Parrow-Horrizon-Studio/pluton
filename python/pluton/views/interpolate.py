@@ -53,9 +53,7 @@ def _nlerp(a, b, t: float):
     return tuple(float(x) for x in (v / n))
 
 
-def interpolate_pose(
-    from_cam: CameraState, to_cam: CameraState, t: float
-) -> CameraState:
+def interpolate_pose(from_cam: CameraState, to_cam: CameraState, t: float) -> CameraState:
     """The eased-`t` pose between two CameraStates (t clamped to [0, 1])."""
     t = max(0.0, min(1.0, float(t)))
     tgt0, az0, el0, dist0, fov0 = _decompose(from_cam)

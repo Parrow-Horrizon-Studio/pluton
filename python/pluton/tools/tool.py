@@ -32,7 +32,7 @@ class ToolContext:
     # editing context changes
     request_context_rebuild: object = None
     active_material_provider: object = None  # M5b — callable () -> Material (active material)
-    set_active_material: object = None       # M5b — callable (int) -> None (eyedropper -> dock)
+    set_active_material: object = None  # M5b — callable (int) -> None (eyedropper -> dock)
 
 
 @dataclass(frozen=True, slots=True)

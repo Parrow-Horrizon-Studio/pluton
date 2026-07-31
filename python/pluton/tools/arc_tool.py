@@ -138,9 +138,9 @@ class ArcTool(Tool):
         segments = np.zeros((0, 3), dtype=np.float32)
         if self._plane is not None and self._cursor_uv is not None:
             if self._state == _State.PLACING_END:
-                world = self._plane.to_world(
-                    np.stack([_ORIGIN_UV, self._cursor_uv])
-                ).astype(np.float32)
+                world = self._plane.to_world(np.stack([_ORIGIN_UV, self._cursor_uv])).astype(
+                    np.float32
+                )
                 segments = polyline_segments(world, closed=False)
             elif self._state == _State.PLACING_BULGE and self._end_uv is not None:
                 bulge_uv = semicircle_snap(_ORIGIN_UV, self._end_uv, self._cursor_uv)
@@ -177,6 +177,7 @@ class ArcTool(Tool):
 
     def apply_typed_value(self, text, units) -> bool:
         from pluton.units import parse_length
+
         if self._plane is None:
             return False
         val = parse_length(text, units)
@@ -197,7 +198,7 @@ class ArcTool(Tool):
             mid = (_ORIGIN_UV + self._end_uv) / 2.0
             chord = self._end_uv - _ORIGIN_UV
             perp = np.array([-chord[1], chord[0]], np.float64)
-            perp /= (np.linalg.norm(perp) + 1e-12)
+            perp /= np.linalg.norm(perp) + 1e-12
             side = 1.0
             if self._cursor_uv is not None and float(np.dot(self._cursor_uv - mid, perp)) < 0:
                 side = -1.0

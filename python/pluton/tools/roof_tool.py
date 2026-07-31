@@ -4,6 +4,7 @@ Draw a rectangle footprint on the active drawing plane; a parametric
 Gable/Hip/Shed roof (from the options row) is baked as a "Roof" group over it,
 ridge auto-aligned to the longer edge. Up/Down arrows rotate the ridge 90°.
 """
+
 from __future__ import annotations
 
 import numpy as np
@@ -24,14 +25,14 @@ class RoofTool(Tool):
         self._scene = None
         self._model = None
         self._command_stack = None
-        self._first: np.ndarray | None = None      # world, incl. base z0
-        self._preview: np.ndarray | None = None     # world, x/y at z0
+        self._first: np.ndarray | None = None  # world, incl. base z0
+        self._preview: np.ndarray | None = None  # world, x/y at z0
         self._flip_quarters = 0
         self._snap_pos: np.ndarray | None = None
         self._snap_color: tuple[float, float, float] = _NEUTRAL
         self._snap_kind = 0
         self.kind = "gable"
-        self.slope = 30.0                            # degrees
+        self.slope = 30.0  # degrees
 
     @property
     def name(self) -> str:
@@ -62,7 +63,7 @@ class RoofTool(Tool):
         if width_x < 1e-9 or width_y < 1e-9:
             return None
         cx, cy = (x0 + x1) / 2.0, (y0 + y1) / 2.0
-        base_q = 0 if width_y >= width_x else 1       # ridge along the longer edge
+        base_q = 0 if width_y >= width_x else 1  # ridge along the longer edge
         q = (base_q + self._flip_quarters) % 4
         if q % 2 == 0:
             w, d = width_x, width_y

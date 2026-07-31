@@ -13,9 +13,7 @@ def capture_view(view_id, name, camera, tag_library, render_style) -> SavedView:
     """Snapshot the current camera, tag visibility and render style as a
     SavedView."""
     tag_visibility = {
-        t.id: bool(t.visible)
-        for t in tag_library.tags()
-        if t.id != tag_library.UNTAGGED_ID
+        t.id: bool(t.visible) for t in tag_library.tags() if t.id != tag_library.UNTAGGED_ID
     }
     return SavedView(
         id=int(view_id),

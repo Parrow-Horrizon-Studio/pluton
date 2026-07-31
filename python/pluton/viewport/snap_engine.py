@@ -57,11 +57,11 @@ _AXIS_DIRS = {
 # the axis color instead).
 MARKER_COLOR_BY_KIND = {
     SnapKind.GRID: (0.70, 0.70, 0.70),
-    SnapKind.MIDPOINT: (0.13, 0.77, 0.84),       # cyan
-    SnapKind.ENDPOINT: (0.15, 0.75, 0.26),       # green
-    SnapKind.ON_EDGE: (0.89, 0.23, 0.18),        # red
-    SnapKind.ON_FACE: (0.18, 0.42, 0.88),        # blue
-    SnapKind.INTERSECTION: (0.82, 0.23, 0.82),   # magenta
+    SnapKind.MIDPOINT: (0.13, 0.77, 0.84),  # cyan
+    SnapKind.ENDPOINT: (0.15, 0.75, 0.26),  # green
+    SnapKind.ON_EDGE: (0.89, 0.23, 0.18),  # red
+    SnapKind.ON_FACE: (0.18, 0.42, 0.88),  # blue
+    SnapKind.INTERSECTION: (0.82, 0.23, 0.82),  # magenta
 }
 
 # Precedence, highest first. Decoupled from the enum's integer values.
@@ -134,6 +134,7 @@ class SnapEngine:
             ray_origin_local = apply_mat(ray_origin, inv)[0]
             ray_dir_local = (inv[:3, :3] @ np.asarray(ray_dir, dtype=np.float64)).astype(np.float32)
         else:
+
             def _to_world(local_pos):  # type: ignore[misc]
                 return local_pos
 
@@ -143,8 +144,17 @@ class SnapEngine:
         cands: list[_Candidate] = []
         cands += self._endpoint_candidates(px, py, width, height, camera, scene, _to_world)
         cands += self._edge_point_candidates(
-            px, py, width, height, camera, scene, ray_origin, ray_dir, _to_world,
-            ray_origin_local, ray_dir_local,
+            px,
+            py,
+            width,
+            height,
+            camera,
+            scene,
+            ray_origin,
+            ray_dir,
+            _to_world,
+            ray_origin_local,
+            ray_dir_local,
         )
         face_cand = self._face_candidate(ray_origin_local, ray_dir_local, scene)
         if face_cand is not None:
@@ -167,7 +177,9 @@ class SnapEngine:
             return SnapResult(
                 kind=SnapKind.GRID,
                 world_position=np.array([gx, gy, 0.0], dtype=np.float32),
-                axis=None, vertex_id=None, label="Grid",
+                axis=None,
+                vertex_id=None,
+                label="Grid",
             )
         return self._none()
 
@@ -192,15 +204,19 @@ class SnapEngine:
         return SnapResult(
             kind=SnapKind.NONE,
             world_position=np.zeros(3, dtype=np.float32),
-            axis=None, vertex_id=None, label="—",
+            axis=None,
+            vertex_id=None,
+            label="—",
         )
 
     # --- candidate generators --------------------------------------------
 
     def _endpoint_candidates(self, px, py, width, height, camera, scene, _to_world=None):
         if _to_world is None:
+
             def _to_world(p):  # type: ignore[misc]
                 return p
+
         out: list[_Candidate] = []
         for v in scene.vertices_iter():
             world_pos = _to_world(v.position)
@@ -210,15 +226,31 @@ class SnapEngine:
             sx, sy, depth = proj
             d = math.hypot(sx - px, sy - py)
             if d <= self.PIXEL_TOLERANCE:
-                out.append(_Candidate(
-                    kind=SnapKind.ENDPOINT, world_position=np.asarray(world_pos, dtype=np.float32),
-                    screen_dist=d, depth=depth, label="Endpoint", vertex_id=v.id,
-                ))
+                out.append(
+                    _Candidate(
+                        kind=SnapKind.ENDPOINT,
+                        world_position=np.asarray(world_pos, dtype=np.float32),
+                        screen_dist=d,
+                        depth=depth,
+                        label="Endpoint",
+                        vertex_id=v.id,
+                    )
+                )
         return out
 
     def _edge_point_candidates(
-        self, px, py, width, height, camera, scene, ray_origin, ray_dir,
-        _to_world=None, ray_origin_local=None, ray_dir_local=None,
+        self,
+        px,
+        py,
+        width,
+        height,
+        camera,
+        scene,
+        ray_origin,
+        ray_dir,
+        _to_world=None,
+        ray_origin_local=None,
+        ray_dir_local=None,
     ):
         """Midpoint AND On-Edge candidates for each live edge.
 
@@ -232,8 +264,10 @@ class SnapEngine:
         finding the closest point on local-space segments).
         """
         if _to_world is None:
+
             def _to_world(p):  # type: ignore[misc]
                 return p
+
         if ray_origin_local is None:
             ray_origin_local = ray_origin
         if ray_dir_local is None:
@@ -251,12 +285,17 @@ class SnapEngine:
                 sx, sy, depth = proj
                 d = math.hypot(sx - px, sy - py)
                 if d <= self.PIXEL_TOLERANCE:
-                    out.append(_Candidate(
-                        kind=SnapKind.MIDPOINT,
-                        world_position=np.asarray(mid_world, dtype=np.float32),
-                        screen_dist=d, depth=depth, label="Midpoint",
-                        edge_id=e.id, edge_t=0.5,
-                    ))
+                    out.append(
+                        _Candidate(
+                            kind=SnapKind.MIDPOINT,
+                            world_position=np.asarray(mid_world, dtype=np.float32),
+                            screen_dist=d,
+                            depth=depth,
+                            label="Midpoint",
+                            edge_id=e.id,
+                            edge_t=0.5,
+                        )
+                    )
             # On-Edge: closest point on the local 3D segment to the local cursor ray.
             on_pt_local, t = _closest_point_on_segment_to_ray(
                 ray_origin_local, ray_dir_local, p1, p2
@@ -267,12 +306,17 @@ class SnapEngine:
                 sx, sy, depth = proj_e
                 d = math.hypot(sx - px, sy - py)
                 if d <= self.PIXEL_TOLERANCE:
-                    out.append(_Candidate(
-                        kind=SnapKind.ON_EDGE,
-                        world_position=np.asarray(on_pt_world, dtype=np.float32),
-                        screen_dist=d, depth=depth, label="On Edge",
-                        edge_id=e.id, edge_t=t,
-                    ))
+                    out.append(
+                        _Candidate(
+                            kind=SnapKind.ON_EDGE,
+                            world_position=np.asarray(on_pt_world, dtype=np.float32),
+                            screen_dist=d,
+                            depth=depth,
+                            label="On Edge",
+                            edge_id=e.id,
+                            edge_t=t,
+                        )
+                    )
         return out
 
     def _axis_candidates(self, px, py, width, height, camera, anchor, ray_origin, ray_dir):
@@ -286,11 +330,16 @@ class SnapEngine:
             sx, sy, depth = proj
             d = math.hypot(sx - px, sy - py)
             if d <= self.PIXEL_TOLERANCE:
-                out.append(_Candidate(
-                    kind=SnapKind.AXIS_LOCK, world_position=c_axis,
-                    screen_dist=d, depth=depth,
-                    label=f"on {_AXIS_NAMES[axis_idx]} Axis", axis=axis_idx,
-                ))
+                out.append(
+                    _Candidate(
+                        kind=SnapKind.AXIS_LOCK,
+                        world_position=c_axis,
+                        screen_dist=d,
+                        depth=depth,
+                        label=f"on {_AXIS_NAMES[axis_idx]} Axis",
+                        axis=axis_idx,
+                    )
+                )
         return out
 
     def _intersection_candidates(self, px, py, width, height, camera, scene, anchor):
@@ -311,11 +360,17 @@ class SnapEngine:
                 sx, sy, depth = proj
                 d = math.hypot(sx - px, sy - py)
                 if d <= self.PIXEL_TOLERANCE:
-                    out.append(_Candidate(
-                        kind=SnapKind.INTERSECTION, world_position=c_edge,
-                        screen_dist=d, depth=depth, label="Intersection",
-                        edge_id=e.id, edge_t=float(t),
-                    ))
+                    out.append(
+                        _Candidate(
+                            kind=SnapKind.INTERSECTION,
+                            world_position=c_edge,
+                            screen_dist=d,
+                            depth=depth,
+                            label="Intersection",
+                            edge_id=e.id,
+                            edge_t=float(t),
+                        )
+                    )
         return out
 
     def _face_candidate(self, ray_origin, ray_dir, scene):
@@ -325,8 +380,11 @@ class SnapEngine:
             return None
         point = np.array([hit.point[0], hit.point[1], hit.point[2]], dtype=np.float32)
         return _Candidate(
-            kind=SnapKind.ON_FACE, world_position=point,
-            screen_dist=0.0, depth=float(hit.t), label="On Face",
+            kind=SnapKind.ON_FACE,
+            world_position=point,
+            screen_dist=0.0,
+            depth=float(hit.t),
+            label="On Face",
             face_id=int(hit.face_id),
         )
 

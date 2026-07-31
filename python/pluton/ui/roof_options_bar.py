@@ -1,4 +1,5 @@
 """RoofOptionsBar (M7c): Gable|Hip|Shed toggle + slope field for the tool."""
+
 from __future__ import annotations
 
 from PySide6.QtWidgets import (

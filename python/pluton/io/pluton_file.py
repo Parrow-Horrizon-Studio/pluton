@@ -28,8 +28,11 @@ def save_document(path, model, camera, doc, render_style) -> None:
     """Write the document to `path` atomically (temp file + os.replace)."""
     path = Path(path)
     data = document_to_dict(model, camera, doc, render_style)
-    manifest = {"format": "pluton", "schema_version": SCHEMA_VERSION,
-                "app_version": _core_version()}
+    manifest = {
+        "format": "pluton",
+        "schema_version": SCHEMA_VERSION,
+        "app_version": _core_version(),
+    }
     tmp = path.with_name(path.name + ".tmp")
     try:
         with zipfile.ZipFile(tmp, "w", zipfile.ZIP_DEFLATED) as zf:
@@ -54,7 +57,8 @@ def load_document(path) -> LoadedDocument:
             # migration branch needed until a v2 format lands); only newer is rejected.
             if not isinstance(ver, int) or ver > SCHEMA_VERSION:
                 raise PlutonVersionError(
-                    f"file schema_version {ver} is newer than supported ({SCHEMA_VERSION})")
+                    f"file schema_version {ver} is newer than supported ({SCHEMA_VERSION})"
+                )
             data = json.loads(zf.read(_DOCUMENT))
     except zipfile.BadZipFile as e:
         raise PlutonFormatError("not a valid .pluton file (not a zip archive)") from e

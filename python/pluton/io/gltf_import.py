@@ -4,6 +4,7 @@ read_gltf_scene adapts the _core.import_gltf bridge into the neutral IR;
 build_gltf_into_model (Tasks 4-5) maps the IR into the Model. This is the only
 glTF module that imports Model/Scene.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -127,8 +128,8 @@ def _build_mesh_components(scene, model, mat_id_by_index):
 
 @dataclass(frozen=True)
 class GltfImportSummary:
-    nodes: int          # glTF nodes mapped (one object each)
-    meshes: int         # distinct Component meshes built
+    nodes: int  # glTF nodes mapped (one object each)
+    meshes: int  # distinct Component meshes built
     faces_imported: int  # faces built into Component meshes (per distinct mesh)
     faces_skipped: int
 
@@ -136,16 +137,13 @@ class GltfImportSummary:
 @dataclass
 class GltfBuildResult:
     summary: GltfImportSummary
-    root_instance: object   # the single Instance appended to target_context.children
+    root_instance: object  # the single Instance appended to target_context.children
 
 
 def _yup_to_zup() -> np.ndarray:
     """Rx(+90°): glTF Y-up -> Pluton Z-up. (x, y, z) -> (x, -z, y)."""
     return np.array(
-        [[1.0, 0.0, 0.0, 0.0],
-         [0.0, 0.0, -1.0, 0.0],
-         [0.0, 1.0, 0.0, 0.0],
-         [0.0, 0.0, 0.0, 1.0]],
+        [[1.0, 0.0, 0.0, 0.0], [0.0, 0.0, -1.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 0.0, 1.0]],
         dtype=np.float64,
     )
 
@@ -164,8 +162,9 @@ def build_gltf_into_model(scene, model, target_context, root_name="glTF") -> Glt
 
     for idx, node in enumerate(scene.nodes):
         local = np.array(node.transform, dtype=np.float64).reshape(4, 4)
-        mesh_idxs = [mi for mi in node.mesh_indices
-                     if 0 <= mi < len(meshdefs) and meshdefs[mi] is not None]
+        mesh_idxs = [
+            mi for mi in node.mesh_indices if 0 <= mi < len(meshdefs) and meshdefs[mi] is not None
+        ]
         collapsible = (len(mesh_idxs) == 1) and (idx not in has_children)
         if collapsible:
             inst = model.new_instance(meshdefs[mesh_idxs[0]], transform=local)
@@ -182,6 +181,6 @@ def build_gltf_into_model(scene, model, target_context, root_name="glTF") -> Glt
     target_context.children.append(root_instance)
 
     summary = GltfImportSummary(
-        nodes=len(scene.nodes), meshes=built,
-        faces_imported=imported, faces_skipped=skipped)
+        nodes=len(scene.nodes), meshes=built, faces_imported=imported, faces_skipped=skipped
+    )
     return GltfBuildResult(summary=summary, root_instance=root_instance)

@@ -145,6 +145,7 @@ class LineTool(Tool):
 
     def apply_typed_value(self, text, units) -> bool:
         from pluton.units import parse_length
+
         if (
             self._state != _State.DRAWING
             or self._preview_tip is None
@@ -161,12 +162,12 @@ class LineTool(Tool):
         anchor_local = np.asarray(s.vertex(self._gesture_vertex_ids[-1]).position, np.float32)
         wt = self._world_transform()
         from pluton.geometry.transforms import apply_mat, is_identity_transform
+
         if is_identity_transform(wt):
             anchor_world = anchor_local
         else:
             anchor_world = apply_mat(
-                anchor_local.astype(np.float64).reshape(1, 3),
-                np.asarray(wt, dtype=np.float64)
+                anchor_local.astype(np.float64).reshape(1, 3), np.asarray(wt, dtype=np.float64)
             )[0].astype(np.float32)
         direction = np.asarray(self._preview_tip, np.float32) - anchor_world
         norm = float(np.linalg.norm(direction))
@@ -175,6 +176,7 @@ class LineTool(Tool):
         target_world = (anchor_world + (direction / norm) * length).astype(np.float32)
         target_local = world_to_local_point(target_world, wt)
         from pluton.commands.scene_commands import AddEdgeCommand, AddVertexCommand
+
         assert self._composite is not None
         v_cmd = AddVertexCommand(target_local)
         v_cmd.do(s)
@@ -224,12 +226,13 @@ class LineTool(Tool):
             anchor_local = s.vertex(self._gesture_vertex_ids[-1]).position
             wt = self._world_transform()
             from pluton.geometry.transforms import apply_mat, is_identity_transform
+
             if is_identity_transform(wt):
                 anchor_world = anchor_local
             else:
                 anchor_world = apply_mat(
                     np.asarray(anchor_local, dtype=np.float64).reshape(1, 3),
-                    np.asarray(wt, dtype=np.float64)
+                    np.asarray(wt, dtype=np.float64),
                 )[0]
             segments = np.array(
                 [
@@ -264,16 +267,15 @@ class LineTool(Tool):
         s = self._scene  # type: ignore[assignment]
         if self._state != _State.DRAWING or s is None or not self._gesture_vertex_ids:
             return None
-        anchor = np.asarray(
-            s.vertex(self._gesture_vertex_ids[-1]).position, np.float32
-        ).copy()
+        anchor = np.asarray(s.vertex(self._gesture_vertex_ids[-1]).position, np.float32).copy()
         from pluton.geometry.transforms import apply_mat, is_identity_transform
+
         wt = self._world_transform()
         if is_identity_transform(wt):
             return anchor
-        return apply_mat(
-            anchor.astype(np.float64).reshape(1, 3), np.asarray(wt, dtype=np.float64)
-        )[0]
+        return apply_mat(anchor.astype(np.float64).reshape(1, 3), np.asarray(wt, dtype=np.float64))[
+            0
+        ]
 
     # ---- internal -------------------------------------------------------
     def _vertex_for_snap(self, snap, scene):
@@ -283,8 +285,10 @@ class LineTool(Tool):
 
         if snap.kind == SnapKind.ENDPOINT and snap.vertex_id is not None:
             return snap.vertex_id, None
-        if snap.edge_id is not None and snap.edge_t is not None and snap.kind in (
-            SnapKind.MIDPOINT, SnapKind.ON_EDGE, SnapKind.INTERSECTION
+        if (
+            snap.edge_id is not None
+            and snap.edge_t is not None
+            and snap.kind in (SnapKind.MIDPOINT, SnapKind.ON_EDGE, SnapKind.INTERSECTION)
         ):
             split = SplitEdgeCommand(snap.edge_id, snap.edge_t)
             split.do(scene)

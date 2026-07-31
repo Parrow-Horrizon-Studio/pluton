@@ -77,7 +77,10 @@ class EraserTool(Tool):
 
     def _pick_edge(self, event: QMouseEvent) -> int | None:
         hit = pick_selectable(
-            self._cursor(event), self._viewport_size(), self._camera, self._scene,
+            self._cursor(event),
+            self._viewport_size(),
+            self._camera,
+            self._scene,
             world_transform=self._world_transform(),
         )
         return hit[1] if hit is not None and hit[0] == "edge" else None
@@ -160,6 +163,7 @@ class EraserTool(Tool):
         if self._hovered_edge is not None and self._scene is not None:
             try:
                 from pluton.geometry.transforms import apply_mat, is_identity_transform
+
                 wt = self._world_transform()
                 use_wt = not is_identity_transform(wt)
                 wt_arr = np.asarray(wt, dtype=np.float64) if use_wt else None
@@ -177,13 +181,17 @@ class EraserTool(Tool):
                     if f_id is None:
                         continue
                     loop = self._scene.face_loop(f_id)
-                    fills.append(np.array(
-                        [
-                            _to_world(np.asarray(self._scene.vertex(v).position, dtype=np.float32))
-                            for v in loop
-                        ],
-                        dtype=np.float32,
-                    ))
+                    fills.append(
+                        np.array(
+                            [
+                                _to_world(
+                                    np.asarray(self._scene.vertex(v).position, dtype=np.float32)
+                                )
+                                for v in loop
+                            ],
+                            dtype=np.float32,
+                        )
+                    )
             except KeyError:
                 pass
         return ToolOverlay(

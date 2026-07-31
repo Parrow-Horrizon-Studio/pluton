@@ -26,7 +26,6 @@ def _point_segment_distance(px, py, ax, ay, bx, by) -> float:
     return math.hypot(px - cx, py - cy)
 
 
-
 def ray_into_local(origin, direction, world_transform):
     """Transform a world-space ray (origin point, direction vector) into the
     local frame of `world_transform`. Returns (origin, direction) unchanged when
@@ -44,6 +43,7 @@ def world_to_local_point(point, world_transform):
     world_transform. Returns the point unchanged when world_transform is None
     or identity (root context)."""
     from pluton.geometry.transforms import apply_mat, is_identity_transform, mat_invert
+
     if is_identity_transform(world_transform):
         return np.asarray(point, dtype=np.float32).reshape(3)
     return apply_mat(
@@ -136,8 +136,10 @@ def _segment_intersects_rect(ax, ay, bx, by, rect) -> bool:
         return True
     x0, y0, x1, y1 = rect
     sides = (
-        (x0, y0, x1, y0), (x1, y0, x1, y1),
-        (x1, y1, x0, y1), (x0, y1, x0, y0),
+        (x0, y0, x1, y0),
+        (x1, y0, x1, y1),
+        (x1, y1, x0, y1),
+        (x0, y1, x0, y0),
     )
     for cx, cy, dx, dy in sides:
         if _segments_cross(ax, ay, bx, by, cx, cy, dx, dy):
@@ -177,13 +179,18 @@ def entities_in_box(rect_px, mode, viewport_size, camera, scene, world_transform
         s1 = proj(scene.vertex(e.v1_id).position)
         s2 = proj(scene.vertex(e.v2_id).position)
         if mode == "window":
-            if s1 is not None and s2 is not None and \
-               _point_in_rect(s1[0], s1[1], rect) and _point_in_rect(s2[0], s2[1], rect):
+            if (
+                s1 is not None
+                and s2 is not None
+                and _point_in_rect(s1[0], s1[1], rect)
+                and _point_in_rect(s2[0], s2[1], rect)
+            ):
                 edges.add(e.id)
         else:  # crossing
             if s1 is None or s2 is None:
-                if (s1 is not None and _point_in_rect(s1[0], s1[1], rect)) or \
-                   (s2 is not None and _point_in_rect(s2[0], s2[1], rect)):
+                if (s1 is not None and _point_in_rect(s1[0], s1[1], rect)) or (
+                    s2 is not None and _point_in_rect(s2[0], s2[1], rect)
+                ):
                     edges.add(e.id)
             elif _segment_intersects_rect(s1[0], s1[1], s2[0], s2[1], rect):
                 edges.add(e.id)
@@ -200,8 +207,11 @@ def entities_in_box(rect_px, mode, viewport_size, camera, scene, world_transform
                 n = len(pts)
                 for i in range(n):
                     p, q = pts[i], pts[(i + 1) % n]
-                    if p is not None and q is not None and \
-                       _segment_intersects_rect(p[0], p[1], q[0], q[1], rect):
+                    if (
+                        p is not None
+                        and q is not None
+                        and _segment_intersects_rect(p[0], p[1], q[0], q[1], rect)
+                    ):
                         touched = True
                         break
             if not touched:

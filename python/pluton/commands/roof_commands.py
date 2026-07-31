@@ -1,4 +1,5 @@
 """CreateRoofCommand (M7c): bake a parametric roof as a "Roof" group."""
+
 from __future__ import annotations
 
 import numpy as np
@@ -38,7 +39,7 @@ class CreateRoofCommand(Command):
             self._definition = defn
             self._instance = model.new_instance(defn, self._transform)
         elif self._instance not in self._definition.instances:
-            self._definition.instances.append(self._instance)   # redo: re-register
+            self._definition.instances.append(self._instance)  # redo: re-register
         if self._instance is not None:
             self._target.children.append(self._instance)
 

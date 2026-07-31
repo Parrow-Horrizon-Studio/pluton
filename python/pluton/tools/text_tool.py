@@ -14,6 +14,7 @@ the shared helper both tools use so they cannot drift out of sync):
   `pluton.model.annotation.Label`), so each point is converted via
   `world_to_active_local` only at the moment it is written to storage.
 """
+
 from __future__ import annotations
 
 import numpy as np
@@ -104,9 +105,9 @@ class TextTool(Tool):
     def overlay(self) -> ToolOverlay:
         segments = np.zeros((0, 3), dtype=np.float32)
         if self._anchor_world is not None and self._cursor_world is not None:
-            segments = np.array(
-                [self._anchor_world, self._cursor_world], dtype=np.float32
-            ).reshape(-1, 3)
+            segments = np.array([self._anchor_world, self._cursor_world], dtype=np.float32).reshape(
+                -1, 3
+            )
         return ToolOverlay(
             rubber_band_segments=segments,
             rubber_band_color=NEUTRAL_PREVIEW_COLOR,

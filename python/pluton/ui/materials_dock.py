@@ -21,8 +21,7 @@ def _swatch_style(color: tuple[float, float, float], active: bool) -> str:
     r, g, b = (round(c * 255) for c in color)
     border = "3px solid #2f8fff" if active else "1px solid #555"
     return (
-        f"background-color: rgb({r},{g},{b}); border: {border}; "
-        f"min-width: 36px; min-height: 28px;"
+        f"background-color: rgb({r},{g},{b}); border: {border}; min-width: 36px; min-height: 28px;"
     )
 
 
