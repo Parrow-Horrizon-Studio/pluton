@@ -3,12 +3,18 @@
 namespace pluton {
 
 Mesh make_cube(float size) {
+    constexpr std::size_t kCubeFaces = 6;
+    constexpr std::size_t kVertsPerFace = 4;
+    constexpr std::size_t kFloatsPerVertex = 3;
+    constexpr std::size_t kTrisPerFace = 2;
+    constexpr std::size_t kIndicesPerTri = 3;
+
     const float h = size * 0.5f;
 
     Mesh mesh;
-    mesh.positions.reserve(72);
-    mesh.normals.reserve(72);
-    mesh.indices.reserve(36);
+    mesh.positions.reserve(kCubeFaces * kVertsPerFace * kFloatsPerVertex);
+    mesh.normals.reserve(kCubeFaces * kVertsPerFace * kFloatsPerVertex);
+    mesh.indices.reserve(kCubeFaces * kTrisPerFace * kIndicesPerTri);
 
     struct Face {
         float v[4][3];

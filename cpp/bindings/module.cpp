@@ -35,6 +35,12 @@ nb::ndarray<const float, nb::numpy, nb::shape<-1, 3>> as_vec3_array(const std::v
                                                                  {n, static_cast<std::size_t>(3)});
 }
 
+// Expose std::vector<std::uint32_t> as a read-only (M,) numpy view of the
+// data. The `const std::uint32_t` dtype is what makes the resulting numpy
+// array non-writable from Python; the `const_cast` below is required
+// because nanobind's `ndarray` constructor takes a non-const pointer even
+// though the read-only marker is the `const` template parameter, not
+// runtime mutability of the buffer.
 nb::ndarray<const std::uint32_t, nb::numpy, nb::shape<-1>> as_index_array(
     const std::vector<std::uint32_t>& v) {
     return nb::ndarray<const std::uint32_t, nb::numpy, nb::shape<-1>>(
@@ -86,8 +92,8 @@ NB_MODULE(_core, m) {
             "indices", [](Mesh& self) { return as_index_array(self.indices); },
             nb::rv_policy::reference_internal,
             "Triangle indices as a read-only (M,) uint32 numpy view.")
-        .def_prop_ro("vertex_count", &Mesh::vertex_count)
-        .def_prop_ro("triangle_count", &Mesh::triangle_count);
+        .def_prop_ro("vertex_count", &Mesh::vertex_count, "Number of vertices.")
+        .def_prop_ro("triangle_count", &Mesh::triangle_count, "Number of triangles.");
 
     m.def("make_cube", &pluton::make_cube, nb::arg("size") = 1.0f,
           "Create an axis-aligned cube of the given edge length, "

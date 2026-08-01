@@ -71,6 +71,7 @@ def test_default_constructed_mesh_is_empty():
     assert m.vertex_count == 0
     assert m.triangle_count == 0
     assert m.positions.shape == (0, 3)
+    assert m.normals.shape == (0, 3)
     assert m.indices.shape == (0,)
 
 
@@ -79,5 +80,8 @@ def test_mesh_array_is_a_view_not_a_copy():
     m = pluton.make_cube()
     a = np.asarray(m.positions)
     b = np.asarray(m.positions)
-    # Both views reference the same underlying buffer.
-    assert np.may_share_memory(a, b)
+    # Pointer equality is strictly stronger than np.may_share_memory (which
+    # is conservative and can false-positive on overlapping-but-distinct
+    # buffers). For our zero-copy `reference_internal` binding, both views
+    # must point at the exact same underlying buffer.
+    assert a.ctypes.data == b.ctypes.data

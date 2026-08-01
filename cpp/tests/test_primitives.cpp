@@ -57,6 +57,13 @@ TEST(PrimitivesCube, IndicesAreInRange) {
     }
 }
 
+// make_cube emits vertices grouped 4-per-face, one group per face in the
+// `faces[6]` array order (see primitives.cpp): verts [0,3] = face 0,
+// verts [4,7] = face 1, etc. This is guaranteed by the emission loop, which
+// pushes exactly 4 positions/normals per face before moving to the next
+// face — there is no interleaving. If that loop's structure ever changes
+// (e.g. to support a primitive with a variable vertex count per face), this
+// test's `4 * f + v` indexing assumption must change with it.
 TEST(PrimitivesCube, EachFaceHasOneNormal) {
     const auto cube = pluton::make_cube(1.0f);
     for (std::size_t f = 0; f < 6; ++f) {

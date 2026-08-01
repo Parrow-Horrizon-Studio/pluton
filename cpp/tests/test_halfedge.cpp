@@ -705,15 +705,49 @@ TEST(HalfEdgeMeshTest, DissolveEdge_RejectsAlreadyTombstonedEdge) {
 }
 
 TEST(HalfEdgeMeshTest, DissolveEdge_RejectsMultiSharedEdges) {
-    // Pathological topology where two faces share two edges (e.g., a folded
-    // bigon). Construct manually: two triangles sharing two edges. Building a
-    // valid multi-shared topology in our half-edge structure is awkward, so
-    // for now we accept that the guard exists and the unit test is exercised
-    // via the existing implementation path. We assert the API surface stays
-    // honest: a follow-up M3 issue can construct the actual degenerate input.
-    SUCCEED() << "Multi-shared rejection path covered by code review only; "
-              << "constructing a valid degenerate half-edge input requires a "
-              << "test helper not yet built. Filed as known carry-over.";
+    // Folded-bigon topology: a triangle and a quad that share TWO of the
+    // triangle's three edges (v0-v1 and v1-v2), not just one.
+    //
+    //   T1 = (v0, v1, v2)       edges: v0-v1, v1-v2, v2-v0
+    //   T2 = (v2, v1, v0, v3)   edges: v2-v1, v1-v0, v0-v3, v3-v2
+    //
+    // T2 walks v0-v1 and v1-v2 in the opposite direction from T1 (grabbing
+    // their twin half-edges), so f1 and f2 share both v0-v1 and v1-v2 while
+    // v2-v0 stays a boundary edge of f1 alone. Dissolving either shared edge
+    // would have to splice two faces that already touch along a second,
+    // unrelated edge — the guard must refuse rather than produce a
+    // self-intersecting merged loop.
+    pluton::HalfEdgeMesh m;
+    auto v0 = m.add_vertex(0, 0, 0);
+    auto v1 = m.add_vertex(1, 0, 0);
+    auto v2 = m.add_vertex(1, 1, 0);
+    auto v3 = m.add_vertex(0, 1, 0);
+    m.add_halfedge_pair(v0, v1);  // shared edge #1
+    m.add_halfedge_pair(v1, v2);  // shared edge #2
+    m.add_halfedge_pair(v2, v0);
+    m.add_halfedge_pair(v0, v3);
+    m.add_halfedge_pair(v3, v2);
+
+    auto f1 = m.add_face_from_loop({v0, v1, v2}, {(int)v0, (int)v1, (int)v2});
+    auto f2 = m.add_face_from_loop({v2, v1, v0, v3},
+                                   {(int)v2, (int)v1, (int)v0, (int)v2, (int)v0, (int)v3});
+
+    // Find the v0—v1 edge id (one of the two multiply-shared edges).
+    std::uint32_t shared_edge = pluton::HalfEdgeMesh::INVALID_ID;
+    for (std::uint32_t e = 0; e < m.halfedge_slab_size() / 2; ++e) {
+        auto verts = m.edge_vertices(e);
+        if ((verts[0] == v0 && verts[1] == v1) || (verts[0] == v1 && verts[1] == v0)) {
+            shared_edge = e;
+            break;
+        }
+    }
+    ASSERT_NE(shared_edge, pluton::HalfEdgeMesh::INVALID_ID);
+
+    EXPECT_EQ(m.dissolve_edge(shared_edge), pluton::HalfEdgeMesh::INVALID_ID);
+    // Mesh left unchanged: both faces and the edge remain live.
+    EXPECT_TRUE(m.face_is_live(f1));
+    EXPECT_TRUE(m.face_is_live(f2));
+    EXPECT_TRUE(m.edge_is_live(shared_edge));
 }
 
 // ---- split_edge -------------------------------------------------------------
