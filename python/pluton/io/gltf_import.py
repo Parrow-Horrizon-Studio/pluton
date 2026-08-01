@@ -179,6 +179,8 @@ def _validate_gltf_element_counts(doc: dict) -> None:
             f"glTF declares {len(accessors)} accessors, exceeding the {_MAX_ELEMENT_COUNT} ceiling"
         )
     buffer_views = doc.get("bufferViews") or []
+    if not isinstance(buffer_views, list):
+        raise PlutonFormatError("glTF 'bufferViews' is not an array")
     for i, accessor in enumerate(accessors):
         if not isinstance(accessor, dict):
             raise PlutonFormatError(f"glTF accessors[{i}] is not an object")
@@ -191,7 +193,9 @@ def _validate_gltf_element_counts(doc: dict) -> None:
             )
         buffer_view = accessor.get("bufferView")
         if buffer_view is not None and not (
-            isinstance(buffer_view, int) and 0 <= buffer_view < len(buffer_views)
+            isinstance(buffer_view, int)
+            and not isinstance(buffer_view, bool)
+            and 0 <= buffer_view < len(buffer_views)
         ):
             raise PlutonFormatError(
                 f"glTF accessors[{i}] references out-of-range bufferView {buffer_view!r}"
@@ -219,15 +223,25 @@ def _validate_gltf_element_counts(doc: dict) -> None:
             if not isinstance(prim, dict):
                 raise PlutonFormatError(f"glTF meshes[{mi}].primitives[{pi}] is not an object")
             attributes = prim.get("attributes") or {}
+            if not isinstance(attributes, dict):
+                raise PlutonFormatError(
+                    f"glTF meshes[{mi}].primitives[{pi}].attributes is not an object"
+                )
             for attr_name, accessor_index in attributes.items():
-                if not (isinstance(accessor_index, int) and 0 <= accessor_index < len(accessors)):
+                if not (
+                    isinstance(accessor_index, int)
+                    and not isinstance(accessor_index, bool)
+                    and 0 <= accessor_index < len(accessors)
+                ):
                     raise PlutonFormatError(
                         f"glTF meshes[{mi}].primitives[{pi}] attribute {attr_name!r} "
                         f"references out-of-range accessor {accessor_index!r}"
                     )
             indices = prim.get("indices")
             if indices is not None and not (
-                isinstance(indices, int) and 0 <= indices < len(accessors)
+                isinstance(indices, int)
+                and not isinstance(indices, bool)
+                and 0 <= indices < len(accessors)
             ):
                 raise PlutonFormatError(
                     f"glTF meshes[{mi}].primitives[{pi}] references out-of-range "

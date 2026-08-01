@@ -75,3 +75,23 @@ def test_count_guard_rejects_an_out_of_range_bufferview_reference():
     }
     with pytest.raises(PlutonFormatError):
         _validate_gltf_element_counts(doc)
+
+
+# Wrong-TYPED container fields must also yield PlutonFormatError, not a raw
+# AttributeError/TypeError leaking out of the validator.
+def test_count_guard_rejects_wrong_typed_attributes():
+    doc = {
+        "accessors": [{"componentType": 5126, "count": 3, "type": "VEC3"}],
+        "meshes": [{"primitives": [{"attributes": ["POSITION"]}]}],  # array, not object
+    }
+    with pytest.raises(PlutonFormatError):
+        _validate_gltf_element_counts(doc)
+
+
+def test_count_guard_rejects_wrong_typed_bufferviews():
+    doc = {
+        "accessors": [{"componentType": 5126, "count": 3, "type": "VEC3", "bufferView": 0}],
+        "bufferViews": 5,  # scalar, not an array
+    }
+    with pytest.raises(PlutonFormatError):
+        _validate_gltf_element_counts(doc)
