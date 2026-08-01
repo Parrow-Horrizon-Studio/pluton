@@ -229,3 +229,24 @@ def test_move_copy_zero_delta_does_not_crash(qtbot):
     # Both at origin
     for child in m.root.children:
         assert np.allclose(child.transform[:3, 3], [0, 0, 0], atol=1e-9)
+
+
+def test_move_copy_keeps_a_co_selected_annotation_selected(qtbot):
+    """Move-copy replaced the whole Selection, silently dropping a co-selected
+    annotation instead of copying, moving, or reporting it (#96)."""
+    from pluton.model.annotation import Dimension
+
+    m, inst = _make_model_with_component()
+    ann = Dimension(0, (0.0, 0.0, 0.0), (1.0, 0.0, 0.0), (0.0, 0.2, 0.0))
+    m.active_context.annotations.append(ann)
+
+    sel = Selection()
+    sel.replace(instances={inst.id}, annotations={ann.id})
+    stack = CommandStack()
+    tool = MoveTool()
+    tool.activate(_ctx(m, stack, sel))
+
+    tool.on_mouse_press(_press(), _snap([0, 0, 0]))
+    tool.on_mouse_release(_release_ctrl(5, 0), _snap([5, 0, 0]))
+
+    assert ann.id in sel.annotations, "move-copy dropped the co-selected annotation"

@@ -1,8 +1,10 @@
 """The Circle drawing tool.
 
 Two-click gesture: first click sets the center (and resolves the drawing plane
-from the snap), second click sets the radius. Commits a 24-segment polygonal
-circle (N vertices + N edges + 1 face). ESC cancels.
+from the snap), second click sets the radius. Commits an N-segment polygonal
+circle (N vertices + N edges + 1 face; default 24, typed "Ns" during the
+gesture changes the count -- mirrors PolygonTool's sides completion). ESC
+cancels.
 """
 
 from __future__ import annotations
@@ -25,6 +27,8 @@ from pluton.viewport.snap_engine import MARKER_COLOR_BY_KIND
 _NEUTRAL_COLOR = (0.85, 0.85, 0.85)
 _MIN_RADIUS = 1e-4
 _SEGMENTS = 24
+_MIN_SEGMENTS = 3
+_MAX_SEGMENTS = 64
 
 
 class _State(Enum):
@@ -51,6 +55,7 @@ class CircleTool(Tool):
         self._center: np.ndarray | None = None
         self._radius = 0.0
         self._start_angle = 0.0
+        self._segments = _SEGMENTS  # remembered across gestures (like Polygon's sides)
         self._snap_marker_pos: np.ndarray | None = None
         self._snap_marker_color: tuple[float, float, float] = _NEUTRAL_COLOR
         self._snap_marker_kind = 0
@@ -104,7 +109,7 @@ class CircleTool(Tool):
         if radius < _MIN_RADIUS:
             return
         start_angle = float(np.arctan2(uv[1], uv[0]))
-        ring_uv = circle(radius, _SEGMENTS, start_angle)
+        ring_uv = circle(radius, self._segments, start_angle)
         world = self._plane.to_world(ring_uv).astype(np.float32)
         composite = build_closed_face(
             s, world, name="Draw Circle", world_transform=self._world_transform()
@@ -114,14 +119,22 @@ class CircleTool(Tool):
         self._reset_gesture()
 
     def apply_typed_value(self, text, units) -> bool:
-        from pluton.units import parse_length
-
         if self._state != _State.DRAWING or self._plane is None:
             return False
-        radius = parse_length(text, units)
+        t = text.strip().lower()
+        if t.endswith("s"):
+            try:
+                n = int(t[:-1])
+            except ValueError:
+                return False
+            self._segments = max(_MIN_SEGMENTS, min(_MAX_SEGMENTS, n))
+            return True
+        from pluton.units import parse_length
+
+        radius = parse_length(t, units)
         if radius is None or radius < _MIN_RADIUS:
             return False
-        ring_uv = circle(radius, _SEGMENTS, self._start_angle)
+        ring_uv = circle(radius, self._segments, self._start_angle)
         world = self._plane.to_world(ring_uv).astype(np.float32)
         composite = build_closed_face(
             self._scene, world, name="Draw Circle", world_transform=self._world_transform()
@@ -141,7 +154,7 @@ class CircleTool(Tool):
             and self._plane is not None
             and self._radius >= _MIN_RADIUS
         ):
-            ring_uv = circle(self._radius, _SEGMENTS, self._start_angle)
+            ring_uv = circle(self._radius, self._segments, self._start_angle)
             world = self._plane.to_world(ring_uv).astype(np.float32)
             segments = polyline_segments(world, closed=True)
         else:
@@ -165,6 +178,11 @@ class CircleTool(Tool):
         if self._state == _State.DRAWING and self._center is not None:
             return self._center.copy()
         return None
+
+    @property
+    def segments(self) -> int:
+        """Current segment count (remembered across gestures; see PolygonTool._sides)."""
+        return self._segments
 
     @property
     def status_text(self) -> str | None:

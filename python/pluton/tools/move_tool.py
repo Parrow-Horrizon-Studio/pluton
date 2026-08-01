@@ -259,10 +259,16 @@ class MoveTool(Tool):
                 cmd = CompositeCommand(name="Move-copy", children=created_cmds)
             if self._stack is not None:
                 self._stack.execute(cmd, self._model)
-            # Update selection to the newly created instances
+            # Update selection to the newly created instances. Selection.replace
+            # zeroes every field not passed, so a co-selected annotation (which
+            # is neither copied nor moved by move-copy -- it just stays where
+            # it is) must have its id threaded through explicitly here, or it
+            # is silently dropped from the selection (#96).
             if self._selection is not None:
                 new_ids = [c.created_instance.id for c in created_cmds]
-                self._selection.replace(instances=new_ids)
+                self._selection.replace(
+                    instances=new_ids, annotations=set(self._selection.annotations)
+                )
         else:
             cmds = [
                 TransformInstanceCommand(inst, delta_mat @ inst.transform)

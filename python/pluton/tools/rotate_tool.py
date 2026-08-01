@@ -79,6 +79,10 @@ class RotateTool(Tool):
         # instance-mode state
         self._instance_mode = False
         self._instances: list = []
+        # Last signed angle (degrees) resolved via apply_typed_value. NOT reset
+        # by _reset() -- it's a read-back for callers/tests, like Polygon's
+        # persisted _sides, not part of the in-gesture state machine.
+        self._angle_degrees = 0.0
 
     def _world_transform(self):
         return self._model.active_world_transform if self._model is not None else None
@@ -184,12 +188,21 @@ class RotateTool(Tool):
         deg = parse_angle(text)
         if deg is None:
             return False
-        sign = 1.0 if self._swept_angle_from_cur() >= 0 else -1.0
-        angle = sign * math.radians(deg)
+        if deg < 0:
+            # An explicit negative sign is authoritative: rotate the other
+            # way, regardless of which direction the mouse happened to
+            # sweep. (Previously this was multiplied by sign(swept_angle),
+            # which could cancel an explicit "-" back to positive when the
+            # sweep itself was already negative.)
+            angle = math.radians(deg)
+        else:
+            sign = 1.0 if self._swept_angle_from_cur() >= 0 else -1.0
+            angle = sign * math.radians(deg)
 
         if self._instance_mode:
             self._commit_instance_rotate(angle)
             self._reset()
+            self._angle_degrees = math.degrees(angle)
             return True
 
         moves = self._compute_moves(angle)
@@ -199,6 +212,7 @@ class RotateTool(Tool):
         if not cmd.is_empty() and self._stack is not None:
             self._stack.execute(cmd, self._scene)
         self._reset()
+        self._angle_degrees = math.degrees(angle)
         return True
 
     def overlay(self) -> ToolOverlay:
@@ -231,6 +245,11 @@ class RotateTool(Tool):
     @property
     def anchor_or_none(self) -> np.ndarray | None:
         return self._center.copy() if self._stage != _Stage.IDLE else None
+
+    @property
+    def angle_degrees(self) -> float:
+        """Signed angle (degrees) last resolved via apply_typed_value."""
+        return self._angle_degrees
 
     @property
     def status_text(self) -> str | None:
