@@ -54,3 +54,31 @@ def test_render_style_persists_through_save_new_open(qtbot, tmp_path):
                         loaded.style, path)
     assert win._render_style.face_style is FaceStyle.MONOCHROME
     assert win._render_style.xray is True
+
+
+def test_clamped_reorder_is_a_true_noop(qtbot):
+    win = _make_window(qtbot)
+    win._on_create_view()
+    win._on_create_view()
+    first = win._model.views.views()[0].id
+    order_before = [v.id for v in win._model.views.views()]
+
+    win._doc_controller.mark_clean()
+    undo_before = win._command_stack.can_undo
+
+    win._on_reorder_view(first, -1)          # already at the top -> no-op
+
+    assert [v.id for v in win._model.views.views()] == order_before
+    assert win._doc_controller.dirty is False, "a no-op reorder must not dirty the document"
+    assert win._command_stack.can_undo == undo_before, "a no-op reorder must not push undo"
+
+
+def test_real_reorder_still_works(qtbot):
+    win = _make_window(qtbot)
+    win._on_create_view()
+    win._on_create_view()
+    first = win._model.views.views()[0].id
+
+    win._on_reorder_view(first, +1)          # genuine move
+    assert win._model.views.views()[1].id == first
+    assert win._command_stack.can_undo

@@ -881,8 +881,13 @@ class MainWindow(QMainWindow):
         self._scenes_dock.refresh(select_id=int(view_id))
 
     def _on_reorder_view(self, view_id: int, direction: int) -> None:
-        self._command_stack.execute(ReorderViewCommand(int(view_id), int(direction)), self._model)
-        self._scenes_dock.refresh(select_id=int(view_id))
+        vid = int(view_id)
+        index = self._model.views.index_of(vid)
+        target = index + (1 if int(direction) > 0 else -1)
+        if index < 0 or target < 0 or target >= len(self._model.views.views()):
+            return
+        self._command_stack.execute(ReorderViewCommand(vid, int(direction)), self._model)
+        self._scenes_dock.refresh(select_id=vid)
 
     def _on_recall_view(self, view_id: int) -> None:
         view = self._model.views.get(int(view_id))
