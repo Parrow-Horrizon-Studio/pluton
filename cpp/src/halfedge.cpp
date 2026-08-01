@@ -338,9 +338,12 @@ void HalfEdgeMesh::restore_face(std::uint32_t f_id, const std::vector<std::uint3
 }
 
 void HalfEdgeMesh::clear() noexcept {
-    vertices_.clear();
-    halfedges_.clear();
-    faces_.clear();
+    // Tombstone rather than shrink: keep the slabs at size so ids stay
+    // addressable and restore_* can revive them (the invariant every other
+    // removal follows). Memory reclamation is out of scope — see #16 (M10).
+    for (auto& v : vertices_) v.alive = false;
+    for (auto& h : halfedges_) h.alive = false;
+    for (auto& f : faces_) f.alive = false;
     position_index_.clear();
     edge_index_.clear();
     dirty_ = true;

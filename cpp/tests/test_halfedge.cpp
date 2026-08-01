@@ -22,6 +22,22 @@ TEST(HalfEdgeMeshTest, ClearSetsDirty) {
     EXPECT_EQ(m.vertex_slab_size(), 0u);
 }
 
+TEST(HalfEdgeMeshTest, ClearTombstonesSoRestoreStillWorks) {
+    pluton::HalfEdgeMesh m;
+    auto v0 = m.add_vertex(0.0f, 0.0f, 0.0f);
+    auto v1 = m.add_vertex(1.0f, 0.0f, 0.0f);
+    m.add_halfedge_pair(v0, v1);
+
+    m.clear();
+
+    // Everything is dead...
+    EXPECT_FALSE(m.vertex_is_live(v0));
+    EXPECT_FALSE(m.vertex_is_live(v1));
+    // ...but the ids are still addressable, so undo can revive them.
+    EXPECT_NO_THROW(m.restore_vertex(v0, 0.0f, 0.0f, 0.0f));
+    EXPECT_TRUE(m.vertex_is_live(v0));
+}
+
 TEST(HalfEdgeMeshTest, InvalidIdConstant) {
     EXPECT_EQ(pluton::HalfEdgeMesh::INVALID_ID, 0xFFFFFFFFu);
 }
@@ -337,7 +353,10 @@ TEST(HalfEdgeMeshTest, ClearEmptiesEverythingAndMarksDirty) {
 
     m.clear();
     EXPECT_TRUE(m.is_dirty());
-    EXPECT_EQ(m.vertex_slab_size(), 0u);
+    // clear() tombstones rather than shrinks (so ids stay addressable for
+    // restore_*, see ClearTombstonesSoRestoreStillWorks) -- the slab keeps
+    // its size, but nothing in it is live anymore.
+    EXPECT_EQ(m.vertex_slab_size(), 2u);
     EXPECT_EQ(m.next_live_vertex(0), pluton::HalfEdgeMesh::INVALID_ID);
 }
 
