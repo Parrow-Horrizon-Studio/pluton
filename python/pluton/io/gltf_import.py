@@ -7,20 +7,53 @@ glTF module that imports Model/Scene.
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
+from pathlib import Path
 
 import numpy as np
 
 from pluton.io.errors import PlutonFormatError
 from pluton.io.gltf_scene import GltfMaterial, GltfMesh, GltfNode, GltfSceneData
 
+# glTF import is an untrusted-input path (Assimp has a real CVE history): a
+# file someone emailed you is a normal thing to import. Everything below runs
+# BEFORE the file reaches Assimp, so a hostile file is rejected deterministically
+# rather than risking a native crash/hang/OOM (#84).
+
+# On-disk size ceiling. Protects against simply reading/parsing a gigantic
+# file (whether or not its *declared* counts are absurd) before Assimp is
+# even invoked. Checked via stat(), never by reading the file into memory.
+# A few hundred MiB comfortably covers any legitimate architectural asset.
+_MAX_GLTF_BYTES = 512 * 1024 * 1024  # 512 MiB
+
+# Ceiling for any declared "how many of these" number in the glTF JSON:
+# accessors[].count, and the number of accessors/meshes/primitives. Protects
+# against the #84 CVE class where a tiny JSON payload declares an
+# astronomical count (e.g. 10**12 vertices) that a naive parser tries to
+# honor, driving unbounded allocation in native code. 50M is far beyond any
+# real mesh (millions of vertices is already an extreme architectural model)
+# while comfortably rejecting hostile counts.
+_MAX_ELEMENT_COUNT = 50_000_000
+
+# GLB (binary glTF) container layout: magic + version + total length, then
+# one or more length-prefixed chunks; the first chunk is conventionally JSON.
+_GLB_MAGIC = b"glTF"
+_GLB_HEADER_SIZE = 12
+_GLB_CHUNK_HEADER_SIZE = 8
+_GLB_JSON_CHUNK_TYPE = b"JSON"
+
 
 def read_gltf_scene(path) -> GltfSceneData:
     """Read a .glb/.gltf via the Assimp bridge into a GltfSceneData.
 
-    Raises PlutonFormatError if the file cannot be decoded. OSError from a
-    genuinely missing/unreadable path propagates.
+    Raises PlutonFormatError if the file cannot be decoded, is larger than
+    _MAX_GLTF_BYTES, or declares element counts larger than
+    _MAX_ELEMENT_COUNT. OSError from a genuinely missing/unreadable path
+    propagates.
     """
+    _validate_gltf_file_before_parse(path)
+
     import pluton._core as core
 
     try:
@@ -50,6 +83,156 @@ def read_gltf_scene(path) -> GltfSceneData:
         for n in raw.nodes
     )
     return GltfSceneData(nodes=nodes, meshes=meshes, materials=materials)
+
+
+def _validate_gltf_file_before_parse(path) -> None:
+    """Pre-parse validation that runs before Assimp ever sees the file.
+
+    Checks size first (cheap, no file content read), then for JSON-based
+    .gltf files parses and validates the document; for binary .glb files at
+    minimum the size ceiling applies, plus a best-effort JSON-chunk check
+    when the GLB header is well-formed enough to extract one.
+    """
+    p = Path(path)
+    # os.path.getsize/.stat() reads only filesystem metadata, not file
+    # content, so this is cheap even for a maliciously huge file.
+    size = p.stat().st_size  # OSError propagates for missing/unreadable path
+    if size > _MAX_GLTF_BYTES:
+        raise PlutonFormatError(
+            f"glTF file is {size} bytes, exceeding the {_MAX_GLTF_BYTES} byte ceiling"
+        )
+
+    if p.suffix.lower() == ".glb":
+        doc = _read_glb_json_chunk(p)
+    else:
+        doc = _read_gltf_json(p)
+
+    if doc is not None:
+        _validate_gltf_element_counts(doc)
+
+
+def _read_gltf_json(p: Path) -> dict:
+    """Read+parse a .gltf (JSON) file. A truncated or non-JSON file surfaces
+    as PlutonFormatError deterministically, rather than being handed to
+    Assimp's native parser first."""
+    try:
+        text = p.read_text(encoding="utf-8")
+    except UnicodeDecodeError as e:
+        raise PlutonFormatError(f"glTF file is not valid UTF-8 text: {e}") from e
+    try:
+        doc = json.loads(text)
+    except json.JSONDecodeError as e:
+        raise PlutonFormatError(f"glTF file is not valid JSON: {e}") from e
+    if not isinstance(doc, dict):
+        raise PlutonFormatError("glTF file JSON root is not an object")
+    return doc
+
+
+def _read_glb_json_chunk(p: Path) -> dict | None:
+    """Best-effort extraction of the JSON chunk from a .glb container.
+
+    Returns None (deferring to Assimp + the existing exception wrapping)
+    when the header doesn't look like a well-formed GLB we can safely parse
+    ourselves -- we never want our own parsing here to be a *new* source of
+    crashes on malformed input.
+    """
+    with p.open("rb") as f:
+        header = f.read(_GLB_HEADER_SIZE)
+        if len(header) < _GLB_HEADER_SIZE or header[:4] != _GLB_MAGIC:
+            return None
+        chunk_header = f.read(_GLB_CHUNK_HEADER_SIZE)
+        if len(chunk_header) < _GLB_CHUNK_HEADER_SIZE:
+            return None
+        chunk_length = int.from_bytes(chunk_header[0:4], "little")
+        chunk_type = chunk_header[4:8]
+        if chunk_type != _GLB_JSON_CHUNK_TYPE:
+            return None
+        if chunk_length > _MAX_GLTF_BYTES:
+            raise PlutonFormatError(
+                f"glTF GLB JSON chunk declares {chunk_length} bytes, "
+                f"exceeding the {_MAX_GLTF_BYTES} byte ceiling"
+            )
+        json_bytes = f.read(chunk_length)
+        if len(json_bytes) < chunk_length:
+            raise PlutonFormatError("glTF GLB JSON chunk is truncated")
+
+    try:
+        doc = json.loads(json_bytes)
+    except json.JSONDecodeError as e:
+        raise PlutonFormatError(f"glTF GLB JSON chunk is not valid JSON: {e}") from e
+    if not isinstance(doc, dict):
+        raise PlutonFormatError("glTF GLB JSON chunk root is not an object")
+    return doc
+
+
+def _validate_gltf_element_counts(doc: dict) -> None:
+    """Reject declared accessor/mesh/primitive counts (and out-of-range
+    accessor/bufferView/attribute references) that exceed a sane ceiling,
+    before Assimp allocates anything on their behalf. This is the guard for
+    the #84 CVE class: a tiny JSON payload can declare an astronomically
+    large accessor.count that a parser may try to honor."""
+    accessors = doc.get("accessors") or []
+    if not isinstance(accessors, list):
+        raise PlutonFormatError("glTF 'accessors' is not an array")
+    if len(accessors) > _MAX_ELEMENT_COUNT:
+        raise PlutonFormatError(
+            f"glTF declares {len(accessors)} accessors, exceeding the {_MAX_ELEMENT_COUNT} ceiling"
+        )
+    buffer_views = doc.get("bufferViews") or []
+    for i, accessor in enumerate(accessors):
+        if not isinstance(accessor, dict):
+            raise PlutonFormatError(f"glTF accessors[{i}] is not an object")
+        count = accessor.get("count")
+        is_int_count = isinstance(count, int) and not isinstance(count, bool)
+        if not (is_int_count and 0 <= count <= _MAX_ELEMENT_COUNT):
+            raise PlutonFormatError(
+                f"glTF accessors[{i}].count={count!r} exceeds the "
+                f"{_MAX_ELEMENT_COUNT} element ceiling"
+            )
+        buffer_view = accessor.get("bufferView")
+        if buffer_view is not None and not (
+            isinstance(buffer_view, int) and 0 <= buffer_view < len(buffer_views)
+        ):
+            raise PlutonFormatError(
+                f"glTF accessors[{i}] references out-of-range bufferView {buffer_view!r}"
+            )
+
+    meshes = doc.get("meshes") or []
+    if not isinstance(meshes, list):
+        raise PlutonFormatError("glTF 'meshes' is not an array")
+    if len(meshes) > _MAX_ELEMENT_COUNT:
+        raise PlutonFormatError(
+            f"glTF declares {len(meshes)} meshes, exceeding the {_MAX_ELEMENT_COUNT} ceiling"
+        )
+    for mi, mesh in enumerate(meshes):
+        if not isinstance(mesh, dict):
+            raise PlutonFormatError(f"glTF meshes[{mi}] is not an object")
+        primitives = mesh.get("primitives") or []
+        if not isinstance(primitives, list):
+            raise PlutonFormatError(f"glTF meshes[{mi}].primitives is not an array")
+        if len(primitives) > _MAX_ELEMENT_COUNT:
+            raise PlutonFormatError(
+                f"glTF meshes[{mi}] declares {len(primitives)} primitives, "
+                f"exceeding the {_MAX_ELEMENT_COUNT} ceiling"
+            )
+        for pi, prim in enumerate(primitives):
+            if not isinstance(prim, dict):
+                raise PlutonFormatError(f"glTF meshes[{mi}].primitives[{pi}] is not an object")
+            attributes = prim.get("attributes") or {}
+            for attr_name, accessor_index in attributes.items():
+                if not (isinstance(accessor_index, int) and 0 <= accessor_index < len(accessors)):
+                    raise PlutonFormatError(
+                        f"glTF meshes[{mi}].primitives[{pi}] attribute {attr_name!r} "
+                        f"references out-of-range accessor {accessor_index!r}"
+                    )
+            indices = prim.get("indices")
+            if indices is not None and not (
+                isinstance(indices, int) and 0 <= indices < len(accessors)
+            ):
+                raise PlutonFormatError(
+                    f"glTF meshes[{mi}].primitives[{pi}] references out-of-range "
+                    f"indices accessor {indices!r}"
+                )
 
 
 _DEFAULT_MATERIAL_NAMES = {"", "DefaultMaterial"}
