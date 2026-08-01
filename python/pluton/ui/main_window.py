@@ -790,12 +790,38 @@ class MainWindow(QMainWindow):
 
     def _on_after_undo_redo(self) -> None:
         """Called by CommandStack listeners after every successful undo or redo."""
-        self._selection.clear()
-        self._refresh_selection_status()
+        # revalidate_active_path() must run FIRST: _prune_selection() reads
+        # self._model.active_context, which is only meaningful once the active
+        # path has been walked back to the nearest still-reachable instance.
         self._model.revalidate_active_path()
+        self._prune_selection()
+        self._refresh_selection_status()
         self._rebuild_tool_context()
         self._refresh_breadcrumb()
         self._scenes_dock.refresh()
+
+    def _prune_selection(self) -> None:
+        """Keep only selected entities still live in the active context (#46).
+
+        An undo/redo can leave previously-selected ids dangling (e.g. undoing
+        a create, or redoing a delete) while leaving others untouched (e.g. a
+        transform). Rather than blanket-clearing the selection on every
+        undo/redo -- which drops it even when nothing selected was touched --
+        intersect each of the four selection sets with the ids still live in
+        the active context. Mirrors the defensive, walk-and-check style of
+        Model.revalidate_active_path().
+        """
+        ctx = self._model.active_context
+        live_instances = {inst.id for inst in ctx.children}
+        live_edges = {e.id for e in ctx.mesh.edges_iter()}
+        live_faces = {f.id for f in ctx.mesh.faces_iter()}
+        live_annotations = {a.id for a in ctx.annotations}
+        self._selection.replace(
+            edges=self._selection.edges & live_edges,
+            faces=self._selection.faces & live_faces,
+            instances=self._selection.instances & live_instances,
+            annotations=self._selection.annotations & live_annotations,
+        )
 
     def _on_set_face_style(self, style: FaceStyle) -> None:
         self._render_style.face_style = style

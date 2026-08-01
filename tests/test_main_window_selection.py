@@ -58,13 +58,21 @@ def test_delete_selected_edge_cascades_face(win):
     assert len(list(scene.faces_iter())) == f0 - 1
 
 
-def test_undo_clears_selection(win):
+# M7.1 T9 (#46): this test used to assert that undo ALWAYS empties the
+# selection, encoding the old blanket `self._selection.clear()` bug. Under
+# the prune contract (_on_after_undo_redo keeps ids still live in the active
+# context, drops the rest), the assertion is wrong: RemoveFaceCommand.undo
+# restores the face with its ORIGINAL id, so `fid` is live again by the time
+# the post-undo hook runs, and a selection re-pointed at that same id must
+# survive -- not be wiped.
+def test_undo_of_delete_keeps_selection_for_the_restored_entity(win):
     scene, fid = _quad(win)
     win._selection.replace(faces=[fid])
     win._on_delete_selection()
+    # Simulate re-pointing the selection at the same id before undo runs.
     win._selection.replace(faces=[fid])
     win._command_stack.undo()
-    assert win._selection.is_empty()
+    assert fid in win._selection.faces
 
 
 def test_empty_selection_delete_is_noop(win):
