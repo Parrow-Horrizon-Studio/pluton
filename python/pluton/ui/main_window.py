@@ -907,12 +907,14 @@ class MainWindow(QMainWindow):
     def _set_units_metric(self, unit: str) -> None:
         self._doc.set_metric(unit)
         self._refresh_status_text()
+        self._refresh_tool_options()
         self._viewport.update()
         self._on_document_changed()
 
     def _set_units_imperial(self) -> None:
         self._doc.set_imperial()
         self._refresh_status_text()
+        self._refresh_tool_options()
         self._viewport.update()
         self._on_document_changed()
 
