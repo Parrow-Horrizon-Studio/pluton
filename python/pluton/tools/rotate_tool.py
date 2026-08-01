@@ -70,6 +70,7 @@ class RotateTool(Tool):
         self._stage = _Stage.IDLE
         self._center = np.zeros(3, np.float32)
         self._normal = np.array([0, 0, 1], np.float32)
+        self._inferred_normal = np.array([0, 0, 1], np.float32)
         self._start_dir = np.array([1, 0, 0], np.float32)
         self._cur_dir = np.array([1, 0, 0], np.float32)
         self._forced_axis: int | None = None
@@ -130,7 +131,8 @@ class RotateTool(Tool):
                     return
                 self._orig = {v: self._scene.vertex(v).position.copy() for v in self._vertex_ids}
             self._center = p.copy()
-            self._normal = self._effective_normal(self._pick_plane_normal(event))
+            self._inferred_normal = np.asarray(self._pick_plane_normal(event), np.float32)
+            self._normal = self._effective_normal(self._inferred_normal)
             self._stage = _Stage.HAVE_CENTER
             return
 
@@ -172,7 +174,7 @@ class RotateTool(Tool):
             cur = order.index(self._forced_axis)
             self._forced_axis = order[(cur + 1) % len(order)]
             if self._stage != _Stage.IDLE:
-                self._normal = self._effective_normal(self._normal)
+                self._normal = self._effective_normal(self._inferred_normal)
 
     def apply_typed_value(self, text, units) -> bool:
         from pluton.units import parse_angle
@@ -400,6 +402,7 @@ class RotateTool(Tool):
         self._stage = _Stage.IDLE
         self._center = np.zeros(3, np.float32)
         self._normal = np.array([0, 0, 1], np.float32)
+        self._inferred_normal = np.array([0, 0, 1], np.float32)
         self._start_dir = np.array([1, 0, 0], np.float32)
         self._cur_dir = np.array([1, 0, 0], np.float32)
         self._forced_axis = None
