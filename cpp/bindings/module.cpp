@@ -43,6 +43,30 @@ nb::ndarray<const std::uint32_t, nb::numpy, nb::shape<-1>> as_index_array(
 
 }  // namespace
 
+// Issue #20 — the pytest run occasionally prints "nanobind: leaked N
+// instances/types/functions!" on stderr at interpreter shutdown. Investigated
+// (M7.1 T18) and confirmed BENIGN, not a binding-lifetime bug:
+//   - A single HalfEdgeMesh instance surviving to shutdown does not reproduce
+//     from direct construct/destroy cycles in isolation, even at 5000x, so
+//     it is not caused by a missing/incorrect ownership policy here.
+//   - It appears only when many Qt-hosted tests run in the same process
+//     (e.g. tests/test_main_window_*.py constructing MainWindow() — and by
+//     extension a Scene/HalfEdgeMesh — without qtbot teardown). Running a
+//     partial suite left dozens of instances pending; running the full
+//     suite left just one. That pattern is consistent with Qt's C++-side
+//     event/timer/widget bookkeeping holding the last few Python objects
+//     alive until the QApplication itself tears down — not something
+//     Python's own cyclic GC can reach (forcing extra gc.collect() at
+//     session end did not clear it), and unrelated to reference-counting
+//     in this module's bindings.
+//   - The reported "leaked types" / "leaked functions" are a knock-on effect
+//     of that one live instance keeping its type object (and therefore the
+//     type's whole method table) referenced; they are not independent leaks.
+// nanobind (2.12.0, pinned) only exposes a single process-wide toggle for
+// this diagnostic (nb::set_leak_warnings), which would also hide a genuine
+// future instance leak — so we deliberately do NOT suppress it here. Accept
+// the shutdown-time message as expected noise. See:
+// https://nanobind.readthedocs.io/en/latest/refleaks.html
 NB_MODULE(_core, m) {
     m.doc() = "Pluton C++ core module";
 
