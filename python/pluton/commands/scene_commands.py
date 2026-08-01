@@ -119,12 +119,11 @@ class RemoveVertexCommand(Command):
 
 
 class _AddVertexAtId(Command):
-    """Internal: re-adds a vertex at a specific ID. Used by ClearSceneCommand.undo.
+    """Internal: revive a vertex at its original ID. Used by ClearSceneCommand.undo.
 
-    After scene.clear() the slab is empty; restore_vertex requires the slot to
-    already exist.  We therefore call scene.add_vertex() so the slab grows
-    back.  When the scene is empty and vertices are re-added in their original
-    order the C++ HalfEdgeMesh assigns the same sequential IDs.
+    Since HalfEdgeMesh::clear() tombstones rather than shrinking the slabs
+    (M7.1 #19), the original slot still exists after a clear, so restore_vertex
+    revives it at its exact id — keeping later edge/face references valid.
     """
 
     def __init__(self, v_id: int, position: np.ndarray) -> None:
@@ -132,7 +131,7 @@ class _AddVertexAtId(Command):
         self._position = np.asarray(position, dtype=np.float32).reshape(3).copy()
 
     def do(self, scene) -> None:
-        scene.add_vertex(self._position)
+        scene.restore_vertex(self._v_id, self._position)
 
     def undo(self, scene) -> None:
         scene.remove_vertex(self._v_id)
@@ -146,7 +145,7 @@ class _AddEdgeAtId(Command):
         self._v1, self._v2 = v1_id, v2_id
 
     def do(self, scene) -> None:
-        scene.add_edge(self._v1, self._v2)
+        scene.restore_edge(self._e_id, self._v1, self._v2)
 
     def undo(self, scene) -> None:
         scene.remove_edge(self._e_id)
@@ -160,7 +159,7 @@ class _AddFaceAtId(Command):
         self._loop = tuple(loop)
 
     def do(self, scene) -> None:
-        scene.add_face_from_loop(self._loop)
+        scene.restore_face(self._f_id, self._loop)
 
     def undo(self, scene) -> None:
         scene.remove_face(self._f_id)
