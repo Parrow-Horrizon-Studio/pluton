@@ -321,3 +321,20 @@ def test_clear_empties_both_stacks():
     stack.clear()
     assert not stack.can_undo
     assert not stack.can_redo
+
+
+def test_clear_does_not_fire_the_change_listener():
+    """clear() is documented as firing no listeners (used when switching
+    documents, where the caller resets UI state through a different path).
+    Guard that against a future change silently wiring clear() into
+    _fire_change() and double-notifying listeners on document swap."""
+    from pluton.commands.command_stack import CommandStack
+
+    stack = CommandStack()
+    stack.execute(_NoOpCmd(), object())
+    calls = []
+    stack.add_change_listener(lambda: calls.append(1))
+
+    stack.clear()
+
+    assert calls == [], "clear() must not fire the change listener"

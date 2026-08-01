@@ -45,6 +45,26 @@ def test_canonical_extents_and_origin():
     assert np.allclose(hi, [0.6, 0.1, 1.5])
 
 
+def test_door_panel_does_not_protrude_when_depth_below_panel_thickness():
+    """depth < panel thickness (0.04m) used to make iy0 negative and iy1 >
+    depth, so the panel box protruded past the flush outer wall faces on
+    both sides. opening_frame now clamps depth up to the infill thickness."""
+    verts, _ = opening_frame("door", width=0.9, height=2.1, depth=0.01)
+    a = np.array(verts, dtype=np.float64)
+    y = a[:, 1]
+    assert y.min() >= -1e-9, "panel must not protrude before the front wall face (y=0)"
+    assert y.max() <= 0.04 + 1e-9, "panel must not protrude past the clamped depth"
+
+
+def test_window_glazing_does_not_protrude_when_depth_below_glazing_thickness():
+    """Same clamp, window side: depth < glazing thickness (0.006m)."""
+    verts, _ = opening_frame("window", width=1.2, height=1.2, depth=0.001)
+    a = np.array(verts, dtype=np.float64)
+    y = a[:, 1]
+    assert y.min() >= -1e-9, "glazing must not protrude before the front wall face (y=0)"
+    assert y.max() <= 0.006 + 1e-9, "glazing must not protrude past the clamped depth"
+
+
 def test_door_panel_vs_window_sill_at_the_floor():
     # At the floor (z==0), a door's solid panel is thin in depth, adding two
     # interior depth values (iy0, iy1) on top of the jambs' (0, d) -> 4 distinct

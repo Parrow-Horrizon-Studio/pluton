@@ -46,9 +46,13 @@ def world_to_local_point(point, world_transform):
 
     if is_identity_transform(world_transform):
         return np.asarray(point, dtype=np.float32).reshape(3)
-    return apply_mat(
+    # apply_mat computes in float64 internally (matrix precision); cast back to
+    # float32 so callers get a consistent dtype regardless of which branch ran
+    # (some callers feed this straight into float32 vertex-position writes).
+    local = apply_mat(
         np.asarray(point, dtype=np.float64).reshape(1, 3), mat_invert(world_transform)
     )[0]
+    return local.astype(np.float32)
 
 
 def pick_selectable(cursor_screen, viewport_size, camera, scene, world_transform=None):

@@ -26,6 +26,18 @@ def test_get_unknown_falls_back_to_untagged():
     assert lib.get(999).id == TagLibrary.UNTAGGED_ID
 
 
+def test_from_records_with_empty_list_falls_back_to_sentinel_untagged():
+    """Empty records is a real (if unusual) input: no tags survive into
+    _tags/_order, but `get()` must still return a usable Untagged rather
+    than KeyError/None — the sentinel Untagged seeded by `cls()` before the
+    records loop overwrote the dicts is the fallback that makes this work."""
+    lib = TagLibrary.from_records([], next_id=1)
+    assert lib.tags() == []
+    untagged = lib.get(TagLibrary.UNTAGGED_ID)
+    assert untagged is not None
+    assert untagged.name == "Untagged"
+
+
 def test_set_visible_toggles_user_tag():
     lib = TagLibrary()
     w = lib.add("Walls")

@@ -66,6 +66,13 @@ public:
     bool face_is_live(std::uint32_t f_id) const noexcept;
 
     std::array<float, 3> vertex_position(std::uint32_t v_id) const;
+
+    /// One outgoing half-edge slab index for `v_id` (INVALID_ID if the
+    /// vertex has none, e.g. freshly added with no incident edges yet).
+    /// Exposed for testing internal bookkeeping (e.g. that dissolve_edge
+    /// repoints a stale reference); no adjacency walk reads it yet.
+    std::uint32_t vertex_outgoing_halfedge(std::uint32_t v_id) const;
+
     std::array<std::uint32_t, 2> edge_vertices(std::uint32_t e_id) const;
     std::vector<std::uint32_t> face_loop_vertices(std::uint32_t f_id) const;
     std::vector<std::int32_t> face_triangles(std::uint32_t f_id) const;
@@ -75,7 +82,9 @@ public:
     ///   - the angle between unit normals satisfies dot(n1, n2) > angle_tol_cos, AND
     ///   - every vertex of either face lies within `dist_tol` of the other face's plane.
     /// Returns false (without crashing) for degenerate-normal faces (|n| < 1e-7).
-    /// Project defaults: angle_tol_cos = cos(0.5°) ≈ 0.9999619f, dist_tol = 1e-4f.
+    /// Both tolerances are required (no defaults at this layer); Scene.faces_are_coplanar
+    /// applies the project's recommended values: angle_tol_cos = cos(0.5°) ≈ 0.9999619f,
+    /// dist_tol = 1e-4f.
     bool faces_are_coplanar(std::uint32_t f1_id, std::uint32_t f2_id, float angle_tol_cos,
                             float dist_tol) const;
 

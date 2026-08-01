@@ -59,6 +59,12 @@ def opening_frame(kind, width, height, depth):
     hx = w / 2.0
     is_window = kind == "window"
     infill_t = _GLAZING_T if is_window else _PANEL_T
+    # Clamp depth to at least the infill thickness: below that, iy0 (=
+    # (d-infill_t)/2) goes negative and iy1 (= (d+infill_t)/2) exceeds d, so
+    # the panel/glazing box protrudes past the flush outer face on both
+    # sides. Not reachable at the 100mm default depth; only the `d > _EPS`
+    # guard existed before, which didn't cover this case.
+    d = max(d, infill_t)
     iy0 = (d - infill_t) / 2.0
     iy1 = (d + infill_t) / 2.0
 

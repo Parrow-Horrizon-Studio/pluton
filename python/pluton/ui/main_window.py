@@ -184,8 +184,9 @@ class MainWindow(QMainWindow):
         )
         self._opening_options_bar.hide()
 
-        # Roof options bar (M7c, Task 6) — pitch/overhang fields for the Roof
-        # tool; shown only while that tool is active (see _refresh_tool_options).
+        # Roof options bar (M7c, Task 6) — kind toggle + slope field for the
+        # Roof tool (M7c is flush; no overhang field); shown only while that
+        # tool is active (see _refresh_tool_options).
         self._roof_options_bar = RoofOptionsBar(
             self._roof_tool, units_provider=lambda: self._doc.units
         )

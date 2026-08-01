@@ -22,7 +22,11 @@ def test_import_plain_box_exposes_full_struct():
     node = s.nodes[0]
     assert node.parent == -1
     assert len(node.transform) == 16
-    assert isinstance(list(node.mesh_indices), list)
+    # isinstance(list(x), list) is always true regardless of x's contents —
+    # assert the element type instead, which is the thing actually worth
+    # pinning (mesh_indices must be a sequence of ints into s.meshes).
+    mesh_indices = list(node.mesh_indices)
+    assert all(isinstance(i, int) for i in mesh_indices)
     assert len(s.materials) >= 1
     assert len(s.materials[0].base_color) == 4
 

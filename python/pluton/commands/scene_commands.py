@@ -351,8 +351,12 @@ class SplitEdgeCommand(Command):
     def _redo(self, scene) -> None:
         if self._was_noop:
             return
-        assert self._orig_verts is not None and self._w_pos is not None
-        assert self.new_vertex_id is not None and self._e1 is not None and self._e2 is not None
+        assert self._orig_verts is not None and self._w_pos is not None, (
+            "SplitEdgeCommand._redo before _first_do"
+        )
+        assert self.new_vertex_id is not None and self._e1 is not None and self._e2 is not None, (
+            "SplitEdgeCommand._redo before _first_do"
+        )
         va, vb = self._orig_verts
         w = self.new_vertex_id
         scene.restore_vertex(w, self._w_pos)
@@ -367,8 +371,10 @@ class SplitEdgeCommand(Command):
     def undo(self, scene) -> None:
         if self._was_noop:
             return
-        assert self._orig_verts is not None
-        assert self.new_vertex_id is not None and self._e1 is not None and self._e2 is not None
+        assert self._orig_verts is not None, "SplitEdgeCommand.undo before do"
+        assert self.new_vertex_id is not None and self._e1 is not None and self._e2 is not None, (
+            "SplitEdgeCommand.undo before do"
+        )
         for fid, _loop in self._new_faces:
             scene.remove_face(fid)
         scene.remove_edge(self._e1)

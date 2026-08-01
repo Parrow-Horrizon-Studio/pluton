@@ -104,6 +104,30 @@ def test_up_arrow_flips_ridge_axis():
     assert _apex_axis(m2) == "x"
 
 
+def test_flip_quarters_resets_after_each_completed_gesture():
+    # Flip the ridge with Up during the first gesture and commit it, then run
+    # a SECOND gesture on the same footprint shape with no further flip key.
+    # If _flip_quarters were sticky across gestures (the M7c carry-over bug),
+    # the second roof would inherit the first's flip; it must instead default
+    # back to ridge-along-the-longer-edge.
+    model = Model()
+    stack = CommandStack()
+    tool = RoofTool()
+    tool.activate(_ctx(model, stack))
+
+    tool.on_mouse_press(None, _Snap(0.0, 0.0))
+    tool.on_key_press(
+        QKeyEvent(QKeyEvent.Type.KeyPress, Qt.Key.Key_Up, Qt.KeyboardModifier.NoModifier)
+    )
+    tool.on_mouse_move(None, _Snap(4.0, 8.0))
+    tool.on_mouse_press(None, _Snap(4.0, 8.0))
+    assert _apex_axis(model) == "x"  # flipped, as in test_up_arrow_flips_ridge_axis
+
+    _place(tool, 0.0, 0.0, 4.0, 8.0)  # second gesture, no flip key pressed
+    assert len(model.active_context.children) == 2
+    assert _apex_axis(model) == "y"  # back to default (longer-edge) orientation
+
+
 def test_placement_inside_entered_group_lands_at_world_footprint():
     # Placing a roof while entered into a translated+rotated group must still
     # land at the DRAWN WORLD footprint (transform_local = inv(active_world) @ m_world

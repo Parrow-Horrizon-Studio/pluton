@@ -685,7 +685,9 @@ TEST(HalfEdgeMeshTest, DissolveEdge_RejectsBoundaryEdge) {
     auto v0 = m.add_vertex(0, 0, 0);
     auto v1 = m.add_vertex(1, 0, 0);
     auto v2 = m.add_vertex(0, 1, 0);
-    auto e01 = m.add_halfedge_pair(v0, v1) / 2u;
+    // add_halfedge_pair already returns the edge id — no /2u needed (see
+    // DissolveEdge_RejectsAlreadyTombstonedEdge for the same fix).
+    auto e01 = m.add_halfedge_pair(v0, v1);
     m.add_halfedge_pair(v1, v2);
     m.add_halfedge_pair(v2, v0);
     m.add_face_from_loop({v0, v1, v2}, {(int)v0, (int)v1, (int)v2});
@@ -694,11 +696,57 @@ TEST(HalfEdgeMeshTest, DissolveEdge_RejectsBoundaryEdge) {
     EXPECT_TRUE(m.edge_is_live(e01));  // unchanged
 }
 
+TEST(HalfEdgeMeshTest, DissolveEdge_RepointsStaleOutgoingHalfedge) {
+    // T1 = (v0, v1, v2)   T2 = (v1, v3, v2)   shared edge: v1—v2
+    // v1's cached outgoing_he is set (by T1's construction, first-touch-wins)
+    // to the v1->v2 half-edge — exactly the one dissolve_edge tombstones.
+    // Verify it gets repointed to a still-live outgoing half-edge instead of
+    // dangling at a now-dead slab index.
+    pluton::HalfEdgeMesh m;
+    auto v0 = m.add_vertex(0, 0, 0);
+    auto v1 = m.add_vertex(1, 0, 0);
+    auto v2 = m.add_vertex(1, 1, 0);
+    auto v3 = m.add_vertex(2, 1, 0);
+    m.add_halfedge_pair(v0, v1);
+    m.add_halfedge_pair(v1, v2);  // shared
+    m.add_halfedge_pair(v2, v0);
+    m.add_halfedge_pair(v1, v3);
+    m.add_halfedge_pair(v3, v2);
+    m.add_face_from_loop({v0, v1, v2}, {(int)v0, (int)v1, (int)v2});
+    m.add_face_from_loop({v1, v3, v2}, {(int)v1, (int)v3, (int)v2});
+
+    const std::uint32_t stale_he = m.vertex_outgoing_halfedge(v1);
+    ASSERT_EQ(m.halfedge_origin(stale_he), v1);
+
+    std::uint32_t shared_edge = pluton::HalfEdgeMesh::INVALID_ID;
+    for (std::uint32_t e = 0; e < m.halfedge_slab_size() / 2; ++e) {
+        auto verts = m.edge_vertices(e);
+        if ((verts[0] == v1 && verts[1] == v2) || (verts[0] == v2 && verts[1] == v1)) {
+            shared_edge = e;
+            break;
+        }
+    }
+    ASSERT_NE(shared_edge, pluton::HalfEdgeMesh::INVALID_ID);
+    ASSERT_EQ(stale_he, 2u * shared_edge)
+        << "sanity check: v1's outgoing_he must be the exact half-edge dissolve_edge tombstones "
+        << "for this test to exercise the repoint path";
+
+    ASSERT_NE(m.dissolve_edge(shared_edge), pluton::HalfEdgeMesh::INVALID_ID);
+
+    const std::uint32_t new_he = m.vertex_outgoing_halfedge(v1);
+    EXPECT_NE(new_he, stale_he) << "outgoing_he must not still point at the tombstoned half-edge";
+    EXPECT_NE(new_he, pluton::HalfEdgeMesh::INVALID_ID);
+    EXPECT_EQ(m.halfedge_origin(new_he), v1);
+}
+
 TEST(HalfEdgeMeshTest, DissolveEdge_RejectsAlreadyTombstonedEdge) {
     pluton::HalfEdgeMesh m;
     auto v0 = m.add_vertex(0, 0, 0);
     auto v1 = m.add_vertex(1, 0, 0);
-    auto e = m.add_halfedge_pair(v0, v1) / 2u;
+    // add_halfedge_pair already returns the edge id (not a half-edge slab
+    // index) — no /2u needed. Both happened to be edge 0 here, so the stray
+    // /2u previously passed by coincidence rather than correctness.
+    auto e = m.add_halfedge_pair(v0, v1);
     m.remove_edge(e);
 
     EXPECT_EQ(m.dissolve_edge(e), pluton::HalfEdgeMesh::INVALID_ID);

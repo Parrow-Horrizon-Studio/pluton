@@ -48,6 +48,43 @@ def test_write_obj_no_materials_returns_none_mtl():
     assert "f 1 2 3" in obj_text
 
 
+def test_write_obj_groups_multiple_faces_per_material_into_one_usemtl_run():
+    """write_obj sorts faces (unpainted first, then by material name) so each
+    material gets exactly ONE `usemtl` line covering a contiguous run of
+    faces, not a `usemtl` re-emitted before every single face. Only a
+    single-face case was previously covered — this exercises >1 face per
+    material plus an interleaved unpainted face and multiple materials."""
+    doc = ObjDocument(
+        vertices=((0, 0, 0), (1, 0, 0), (1, 1, 0), (0, 1, 0), (2, 0, 0), (2, 1, 0)),
+        objects=(
+            ObjObject(
+                "Room",
+                (
+                    ObjFace((0, 1, 2), "Blue"),
+                    ObjFace((1, 4, 5), None),  # unpainted, sorts first
+                    ObjFace((2, 3, 0), "Blue"),
+                    ObjFace((0, 2, 4), "Red"),
+                ),
+            ),
+        ),
+        materials={"Blue": (0.2, 0.3, 0.8), "Red": (0.8, 0.2, 0.2)},
+        has_object_tags=True,
+    )
+    obj_text, _mtl_text = write_obj(doc, "room.mtl")
+    lines = obj_text.splitlines()
+    usemtl_lines = [i for i, ln in enumerate(lines) if ln.startswith("usemtl")]
+
+    # Exactly one usemtl per material (Blue's two faces share a single run).
+    assert [lines[i] for i in usemtl_lines] == ["usemtl Blue", "usemtl Red"]
+
+    # The unpainted face's `f` line precedes the first usemtl (sort-first, no
+    # usemtl emitted for it), and both Blue faces' `f` lines fall between the
+    # Blue usemtl and the Red usemtl (a contiguous run, not re-split).
+    f_lines = [i for i, ln in enumerate(lines) if ln.startswith("f ")]
+    assert f_lines[0] < usemtl_lines[0]  # unpainted face first
+    assert usemtl_lines[0] < f_lines[1] < f_lines[2] < usemtl_lines[1]  # both Blue faces grouped
+
+
 def test_parse_multi_object_with_materials():
     obj = "\n".join([
         "mtllib x.mtl",

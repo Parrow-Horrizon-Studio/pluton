@@ -133,8 +133,8 @@ NB_MODULE(_core, m) {
         .def("faces_are_coplanar", &HalfEdgeMesh::faces_are_coplanar, nb::arg("f1_id"),
              nb::arg("f2_id"), nb::arg("angle_tol_cos"), nb::arg("dist_tol"),
              "True iff |dot(n1, n2)| > angle_tol_cos AND every vertex of either "
-             "face lies within dist_tol of the other face's plane. Project defaults: "
-             "cos(0.5°) ≈ 0.9999619, 1e-4.")
+             "face lies within dist_tol of the other face's plane. Recommended values "
+             "(applied by Scene.faces_are_coplanar): cos(0.5°) ≈ 0.9999619, 1e-4.")
         .def("split_edge", &HalfEdgeMesh::split_edge, nb::arg("edge_id"), nb::arg("t"),
              "Split an edge at parameter t in (0,1), inserting a vertex and "
              "rebuilding incident faces. Returns a SplitEdgeResult, or None if "

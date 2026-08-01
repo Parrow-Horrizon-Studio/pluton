@@ -27,6 +27,7 @@ from pluton.commands.scene_commands import (
     DissolveEdgeCommand,
     RemoveFaceCommand,
 )
+from pluton.geometry.transforms import apply_mat, is_identity_transform
 from pluton.tools.tool import Tool, ToolContext, ToolOverlay
 
 # Visual constants (RGBA).
@@ -170,8 +171,6 @@ class PushPullTool(Tool):
         # renderer can draw them at identity (consistent with every other tool).
         # At root the world transform is identity → this is a no-op.
         if polygons:
-            from pluton.geometry.transforms import apply_mat, is_identity_transform
-
             wt = self._world_transform()
             if wt is not None and not is_identity_transform(wt):
                 polygons = [

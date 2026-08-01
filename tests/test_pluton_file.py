@@ -47,6 +47,20 @@ def test_load_rejects_newer_schema(tmp_path):
         load_document(path)
 
 
+def test_load_rejects_non_int_schema_version(tmp_path):
+    """schema_version must be an int; a non-int value (e.g. a string) must hit
+    the `not isinstance(ver, int)` branch of the version gate, not the
+    `ver > SCHEMA_VERSION` numeric-comparison branch (which test_load_rejects_
+    newer_schema already covers with an int that's simply too big)."""
+    path = tmp_path / "bad_version_type.pluton"
+    with zipfile.ZipFile(path, "w") as zf:
+        zf.writestr("manifest.json",
+                    json.dumps({"format": "pluton", "schema_version": "not-a-number"}))
+        zf.writestr("document.json", "{}")
+    with pytest.raises(PlutonVersionError):
+        load_document(path)
+
+
 def test_load_rejects_foreign_format(tmp_path):
     path = tmp_path / "alien.pluton"
     with zipfile.ZipFile(path, "w") as zf:

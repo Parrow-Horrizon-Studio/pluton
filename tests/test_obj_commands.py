@@ -44,3 +44,4 @@ def test_import_command_merge_do_undo():
     cmd.undo(model)
     assert len(list(ctx.mesh.faces_iter())) == 0          # geometry removed
     assert len(list(ctx.mesh.vertices_iter())) == 0
+    assert len(list(ctx.mesh.edges_iter())) == 0          # fully locks the empty-mesh invariant

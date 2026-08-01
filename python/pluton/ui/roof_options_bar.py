@@ -47,6 +47,7 @@ class RoofOptionsBar(QWidget):
     def set_kind(self, kind) -> None:
         self._tool.kind = kind
         self._buttons[kind].setChecked(True)
+        self.refresh()
 
     def refresh(self) -> None:
         self._buttons[self._tool.kind].setChecked(True)

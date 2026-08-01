@@ -66,6 +66,13 @@ def _project_loop_to_2d_for_earcut(positions_3d: np.ndarray) -> np.ndarray:
 class Scene:
     """Editable polygonal scene with stable integer IDs (C++ HalfEdgeMesh backed)."""
 
+    # Recommended tolerances for faces_are_coplanar (cos(0.5 deg) angle tolerance,
+    # 1e-4 world-unit distance tolerance). Kept at the class top since they're
+    # part of Scene's public contract, not an implementation detail local to
+    # one method.
+    _ANGLE_TOL_COS = 0.9999619  # cos(0.5°)
+    _DIST_TOL = 1e-4
+
     def __init__(self) -> None:
         self._mesh = HalfEdgeMesh()
         self._face_materials: dict[int, int] = {}
@@ -259,10 +266,6 @@ class Scene:
 
     # ---- M3c additions ----
 
-    # Project-default tolerances for faces_are_coplanar.
-    _ANGLE_TOL_COS = 0.9999619  # cos(0.5°)
-    _DIST_TOL = 1e-4
-
     def dissolve_edge(self, edge_id: int) -> int | None:
         """Dissolve an edge between two adjacent faces.
 
@@ -275,7 +278,12 @@ class Scene:
         return int(result)
 
     def faces_are_coplanar(self, f1_id: int, f2_id: int) -> bool:
-        """Project-default tolerances applied. See HalfEdgeMesh.faces_are_coplanar."""
+        """True iff the two faces' normals and planes agree within tolerance.
+
+        Applies Scene's recommended tolerances (_ANGLE_TOL_COS, _DIST_TOL) to
+        HalfEdgeMesh.faces_are_coplanar, which takes tolerances as required
+        arguments with no built-in defaults of its own.
+        """
         return bool(
             self._mesh.faces_are_coplanar(
                 f1_id,

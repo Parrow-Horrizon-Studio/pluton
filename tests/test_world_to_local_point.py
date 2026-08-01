@@ -38,6 +38,17 @@ def test_translate_plus10x_world_10_2_3_becomes_local_0_2_3():
     np.testing.assert_allclose(local, [0.0, 2.0, 3.0], atol=1e-5)
 
 
+def test_return_dtype_is_float32_regardless_of_identity_branch():
+    """Both the identity no-op path and the apply_mat (float64-internal) path
+    must return float32, so callers get a consistent dtype either way."""
+    p = np.array([1.0, 2.0, 3.0], dtype=np.float32)
+    assert world_to_local_point(p, None).dtype == np.float32
+    assert world_to_local_point(p, np.eye(4, dtype=np.float64)).dtype == np.float32
+
+    wt = mat_translate(np.array([10.0, 0.0, 0.0]))
+    assert world_to_local_point(p, wt).dtype == np.float32
+
+
 # ---------------------------------------------------------------------------
 # Integration: LineTool write path in a translated group
 # ---------------------------------------------------------------------------

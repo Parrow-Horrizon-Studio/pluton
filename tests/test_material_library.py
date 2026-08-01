@@ -46,3 +46,15 @@ def test_material_is_frozen():
     m = Material(1, "X", (0.1, 0.2, 0.3))
     with pytest.raises(FrozenInstanceError):
         m.color = (0.0, 0.0, 0.0)  # type: ignore[misc]
+
+
+def test_from_records_with_empty_list_falls_back_to_sentinel_default():
+    """Empty records is a real (if unusual) input: no materials survive into
+    _materials/_order, but `get()` must still return a usable Default rather
+    than KeyError/None — the sentinel Default seeded by `cls()` before the
+    records loop overwrote the dicts is the fallback that makes this work."""
+    lib = MaterialLibrary.from_records([], next_id=1)
+    assert lib.materials() == []
+    default = lib.get(MaterialLibrary.DEFAULT_ID)
+    assert default is not None
+    assert default.name == "Default"

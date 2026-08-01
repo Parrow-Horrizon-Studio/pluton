@@ -10,11 +10,15 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import numpy as np
 
 from pluton.io.errors import PlutonFormatError
 from pluton.io.gltf_scene import GltfMaterial, GltfMesh, GltfNode, GltfSceneData
+
+if TYPE_CHECKING:
+    from pluton.model.instance import Instance
 
 # glTF import is an untrusted-input path (Assimp has a real CVE history): a
 # file someone emailed you is a normal thing to import. Everything below runs
@@ -334,7 +338,7 @@ class GltfImportSummary:
 @dataclass
 class GltfBuildResult:
     summary: GltfImportSummary
-    root_instance: object  # the single Instance appended to target_context.children
+    root_instance: Instance  # appended to target_context.children
 
 
 def _yup_to_zup() -> np.ndarray:
@@ -371,6 +375,9 @@ def build_gltf_into_model(scene, model, target_context, root_name="glTF") -> Glt
                 g.children.append(model.new_instance(meshdefs[mi]))
             inst = model.new_instance(g, transform=local)
             container_def[idx] = g
+        # Precondition: scene.nodes lists each node's parent at a lower index
+        # than the node itself (glTF's own node-array ordering guarantee), so
+        # container_def[node.parent] is always already populated here.
         parent = wrapper if node.parent == -1 else container_def[node.parent]
         parent.children.append(inst)
 

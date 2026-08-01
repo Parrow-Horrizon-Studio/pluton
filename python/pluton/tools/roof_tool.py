@@ -176,3 +176,5 @@ class RoofTool(Tool):
         self._preview = None
         self._snap_pos = None
         self._snap_kind = 0
+        self._flip_quarters = 0  # ridge orientation is per-gesture, not sticky
+        self._snap_color = _NEUTRAL

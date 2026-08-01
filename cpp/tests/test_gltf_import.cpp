@@ -1,6 +1,5 @@
 #include <gtest/gtest.h>
 
-#include <cstdlib>
 #include <string>
 
 #include "pluton/gltf_import.h"

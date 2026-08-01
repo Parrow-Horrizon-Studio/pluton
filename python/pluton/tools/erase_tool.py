@@ -16,6 +16,7 @@ from pluton.annotations.picking import pick_annotation
 from pluton.commands import CompositeCommand
 from pluton.commands.annotation_commands import DeleteAnnotationsCommand
 from pluton.commands.scene_commands import RemoveEdgeCommand, RemoveFaceCommand
+from pluton.geometry.transforms import apply_mat, is_identity_transform
 from pluton.tools.tool import Tool, ToolContext, ToolOverlay
 from pluton.units import Units
 from pluton.viewport.picking import pick_selectable
@@ -162,8 +163,6 @@ class EraserTool(Tool):
         fills: list[np.ndarray] = []
         if self._hovered_edge is not None and self._scene is not None:
             try:
-                from pluton.geometry.transforms import apply_mat, is_identity_transform
-
                 wt = self._world_transform()
                 use_wt = not is_identity_transform(wt)
                 wt_arr = np.asarray(wt, dtype=np.float64) if use_wt else None

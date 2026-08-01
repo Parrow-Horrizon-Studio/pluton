@@ -1,6 +1,7 @@
 #include "pluton/halfedge.h"
 
 #include <algorithm>
+#include <cassert>
 #include <cmath>
 #include <cstring>
 
@@ -29,6 +30,45 @@ std::uint64_t HalfEdgeMesh::pack_position(float x, float y, float z) noexcept {
 std::uint64_t HalfEdgeMesh::pack_pair(std::uint32_t a, std::uint32_t b) noexcept {
     return (static_cast<std::uint64_t>(a) << 32) | static_cast<std::uint64_t>(b);
 }
+
+namespace {
+
+// Degenerate-length threshold shared by every geometric-normal computation
+// site (add_face_from_loop, restore_face, compute_face_normal_geometric).
+// Previously two call sites used 1e-9f and a third used 1e-7f — a 100x
+// mismatch with no intentional reason. Standardized on the older/more
+// common 1e-9f.
+constexpr float kDegenerateNormalLengthThreshold = 1e-9f;
+
+// Raw (non-normalized) geometric normal from a face loop's first three
+// vertices — cross product of the first two edges, plus its length. This is
+// the single source of the cross-product math shared by add_face_from_loop,
+// restore_face, and compute_face_normal_geometric (below). Callers apply
+// their own fallback for the degenerate (near-zero-length) case, since they
+// don't agree on what that fallback should be: add_face_from_loop/
+// restore_face default to {0,0,1} (a plausible upward normal so the
+// renderer still sees *some* lighting), while compute_face_normal_geometric
+// defaults to {0,0,0} (a sentinel its callers explicitly test for).
+struct RawNormal {
+    float x, y, z;
+    float length;
+};
+
+RawNormal raw_normal_from_first_three(const float* p0, const float* p1, const float* p2) {
+    const float e1x = p1[0] - p0[0];
+    const float e1y = p1[1] - p0[1];
+    const float e1z = p1[2] - p0[2];
+    const float e2x = p2[0] - p0[0];
+    const float e2y = p2[1] - p0[1];
+    const float e2z = p2[2] - p0[2];
+    const float nx = e1y * e2z - e1z * e2y;
+    const float ny = e1z * e2x - e1x * e2z;
+    const float nz = e1x * e2y - e1y * e2x;
+    const float length = std::sqrt(nx * nx + ny * ny + nz * nz);
+    return {nx, ny, nz, length};
+}
+
+}  // namespace
 
 // --- Stubs for Task 2+ -------------------------------------------------
 
@@ -99,23 +139,13 @@ std::uint32_t HalfEdgeMesh::add_face_from_loop(const std::vector<std::uint32_t>&
     const std::uint32_t f_id = static_cast<std::uint32_t>(faces_.size());
     // Compute geometric normal from the first three boundary vertices.
     // Assumes planar face — M2/M3a only produce planar faces; M4+ will revisit.
-    const auto& p0 = vertices_[loop[0]].pos;
-    const auto& p1 = vertices_[loop[1]].pos;
-    const auto& p2 = vertices_[loop[2]].pos;
-    const float e1x = p1[0] - p0[0];
-    const float e1y = p1[1] - p0[1];
-    const float e1z = p1[2] - p0[2];
-    const float e2x = p2[0] - p0[0];
-    const float e2y = p2[1] - p0[1];
-    const float e2z = p2[2] - p0[2];
-    float nx = e1y * e2z - e1z * e2y;
-    float ny = e1z * e2x - e1x * e2z;
-    float nz = e1x * e2y - e1y * e2x;
-    const float length = std::sqrt(nx * nx + ny * ny + nz * nz);
-    if (length > 1e-9f) {
-        nx /= length;
-        ny /= length;
-        nz /= length;
+    const auto raw = raw_normal_from_first_three(vertices_[loop[0]].pos, vertices_[loop[1]].pos,
+                                                 vertices_[loop[2]].pos);
+    float nx = raw.x, ny = raw.y, nz = raw.z;
+    if (raw.length > kDegenerateNormalLengthThreshold) {
+        nx /= raw.length;
+        ny /= raw.length;
+        nz /= raw.length;
     } else {
         // Degenerate (collinear) — keep a sensible default; renderer will see weak lighting.
         nx = 0.0f;
@@ -304,27 +334,17 @@ void HalfEdgeMesh::restore_face(std::uint32_t f_id, const std::vector<std::uint3
     f.tris = triangles;
     f.loop = loop;
     f.alive = true;
-    // Recompute geometric normal (same logic as add_face_from_loop) so that
-    // undo→redo round-trips produce the correct normal rather than preserving
-    // a stale value from before the fix.
+    // Recompute geometric normal (same shared helper as add_face_from_loop)
+    // so that undo→redo round-trips produce the correct normal rather than
+    // preserving a stale value from before the fix.
     {
-        const auto& rp0 = vertices_[loop[0]].pos;
-        const auto& rp1 = vertices_[loop[1]].pos;
-        const auto& rp2 = vertices_[loop[2]].pos;
-        const float re1x = rp1[0] - rp0[0];
-        const float re1y = rp1[1] - rp0[1];
-        const float re1z = rp1[2] - rp0[2];
-        const float re2x = rp2[0] - rp0[0];
-        const float re2y = rp2[1] - rp0[1];
-        const float re2z = rp2[2] - rp0[2];
-        float rnx = re1y * re2z - re1z * re2y;
-        float rny = re1z * re2x - re1x * re2z;
-        float rnz = re1x * re2y - re1y * re2x;
-        const float rlen = std::sqrt(rnx * rnx + rny * rny + rnz * rnz);
-        if (rlen > 1e-9f) {
-            rnx /= rlen;
-            rny /= rlen;
-            rnz /= rlen;
+        const auto raw = raw_normal_from_first_three(vertices_[loop[0]].pos, vertices_[loop[1]].pos,
+                                                     vertices_[loop[2]].pos);
+        float rnx = raw.x, rny = raw.y, rnz = raw.z;
+        if (raw.length > kDegenerateNormalLengthThreshold) {
+            rnx /= raw.length;
+            rny /= raw.length;
+            rnz /= raw.length;
         } else {
             rnx = 0.0f;
             rny = 0.0f;
@@ -369,6 +389,14 @@ std::array<float, 3> HalfEdgeMesh::vertex_position(std::uint32_t v_id) const {
     return {v.pos[0], v.pos[1], v.pos[2]};
 }
 
+std::uint32_t HalfEdgeMesh::vertex_outgoing_halfedge(std::uint32_t v_id) const {
+    if (!vertex_is_live(v_id)) {
+        throw std::out_of_range("HalfEdgeMesh::vertex_outgoing_halfedge: vertex " +
+                                std::to_string(v_id) + " is not live");
+    }
+    return vertices_[v_id].outgoing_he;
+}
+
 std::array<std::uint32_t, 2> HalfEdgeMesh::edge_vertices(std::uint32_t e_id) const {
     if (!edge_is_live(e_id)) {
         throw std::out_of_range("HalfEdgeMesh::edge_vertices: edge " + std::to_string(e_id) +
@@ -397,16 +425,6 @@ std::vector<std::int32_t> HalfEdgeMesh::face_triangles(std::uint32_t f_id) const
 
 namespace {
 
-inline std::array<float, 3> sub3(std::array<float, 3> a, std::array<float, 3> b) {
-    return {a[0] - b[0], a[1] - b[1], a[2] - b[2]};
-}
-inline std::array<float, 3> cross3(std::array<float, 3> a, std::array<float, 3> b) {
-    return {
-        a[1] * b[2] - a[2] * b[1],
-        a[2] * b[0] - a[0] * b[2],
-        a[0] * b[1] - a[1] * b[0],
-    };
-}
 inline float dot3(std::array<float, 3> a, std::array<float, 3> b) {
     return a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
 }
@@ -416,6 +434,9 @@ inline float len3(std::array<float, 3> a) {
 
 // Compute geometric face normal from the first three boundary vertices.
 // Returns zero vector if the face is degenerate (collinear or repeated vertices).
+// Shares its cross-product math and degenerate-length threshold with
+// add_face_from_loop/restore_face via raw_normal_from_first_three (this is
+// the third of the three call sites the M3c review flagged as duplicated).
 std::array<float, 3> compute_face_normal_geometric(const pluton::HalfEdgeMesh& m,
                                                    std::uint32_t f_id) {
     auto loop = m.face_loop_vertices(f_id);
@@ -423,10 +444,9 @@ std::array<float, 3> compute_face_normal_geometric(const pluton::HalfEdgeMesh& m
     auto p0 = m.vertex_position(loop[0]);
     auto p1 = m.vertex_position(loop[1]);
     auto p2 = m.vertex_position(loop[2]);
-    auto n = cross3(sub3(p1, p0), sub3(p2, p0));
-    float L = len3(n);
-    if (L < 1e-7f) return {0, 0, 0};
-    return {n[0] / L, n[1] / L, n[2] / L};
+    const auto raw = raw_normal_from_first_three(p0.data(), p1.data(), p2.data());
+    if (!(raw.length > kDegenerateNormalLengthThreshold)) return {0, 0, 0};
+    return {raw.x / raw.length, raw.y / raw.length, raw.z / raw.length};
 }
 
 // Insert vertex w into `loop` between the adjacent pair (va, vb) (either order),
@@ -548,20 +568,24 @@ std::uint32_t pluton::HalfEdgeMesh::dissolve_edge(std::uint32_t e_id) {
     //   ... -> A -> D -> ... -> C -> B -> ...
     // (skipping he_a and he_b, splicing across the gap.)
 
-    // Find A (predecessor of he_a in f1's loop).
-    std::uint32_t A = INVALID_ID;
-    {
-        std::uint32_t cur = halfedges_[he_a].next;
-        while (halfedges_[cur].next != he_a) cur = halfedges_[cur].next;
-        A = cur;
-    }
-    // Find C (predecessor of he_b in f2's loop).
-    std::uint32_t C = INVALID_ID;
-    {
-        std::uint32_t cur = halfedges_[he_b].next;
-        while (halfedges_[cur].next != he_b) cur = halfedges_[cur].next;
-        C = cur;
-    }
+    // Find the predecessor of `target` within its own next-cycle. Used for
+    // both A (predecessor of he_a in f1's loop) and C (predecessor of he_b in
+    // f2's loop) — previously copy-pasted as two near-identical blocks.
+    // Bounded by the live half-edge count so a malformed boundary cycle
+    // fails a debug-build assertion instead of looping forever.
+    auto find_predecessor = [this](std::uint32_t target) {
+        std::uint32_t cur = halfedges_[target].next;
+        std::size_t steps = 0;
+        while (halfedges_[cur].next != target) {
+            cur = halfedges_[cur].next;
+            ++steps;
+            assert(steps <= halfedges_.size() &&
+                   "dissolve_edge: boundary cycle did not close within halfedge count");
+        }
+        return cur;
+    };
+    const std::uint32_t A = find_predecessor(he_a);
+    const std::uint32_t C = find_predecessor(he_b);
     std::uint32_t B = halfedges_[he_a].next;
     std::uint32_t D = halfedges_[he_b].next;
 
@@ -571,17 +595,27 @@ std::uint32_t pluton::HalfEdgeMesh::dissolve_edge(std::uint32_t e_id) {
 
     // Walk the new merged loop, collecting vertex IDs for the new face's
     // `loop` cache. Face pointers are reassigned later inside add_face_from_loop().
+    // Bounded the same way as find_predecessor above, for the same reason.
     std::vector<std::uint32_t> merged_loop;
     std::uint32_t walk_start = D;
     std::uint32_t walk_cur = walk_start;
-    do {
-        merged_loop.push_back(halfedges_[walk_cur].origin);
-        walk_cur = halfedges_[walk_cur].next;
-    } while (walk_cur != walk_start);
+    {
+        std::size_t walk_steps = 0;
+        do {
+            merged_loop.push_back(halfedges_[walk_cur].origin);
+            walk_cur = halfedges_[walk_cur].next;
+            ++walk_steps;
+            assert(walk_steps <= halfedges_.size() &&
+                   "dissolve_edge: merged-loop walk did not close within halfedge count");
+        } while (walk_cur != walk_start);
+    }
 
     // Retriangulate the merged loop with a simple fan (works for convex; the
     // merged shape from coplanar dissolves is convex by construction in M3c's
     // Case 2). For now use fan from vertex 0.
+    assert(merged_loop.size() >= 3 &&
+           "dissolve_edge: merged loop must have at least 3 vertices (two faces of >=3 sides "
+           "sharing exactly one edge cannot produce fewer)");
     std::vector<std::int32_t> tris;
     tris.reserve((merged_loop.size() - 2) * 3);
     for (std::size_t i = 1; i + 1 < merged_loop.size(); ++i) {
@@ -604,6 +638,26 @@ std::uint32_t pluton::HalfEdgeMesh::dissolve_edge(std::uint32_t e_id) {
         const std::uint32_t v_min = halfedges_[he_a].origin;
         const std::uint32_t v_max = halfedges_[he_b].origin;
         edge_index_.erase(pack_pair(v_min, v_max));
+    }
+
+    // Repoint each endpoint vertex's cached outgoing_he if it pointed at the
+    // half-edge we just tombstoned above. Latent-only today (nothing reads
+    // outgoing_he yet), but leaving it dangling would silently corrupt a
+    // future vertex-incident walk.
+    {
+        auto repoint_if_stale = [this](std::uint32_t v_id, std::uint32_t dead_he) {
+            if (vertices_[v_id].outgoing_he != dead_he) return;
+            std::uint32_t replacement = INVALID_ID;
+            for (std::uint32_t h = 0; h < halfedges_.size(); ++h) {
+                if (halfedges_[h].alive && halfedges_[h].origin == v_id) {
+                    replacement = h;
+                    break;
+                }
+            }
+            vertices_[v_id].outgoing_he = replacement;
+        };
+        repoint_if_stale(halfedges_[he_a].origin, he_a);
+        repoint_if_stale(halfedges_[he_b].origin, he_b);
     }
 
     // Allocate the new face on the merged loop. Note: this calls
