@@ -14,11 +14,10 @@ plane tests focused purely on the plane-normal bug.
 """
 
 import numpy as np
-from PySide6.QtCore import QPointF
-
 from pluton.tools.scale_tool import ScaleTool
 from pluton.tools.transform_support import grip_specs
 from pluton.viewport.camera import Camera
+from PySide6.QtCore import QPointF
 
 
 class _Ev:

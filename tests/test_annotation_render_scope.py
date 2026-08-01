@@ -1,5 +1,4 @@
 import numpy as np
-
 from pluton.annotations.draw_plan import collect_annotation_plans, plan_annotation
 from pluton.model.annotation import Dimension
 from pluton.model.model import Model
@@ -49,7 +48,7 @@ def test_collect_annotation_plans_dims_by_the_geometry_dim_rule_not_active_conte
     Model.definition_is_dimmed(defn) -- NOT "defn is not active_context".
     At the root (active_path empty) nothing is dimmed, matching geometry,
     even though the group is not the active context."""
-    model, inner, _inst = _model_with_annotation_inside_a_group()
+    model, _inner, _inst = _model_with_annotation_inside_a_group()
     cam = Camera()
     cam.aspect = 800.0 / 600.0
 
@@ -141,8 +140,8 @@ def test_paint_annotations_still_draws_the_groups_dimension_from_the_root(monkey
     """The actual regression under test (#95): ViewportWidget._paint_annotations
     must not vanish a dimension living inside a group just because the root
     (not the group) is the active context."""
-    from PySide6 import QtGui
     from pluton.viewport.viewport_widget import ViewportWidget
+    from PySide6 import QtGui
 
     monkeypatch.setattr(QtGui, "QPainter", _RecordingQPainter)
     _RecordingQPainter.last = None

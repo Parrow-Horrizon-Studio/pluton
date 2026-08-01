@@ -10,10 +10,9 @@ itself.
 from __future__ import annotations
 
 import numpy as np
+from pluton.tools.rotate_tool import RotateTool, _Stage
 from PySide6.QtCore import QEvent, Qt
 from PySide6.QtGui import QKeyEvent
-
-from pluton.tools.rotate_tool import RotateTool, _Stage
 
 
 def _key_up():
