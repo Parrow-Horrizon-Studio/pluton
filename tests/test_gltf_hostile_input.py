@@ -9,8 +9,8 @@ never crashes the process, hangs, or exhausts memory.
 import json
 
 import pytest
-
 from pluton.io.errors import PlutonFormatError
+from pluton.io.gltf_import import _MAX_ELEMENT_COUNT, _validate_gltf_element_counts
 
 
 def _import(path):
@@ -43,3 +43,35 @@ def test_not_gltf_at_all_raises_format_error(tmp_path):
     p.write_bytes(b"\x00\x01\x02 this is not a gltf file \xff\xfe")
     with pytest.raises(PlutonFormatError):
         _import(p)
+
+
+# The three cases above are also caught by Assimp's own rejection (wrapped as
+# PlutonFormatError), so they do not, on their own, prove the pre-Assimp count
+# guard fires. These unit tests exercise the guard directly — it is what
+# protects against the realistic #84 CVE shape (a buffer-backed accessor whose
+# inflated count Assimp would try to honor), which the file-level tests cannot
+# reproduce without risking a native OOM.
+def test_count_guard_rejects_an_accessor_count_over_the_ceiling():
+    doc = {
+        "accessors": [{"componentType": 5126, "count": _MAX_ELEMENT_COUNT + 1, "type": "VEC3"}]
+    }
+    with pytest.raises(PlutonFormatError):
+        _validate_gltf_element_counts(doc)
+
+
+def test_count_guard_accepts_a_reasonable_document():
+    doc = {
+        "accessors": [{"componentType": 5126, "count": 3, "type": "VEC3", "bufferView": 0}],
+        "bufferViews": [{"buffer": 0, "byteLength": 36}],
+        "meshes": [{"primitives": [{"attributes": {"POSITION": 0}}]}],
+    }
+    _validate_gltf_element_counts(doc)  # must not raise
+
+
+def test_count_guard_rejects_an_out_of_range_bufferview_reference():
+    doc = {
+        "accessors": [{"componentType": 5126, "count": 3, "type": "VEC3", "bufferView": 7}],
+        "bufferViews": [],  # index 7 is out of range
+    }
+    with pytest.raises(PlutonFormatError):
+        _validate_gltf_element_counts(doc)
