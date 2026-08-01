@@ -184,9 +184,22 @@ class _FakeContext:
 
 
 class _FakeModel:
+    """Stands in for pluton.model.model.Model: exposes exactly what
+    collect_annotation_plans (called by the real _paint_annotations) reads --
+    traverse_visible() and definition_is_dimmed() -- for a single, root-only
+    context with no groups. active_path is empty, so definition_is_dimmed
+    always returns False here, matching a real root Model (#95, Task 13)."""
+
     def __init__(self, annotations):
         self.active_context = _FakeContext(annotations)
         self.active_world_transform = np.eye(4)
+        self.active_path = []
+
+    def traverse_visible(self):
+        yield self.active_context, self.active_world_transform
+
+    def definition_is_dimmed(self, definition):
+        return False
 
 
 class _FakeViewport:

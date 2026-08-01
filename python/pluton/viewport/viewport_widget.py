@@ -215,40 +215,50 @@ class ViewportWidget(QOpenGLWidget):
         )
 
     def _paint_annotations(self, overlay=None) -> None:
-        """M7d: draw the active context's annotations in screen space, on top
-        of the GL render. All layout is delegated to the pure draw_plan module
-        (plan_annotation); this method only projects + paints via QPainter.
+        """M7d: draw every visible context's annotations in screen space, on
+        top of the GL render, dimmed outside the active context exactly like
+        geometry (#95 -- Task 13). All layout is delegated to the pure
+        draw_plan module (collect_annotation_plans/plan_annotation); this
+        method only projects + paints via QPainter.
 
         `overlay`: Task 10b -- the active tool's ToolOverlay for this frame
         (the same object paintGL already asks the tool for and hands to
         scene_renderer.render() to draw edge/face/instance hover). Its
         `hovered_annotation_id` is threaded through to paint_annotation_plans
         so the hovered annotation gets a hover highlight too, without a new
-        tool -> painter channel."""
+        tool -> painter channel.
+
+        Picking is unaffected by this: pick_annotation and every tool's
+        _pick_annotation still only ever see active_context.annotations, so
+        dimmed (non-active-context) annotations are visible but not
+        selectable/hoverable -- annotation ids are per-context, not globally
+        unique, so a dimmed plan is never routed through the same
+        paint_annotation_plans call as the selection/hover ids (which belong
+        to the active context only); doing so could otherwise collide."""
         from PySide6.QtGui import QColor, QFont, QPainter
 
-        from pluton.annotations.draw_plan import FONT_PX, plan_annotation
+        from pluton.annotations.draw_plan import FONT_PX, collect_annotation_plans
         from pluton.units import Units
         from pluton.viewport.annotation_painter import paint_annotation_plans
+        from pluton.viewport.scene_renderer import _DIM_ALPHA_BLEND
 
         if self.model is None:
             return
-        annotations = self.model.active_context.annotations
-        if not annotations:
-            return
         width, height = self.width(), self.height()
-        world = self.model.active_world_transform
         # Every other units provider in this codebase (wall/opening/roof options
         # bars) always yields a real Units object -- None is not a value
         # format_length expects, so default to Units() rather than None.
         units = self._units_provider() if self._units_provider is not None else Units()
-        plans = []
-        for ann in annotations:
-            plan = plan_annotation(ann, world, self.camera, width, height, units)
-            if plan is not None:
-                plans.append(plan)
+        plans = collect_annotation_plans(self.model, self.camera, width, height, units)
         if not plans:
             return
+        active_plans = [plan for plan, dimmed in plans if not dimmed]
+        dimmed_plans = [plan for plan, dimmed in plans if dimmed]
+
+        color = QColor(30, 30, 30)
+        dim_color = QColor(color)
+        dim_color.setAlphaF(_DIM_ALPHA_BLEND)
+
         selected_ids = set(self.selection.annotations) if self.selection is not None else set()
         hovered_id = overlay.hovered_annotation_id if overlay is not None else None
         painter = QPainter(self)
@@ -257,10 +267,13 @@ class ViewportWidget(QOpenGLWidget):
             font = QFont()
             font.setPixelSize(int(FONT_PX))
             painter.setFont(font)
+            # Dimmed plans first (never selectable/hoverable -- picking stays
+            # active-context-only), so the active-context plans draw on top.
+            paint_annotation_plans(painter, dimmed_plans, dim_color, set(), dim_color, None, None)
             paint_annotation_plans(
                 painter,
-                plans,
-                QColor(30, 30, 30),
+                active_plans,
+                color,
                 selected_ids,
                 QColor(51, 140, 242),
                 hovered_id,

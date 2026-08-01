@@ -60,6 +60,15 @@ class Model:
             m = m @ inst.transform
         return m
 
+    def definition_is_dimmed(self, definition) -> bool:
+        """True when `definition` should render dimmed (recede) -- i.e. you
+        are inside a group (active_path is non-empty) and this definition is
+        not the active editing context. At the root context, nothing is
+        dimmed. This is the single source of truth for the dim rule: both
+        geometry (scene_renderer) and annotations (draw_plan) dim exactly
+        when this returns True (#95)."""
+        return bool(self.active_path) and definition is not self.active_context
+
     def enter(self, instance: Instance) -> None:
         self.active_path.append(instance)
 

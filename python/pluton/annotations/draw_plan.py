@@ -153,6 +153,31 @@ def _plan_dimension(dim, world_transform, camera, width, height, units):
     return plan
 
 
+def collect_annotation_plans(model, camera, width, height, units):
+    """Return (plan, dimmed) for every visible annotation in the model.
+
+    Annotations render from every context — dimmed when not active — exactly
+    matching how geometry behaves: `dimmed` is `model.definition_is_dimmed(defn)`,
+    the SAME predicate the renderer uses for geometry, so a definition never
+    disagrees with itself about whether it is dimmed. At the root (no active
+    path) nothing is dimmed, even for a group that is not the active context.
+    Picking remains active-context-only (see #95) -- this helper is only
+    used for drawing.
+
+    Pure: no Qt, no GL. `model` is used only via traverse_visible() and
+    definition_is_dimmed(), so this stays a plain function call, not a new
+    import, keeping this module free of Model imports.
+    """
+    out = []
+    for defn, world in model.traverse_visible():
+        dimmed = model.definition_is_dimmed(defn)
+        for ann in defn.annotations:
+            plan = plan_annotation(ann, world, camera, width, height, units)
+            if plan is not None:
+                out.append((plan, dimmed))
+    return out
+
+
 def _plan_label(label, world_transform, camera, width, height):
     anchor_w = _to_world(label.anchor, world_transform)
     text_w = _to_world(label.text_pos, world_transform)

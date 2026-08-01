@@ -32,10 +32,13 @@ from pluton.viewport.snap_engine import SnapKind
 def definition_is_dimmed(definition, model) -> bool:
     """True when `definition` should render dimmed (recede) — i.e. you are
     inside a group (active_path is non-empty) and this definition is not the
-    active editing context. At the root context, nothing is dimmed."""
-    if not model.active_path:
-        return False
-    return definition is not model.active_context
+    active editing context. At the root context, nothing is dimmed.
+
+    Thin wrapper kept for back-compat with existing callers/tests; the single
+    source of truth is now Model.definition_is_dimmed (#95), so annotations
+    (draw_plan.collect_annotation_plans) dim by exactly the same rule as
+    geometry."""
+    return model.definition_is_dimmed(definition)
 
 
 # --- AABB helpers (Task 15) -------------------------------------------------
