@@ -33,22 +33,38 @@ std::uint64_t HalfEdgeMesh::pack_pair(std::uint32_t a, std::uint32_t b) noexcept
 
 namespace {
 
-// Degenerate-length threshold shared by every geometric-normal computation
-// site (add_face_from_loop, restore_face, compute_face_normal_geometric).
-// Previously two call sites used 1e-9f and a third used 1e-7f — a 100x
-// mismatch with no intentional reason. Standardized on the older/more
-// common 1e-9f.
+// Degenerate-length threshold for add_face_from_loop/restore_face's
+// render-fallback normal. These two call sites only need *some* normal to
+// hand the renderer (their fallback is {0,0,1}, a plausible upward normal so
+// the renderer still sees weak lighting rather than crashing), so a loose
+// 1e-9f guard is fine.
+//
+// This is deliberately looser than kGeometricNormalLengthThreshold below —
+// the two thresholds are NOT meant to match. Only the cross-product math
+// (raw_normal_from_first_three) is shared between the three call sites; each
+// applies its own threshold and its own fallback for the degenerate case.
 constexpr float kDegenerateNormalLengthThreshold = 1e-9f;
+
+// Degenerate-length threshold for compute_face_normal_geometric, the
+// TIGHTER guard: it feeds faces_are_coplanar and recompute_face_normal
+// (reached from set_vertex_position on every interactive vertex drag), both
+// of which need a robust normal rather than a unit vector normalized from
+// float noise. A cross-product length in (kGeometricNormalLengthThreshold,
+// kDegenerateNormalLengthThreshold] would be silently accepted by the looser
+// threshold above but must still be treated as degenerate here.
+constexpr float kGeometricNormalLengthThreshold = 1e-7f;
 
 // Raw (non-normalized) geometric normal from a face loop's first three
 // vertices — cross product of the first two edges, plus its length. This is
 // the single source of the cross-product math shared by add_face_from_loop,
-// restore_face, and compute_face_normal_geometric (below). Callers apply
-// their own fallback for the degenerate (near-zero-length) case, since they
-// don't agree on what that fallback should be: add_face_from_loop/
-// restore_face default to {0,0,1} (a plausible upward normal so the
-// renderer still sees *some* lighting), while compute_face_normal_geometric
-// defaults to {0,0,0} (a sentinel its callers explicitly test for).
+// restore_face, and compute_face_normal_geometric (below); it carries no
+// threshold decision of its own. Callers apply their own fallback for the
+// degenerate (near-zero-length) case, using their own threshold, since they
+// don't agree on what either should be: add_face_from_loop/restore_face
+// default to {0,0,1} at the 1e-9f threshold above (a plausible upward normal
+// so the renderer still sees *some* lighting), while
+// compute_face_normal_geometric defaults to {0,0,0} at the tighter 1e-7f
+// threshold below (a sentinel its callers explicitly test for).
 struct RawNormal {
     float x, y, z;
     float length;
@@ -434,9 +450,14 @@ inline float len3(std::array<float, 3> a) {
 
 // Compute geometric face normal from the first three boundary vertices.
 // Returns zero vector if the face is degenerate (collinear or repeated vertices).
-// Shares its cross-product math and degenerate-length threshold with
-// add_face_from_loop/restore_face via raw_normal_from_first_three (this is
-// the third of the three call sites the M3c review flagged as duplicated).
+// Shares its cross-product math (only) with add_face_from_loop/restore_face
+// via raw_normal_from_first_three (this is the third of the three call sites
+// the M3c review flagged as duplicated) — but NOT their degenerate-length
+// threshold. This function feeds faces_are_coplanar and recompute_face_normal,
+// which need a robust normal, so it applies the tighter
+// kGeometricNormalLengthThreshold (1e-7f) rather than the looser
+// kDegenerateNormalLengthThreshold (1e-9f) used by add_face_from_loop/
+// restore_face's render-fallback normal.
 std::array<float, 3> compute_face_normal_geometric(const pluton::HalfEdgeMesh& m,
                                                    std::uint32_t f_id) {
     auto loop = m.face_loop_vertices(f_id);
@@ -445,7 +466,7 @@ std::array<float, 3> compute_face_normal_geometric(const pluton::HalfEdgeMesh& m
     auto p1 = m.vertex_position(loop[1]);
     auto p2 = m.vertex_position(loop[2]);
     const auto raw = raw_normal_from_first_three(p0.data(), p1.data(), p2.data());
-    if (!(raw.length > kDegenerateNormalLengthThreshold)) return {0, 0, 0};
+    if (!(raw.length > kGeometricNormalLengthThreshold)) return {0, 0, 0};
     return {raw.x / raw.length, raw.y / raw.length, raw.z / raw.length};
 }
 

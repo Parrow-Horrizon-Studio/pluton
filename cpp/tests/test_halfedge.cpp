@@ -536,6 +536,49 @@ TEST(HalfEdgeMeshTest, FacesAreCoplanar_FalseForDegenerateNormal) {
     EXPECT_FALSE(m.faces_are_coplanar(f_good, f_degen, kCos05Deg, kDistTol));
 }
 
+// Regression test for the #26 "threshold unification" review fix: the
+// geometric-normal path (compute_face_normal_geometric, reached here via
+// recompute_face_normal — set_vertex_position's real-world trigger, and also
+// underlying faces_are_coplanar) must use its own TIGHTER 1e-7f degenerate
+// guard, not the looser 1e-9f guard shared by add_face_from_loop/restore_face's
+// render-fallback path.
+//
+// v0=(0,0,0), v1=(1,0,0), v2=(0.5, 1e-8, 0): e1=(1,0,0), e2=(0.5,1e-8,0),
+// cross = e1 x e2 = (0, 0, 1e-8), so |cross| = 1e-8 — strictly between the
+// two thresholds (1e-9, 1e-7). Under the (buggy) unified 1e-9f threshold this
+// is "not degenerate" and gets normalized into the unit vector (0,0,1) —
+// numerically fine here, but arbitrary-direction noise in general. Under the
+// correct 1e-7f threshold it must be treated as degenerate and recompute to
+// the {0,0,0} sentinel.
+//
+// add_face_from_loop computes its own initial normal via its own 1e-9f path,
+// so the geometric path must be triggered explicitly. recompute_face_normal
+// is private; set_vertex_position is its public real-world caller (also
+// exercised interactively whenever a vertex is dragged), so we call it with
+// the vertex's unchanged position purely to force the recompute, then read
+// the result back via face_triangle_buffer (there is no public face_normal
+// accessor).
+TEST(HalfEdgeMeshTest, RecomputeFaceNormalGeometricDegenerateSentinel) {
+    pluton::HalfEdgeMesh m;
+    auto v0 = m.add_vertex(0.0f, 0.0f, 0.0f);
+    auto v1 = m.add_vertex(1.0f, 0.0f, 0.0f);
+    auto v2 = m.add_vertex(0.5f, 1e-8f, 0.0f);
+    m.add_halfedge_pair(v0, v1);
+    m.add_halfedge_pair(v1, v2);
+    m.add_halfedge_pair(v2, v0);
+    m.add_face_from_loop({v0, v1, v2}, {(int)v0, (int)v1, (int)v2});
+
+    // Trigger recompute_face_normal (-> compute_face_normal_geometric) on the
+    // face incident to v0 without moving anything.
+    m.set_vertex_position(v0, 0.0f, 0.0f, 0.0f);
+
+    auto [positions, normals] = m.face_triangle_buffer();
+    ASSERT_EQ(normals.size(), 9u);  // 1 triangle x 3 verts x 3 floats
+    EXPECT_FLOAT_EQ(normals[0], 0.0f);
+    EXPECT_FLOAT_EQ(normals[1], 0.0f);
+    EXPECT_FLOAT_EQ(normals[2], 0.0f);  // sentinel, NOT a unit (0,0,1) from normalized noise
+}
+
 // ====================================================================
 // M3c: dissolve_edge — happy path
 // ====================================================================
