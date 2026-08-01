@@ -188,16 +188,12 @@ class RotateTool(Tool):
         deg = parse_angle(text)
         if deg is None:
             return False
-        if deg < 0:
-            # An explicit negative sign is authoritative: rotate the other
-            # way, regardless of which direction the mouse happened to
-            # sweep. (Previously this was multiplied by sign(swept_angle),
-            # which could cancel an explicit "-" back to positive when the
-            # sweep itself was already negative.)
-            angle = math.radians(deg)
-        else:
-            sign = 1.0 if self._swept_angle_from_cur() >= 0 else -1.0
-            angle = sign * math.radians(deg)
+        # The typed magnitude follows the sweep direction, and an explicit
+        # "-" flips it. Because this same signed formula applies to every
+        # input, -deg is always the opposite rotation of +deg under the same
+        # sweep, for either sweep sign (#55).
+        sign = 1.0 if self._swept_angle_from_cur() >= 0 else -1.0
+        angle = sign * math.radians(deg)
 
         if self._instance_mode:
             self._commit_instance_rotate(angle)

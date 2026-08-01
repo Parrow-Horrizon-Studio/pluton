@@ -85,27 +85,32 @@ def test_circle_accepts_a_segment_count(qtbot):
 # ---------------------------------------------------------------------------
 
 
-def test_rotate_accepts_a_negative_angle():
-    """RotateTool.apply_typed_value guards on `_stage == _Stage.HAVE_START`
-    (rotate_tool.py). A fresh tool's _start_dir/_cur_dir default to the same
-    vector (zero swept angle), which would let a naive `sign(sweep) *
-    radians(deg)` accidentally reproduce the right sign without actually
-    fixing the double-negation bug. So this sets up a mouse sweep in the
-    OPPOSITE direction from the typed sign (start +X, swept to -Y, i.e. a
-    -90 degree sweep) -- under the old buggy logic
-    (`sign(sweep) * radians(deg)`), sign(sweep) = -1 and radians(-30) is
-    negative, so the old code would produce angle = -1 * -30 deg = +30 deg
-    (the explicit "-" silently cancelled). The fix must keep an explicitly
-    negative typed angle negative regardless of sweep direction.
-    """
+def _rotate_typed_under_cw_sweep(typed: str) -> float:
+    """Resolve a typed Rotate angle under a fixed CLOCKWISE (-90 deg) sweep and
+    return the signed result in degrees. RotateTool.apply_typed_value guards on
+    `_stage == _Stage.HAVE_START` (rotate_tool.py), so establish that plus a
+    start/cur direction pair that sweeps -90 deg (start +X, swept to -Y)."""
     tool = RotateTool()
     tool._stage = _Stage.HAVE_START
     tool._normal = np.array([0.0, 0.0, 1.0], dtype=np.float32)
     tool._start_dir = np.array([1.0, 0.0, 0.0], dtype=np.float32)
     tool._cur_dir = np.array([0.0, -1.0, 0.0], dtype=np.float32)  # swept -90 deg
+    assert tool.apply_typed_value(typed, U) is True
+    return tool.angle_degrees
 
-    assert tool.apply_typed_value("-30", U) is True
-    assert tool.angle_degrees < 0
+
+def test_rotate_negative_angle_is_the_opposite_of_positive():
+    """#55: a negative typed angle rotates the OTHER way, i.e. -deg is the exact
+    opposite of +deg under the SAME sweep -- for either sweep sign. This is
+    checked under a clockwise (-90 deg) sweep, the case where a literal
+    `radians(deg)` for negatives (ignoring the sweep) collapses "-30" and "30"
+    to the same rotation. A relative-opposite assertion catches that collision,
+    where a bare `angle_degrees < 0` would not (both are negative under a CW
+    sweep)."""
+    pos = _rotate_typed_under_cw_sweep("30")
+    neg = _rotate_typed_under_cw_sweep("-30")
+    assert pos != 0.0
+    assert neg == -pos, f"-30 must rotate opposite to 30 under the same sweep (got {neg} vs {pos})"
 
 
 # ---------------------------------------------------------------------------
