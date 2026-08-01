@@ -174,6 +174,25 @@ class _DefBuffers:
     edge_count: int = 0  # number of line-segment vertices
     batches: list = field(default_factory=list)  # list[FaceBatch], one per material
 
+    def release(self) -> None:
+        """Delete this definition's GL objects. Guarded so a zero handle
+        (never-uploaded / already-released / headless test stand-in) never
+        reaches a GL call — safe to call without a current context in that
+        case, and correct GL hygiene in all cases.
+
+        FaceBatch entries in `batches` are metadata slices (material_id,
+        first, count) into face_vbo — they hold no GL handles of their own,
+        so there is nothing per-batch to release.
+        """
+        if self.face_vao:
+            GL.glDeleteVertexArrays(1, [self.face_vao])
+        if self.face_vbo:
+            GL.glDeleteBuffers(1, [self.face_vbo])
+        if self.edge_vao:
+            GL.glDeleteVertexArrays(1, [self.edge_vao])
+        if self.edge_vbo:
+            GL.glDeleteBuffers(1, [self.edge_vbo])
+
 
 def _load_shader_source(name: str) -> str:
     return (files("pluton.viewport") / "shaders" / name).read_text(encoding="utf-8")
@@ -492,6 +511,11 @@ class SceneRenderer:
 
         # 3 & 4. Draw all definitions in the scene graph with their world transforms.
         if model is not None:
+            # Task 16 (#59): reconcile _def_buffers against the live model before
+            # drawing so buffers for deleted/exploded definitions don't leak for
+            # the rest of the session. Requires a current GL context, so this can
+            # only run here in the render path (not from an arbitrary caller).
+            self.evict_unreachable(model)
             for definition, world in model.traverse_visible():
                 buf = self._def_buffers.get(id(definition))
                 if buf is None or definition.mesh.dirty:
@@ -582,6 +606,25 @@ class SceneRenderer:
                 self._draw_screen_markers(
                     camera, tool_overlay.screen_markers, self._viewport_w, self._viewport_h
                 )
+
+    def evict_unreachable(self, model) -> None:
+        """Drop + release GL buffers for definitions no longer reachable from `model`.
+
+        Reachability is computed with model.traverse() (ALL instantiated
+        definitions, root included) rather than traverse_visible(), so a
+        definition that is merely on a hidden tag keeps its buffers —
+        eviction only targets definitions with no instance anywhere
+        (deleted or exploded), the actual leak described in #59.
+
+        No-op-safe without a GL context: does not require self._initialized,
+        and _DefBuffers.release() itself guards every delete call behind a
+        zero-handle check, so an all-zero stand-in record releases cleanly.
+        """
+        reachable = {id(definition) for definition, _world in model.traverse()}
+        reachable.add(id(model.root))  # defensive; traverse() already yields root first
+        for key in [k for k in self._def_buffers if k not in reachable]:
+            buf = self._def_buffers.pop(key)
+            buf.release()
 
     # --- Init helpers -----------------------------------------------------
 
