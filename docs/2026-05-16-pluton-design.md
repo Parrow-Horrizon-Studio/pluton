@@ -198,7 +198,7 @@ Version numbers are directional anchors, not commitments.
 modern side panel, materials, and SketchUp-standard interaction — on a
 codebase with no outstanding bug or lint debt.
 
-- **M7.1: Triage & burn-down** ✅ *(shipped v0.3.0)* — verified all 91 open issues against the code and closed 42: 7 that had already shipped, 9 behavior bugs (Scale's world-Z cursor plane, Explode double-ownership, edge-only groups unpickable, selection dropped on undo, Rotate auto-tilt, stale tool options on unit change, no-op Scene reorder dirtying the document, annotations vanishing outside their context, and the kernel's non-tombstoning `HalfEdgeMesh::clear`), the full ruff/clang-format cleanup with a CI lint gate, CI action modernization ahead of the Sept 2026 Node 20 removal, GL buffer eviction, glTF input hardening, and the review roll-ups. Every remaining issue is assigned to a named milestone.
+- **M7.1: Triage & burn-down** ✅ *(shipped v0.3.0)* — verified all 91 open issues against the code and closed 41: 7 that had already shipped, 9 behavior bugs (Scale's world-Z cursor plane, Explode double-ownership, edge-only groups unpickable, selection dropped on undo, Rotate auto-tilt, stale tool options on unit change, no-op Scene reorder dirtying the document, annotations vanishing outside their context, and the kernel's non-tombstoning `HalfEdgeMesh::clear`), the full ruff/clang-format cleanup with a CI lint gate, CI action modernization ahead of the Sept 2026 Node 20 removal, GL buffer eviction, glTF input hardening, and the review roll-ups. The 51 issues left open are the 49 scheduled feature gaps, #17 (command-stack memory profiling, moved to M10), and #99 (the umbrella tracking the sub-items that proved larger than their parent issue) — each assigned to a named milestone.
 - **M7.2: UI shell** — toolbars with an original icon set, per-tool cursors, right-click context menus.
 - **M7.3: Outliner & Properties panel** — Blender-style right panel: model Outliner (visibility toggle + rename) above an icon-tabbed Properties editor; the per-tool option bars move into a Tool Settings tab; the bottom bar keeps coordinates and the Measurements box.
 - **M7.4: Tools** — additional SketchUp-standard tools plus basic geometry primitives.
@@ -287,3 +287,4 @@ These are flagged for resolution during the implementation plan or at the releva
 | Date | Author | Change |
 |---|---|---|
 | 2026-05-16 | Rowee Apor | Initial design from brainstorming session |
+| 2026-08-02 | Rowee Apor | Phase 2.5 (Parity & Polish) inserted after M7; per-phase version ranges relabelled. Per-milestone shipped-status annotations are made in place as each milestone lands — `git log --follow` on this file is the authoritative change history. |
