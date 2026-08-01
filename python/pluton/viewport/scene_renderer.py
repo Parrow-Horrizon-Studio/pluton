@@ -877,6 +877,20 @@ class SceneRenderer:
 
         When ``dimmed`` is True (Task 15), lines are drawn at reduced opacity
         using the constant-alpha blend so the geometry recedes.
+
+        Note (#61): the face dim/transparency path migrated to the
+        `u_alpha` phong uniform + standard GL_SRC_ALPHA blending back in
+        M5a (commit 5a3bc65); this edge path still uses the older
+        glBlendColor + GL_CONSTANT_ALPHA idiom. That's intentional-on-record
+        rather than an oversight: the line shader has no alpha uniform, and
+        every other blended pass already sets its own glBlendFunc to
+        GL_SRC_ALPHA before drawing, so the divergence has no visible
+        effect today. Giving the line shader a u_alpha uniform to unify the
+        two paths would mean auditing every other draw call that shares
+        `self._line_program` (_draw_lines, _draw_tool_overlay,
+        _draw_world_segments, _draw_screen_space_lines) so none of them
+        silently render at GLSL's zero-initialized alpha; left as a
+        follow-up rather than risking a blast-radius change here.
         """
         # Pre-multiply: view_for_edges = view @ model_mat (transforms local→clip).
         # Both are float32; the result is float32.
@@ -902,6 +916,11 @@ class SceneRenderer:
         if dimmed:
             GL.glDisable(GL.GL_BLEND)
             GL.glBlendFunc(GL.GL_SRC_ALPHA, GL.GL_ONE_MINUS_SRC_ALPHA)
+            # Restore the blend color too, not just the blend func — a leftover
+            # non-default GL_CONSTANT_ALPHA color is harmless today only because
+            # every subsequent blended pass overwrites glBlendFunc before use;
+            # reset it so that invariant isn't required to hold.
+            GL.glBlendColor(0.0, 0.0, 0.0, 1.0)
 
     def _draw_tool_overlay(
         self,

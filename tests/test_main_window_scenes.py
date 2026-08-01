@@ -82,3 +82,17 @@ def test_real_reorder_still_works(qtbot):
     win._on_reorder_view(first, +1)          # genuine move
     assert win._model.views.views()[1].id == first
     assert win._command_stack.can_undo
+
+
+def test_recall_does_not_dirty_the_document(qtbot):
+    win = _make_window(qtbot)
+    win._on_create_view()
+    vid = win._model.views.views()[0].id
+    win._doc_controller.mark_clean()
+    undo_before = win._command_stack.can_undo
+
+    win._on_recall_view(vid)
+
+    assert win._doc_controller.dirty is False, "recall is a view change, not an edit"
+    assert win._command_stack.can_undo == undo_before, "recall must not touch the undo stack"
+    win._view_animator.cancel()
