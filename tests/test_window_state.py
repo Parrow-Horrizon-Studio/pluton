@@ -28,19 +28,22 @@ def test_restore_returns_false_when_nothing_is_saved(qtbot, tmp_path):
 def test_save_then_restore_round_trips(qtbot, tmp_path):
     settings = _settings(tmp_path)
     saved = _window(qtbot)
-    # 640x480 stays comfortably inside the 800x800 offscreen virtual screen
-    # that CI uses (see tests/conftest.py), with headroom for the window
-    # frame that QMainWindow.restoreGeometry() accounts for when clamping to
-    # the available screen. It also differs from QMainWindow's own default
-    # size (200x100), so the assertion below proves a genuine round-trip
-    # rather than an accidental match against the default.
-    saved.resize(640, 480)
+    # 720x560 stays comfortably inside the 800x800 offscreen virtual screen
+    # that CI uses (see tests/conftest.py), with real headroom -- beyond
+    # whatever margin QMainWindow.restoreGeometry() reserves for the window
+    # frame -- when clamping to the available screen. It also differs from
+    # BOTH of QMainWindow's own defaults: 640x480 for a never-shown window
+    # (what qtbot.addWidget leaves us with, since it does not call .show())
+    # and 200x100 for a shown one. Matching either default by coincidence
+    # would let this assertion pass even if restore_window_state() restored
+    # nothing at all.
+    saved.resize(720, 560)
     window_state.save_window_state(saved, settings)
 
     restored = _window(qtbot)
     assert window_state.restore_window_state(restored, settings) is True
-    assert restored.size().width() == 640
-    assert restored.size().height() == 480
+    assert restored.size().width() == 720
+    assert restored.size().height() == 560
 
 
 def test_restore_survives_a_corrupt_blob(qtbot, tmp_path):
