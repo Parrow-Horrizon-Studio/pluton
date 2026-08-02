@@ -1,0 +1,80 @@
+"""Window/toolbar state persistence (M7.2 Task 8)."""
+
+from __future__ import annotations
+
+from PySide6.QtCore import QSettings
+from PySide6.QtWidgets import QMainWindow, QToolBar
+
+from pluton.ui import window_state
+
+
+def _settings(tmp_path) -> QSettings:
+    return QSettings(str(tmp_path / "pluton_test.ini"), QSettings.Format.IniFormat)
+
+
+def _window(qtbot) -> QMainWindow:
+    window = QMainWindow()
+    bar = QToolBar("Standard", window)
+    bar.setObjectName("standard")
+    window.addToolBar(bar)
+    qtbot.addWidget(window)
+    return window
+
+
+def test_restore_returns_false_when_nothing_is_saved(qtbot, tmp_path):
+    assert window_state.restore_window_state(_window(qtbot), _settings(tmp_path)) is False
+
+
+def test_save_then_restore_round_trips(qtbot, tmp_path):
+    settings = _settings(tmp_path)
+    saved = _window(qtbot)
+    saved.resize(900, 640)
+    window_state.save_window_state(saved, settings)
+
+    restored = _window(qtbot)
+    assert window_state.restore_window_state(restored, settings) is True
+    assert restored.size().width() == 900
+
+
+def test_restore_survives_a_corrupt_blob(qtbot, tmp_path):
+    settings = _settings(tmp_path)
+    settings.setValue(window_state.GEOMETRY_KEY, b"not-a-qt-blob")
+    settings.setValue(window_state.STATE_KEY, b"also-garbage")
+
+    # Must return False rather than raising -- a bad settings store can never
+    # prevent the application from starting.
+    assert window_state.restore_window_state(_window(qtbot), settings) is False
+
+
+def test_restore_rejects_a_state_from_a_different_version(qtbot, tmp_path):
+    settings = _settings(tmp_path)
+    saved = _window(qtbot)
+    settings.setValue(window_state.GEOMETRY_KEY, saved.saveGeometry())
+    settings.setValue(
+        window_state.STATE_KEY, saved.saveState(window_state.WINDOW_STATE_VERSION + 1)
+    )
+
+    assert window_state.restore_window_state(_window(qtbot), settings) is False
+
+
+def test_reset_clears_both_keys(qtbot, tmp_path):
+    settings = _settings(tmp_path)
+    window_state.save_window_state(_window(qtbot), settings)
+    assert settings.value(window_state.STATE_KEY) is not None
+
+    window_state.reset_window_state(settings)
+
+    assert settings.value(window_state.GEOMETRY_KEY) is None
+    assert settings.value(window_state.STATE_KEY) is None
+
+
+def test_toolbar_visibility_survives_a_round_trip(qtbot, tmp_path):
+    settings = _settings(tmp_path)
+    saved = _window(qtbot)
+    saved.findChild(QToolBar, "standard").setVisible(False)
+    window_state.save_window_state(saved, settings)
+
+    restored = _window(qtbot)
+    window_state.restore_window_state(restored, settings)
+
+    assert restored.findChild(QToolBar, "standard").isHidden()
