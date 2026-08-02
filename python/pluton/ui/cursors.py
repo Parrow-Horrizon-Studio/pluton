@@ -9,11 +9,14 @@ Two bases, matching the semantics of the tools:
   ARROW     - the tool picks an existing entity, where a crosshair would
               imply an accuracy that is not being used.
 
-The badge glyph sits on a small opaque backdrop chip so it stays legible
-against the base and against whatever the cursor is hovering over -- our
-icon set is thin single-stroke outlines, not filled shapes, so the glyph's
-own ink cannot be relied on to read clearly (or to dominate its corner of
-the cursor) on its own.
+The badge glyph is haloed in white before its black ink is painted on top --
+the same technique the crosshair and arrow bases already use, and for the
+same reason: Pluton's viewport clears to a near-black
+`(0.15, 0.15, 0.18)`, so a bare black glyph would disappear into it. The
+halo is built from the glyph's own strokes offset by one device-independent
+pixel in each of the eight directions, not a filled backdrop panel -- our
+icon set is thin single-stroke outlines, not filled shapes, and a panel was
+tried and rejected in favour of this lighter-weight look.
 
 `compose_cursor` takes a `dpr` (a QScreen.devicePixelRatio()) so the cursor
 stays crisp on a HiDPI display: the pixmap is rendered at `dpr` physical
@@ -29,7 +32,7 @@ binds the platform cursor, exactly as it does for the pixmap content.
 
 from __future__ import annotations
 
-from PySide6.QtCore import QPointF, QRectF, QSize, Qt
+from PySide6.QtCore import QPointF, QSize, Qt
 from PySide6.QtGui import QColor, QCursor, QPainter, QPen, QPixmap, QPolygonF
 
 from pluton.ui.actions import CursorStyle, action_by_id
@@ -37,7 +40,7 @@ from pluton.ui.icons import icon_pixmap
 
 CURSOR_SIZE = 32
 BADGE_SIZE = 16
-BADGE_ORIGIN = (CURSOR_SIZE - BADGE_SIZE, CURSOR_SIZE - BADGE_SIZE)
+_BADGE_ORIGIN = (CURSOR_SIZE - BADGE_SIZE, CURSOR_SIZE - BADGE_SIZE)
 CROSSHAIR_HOTSPOT = (11, 11)
 ARROW_HOTSPOT = (0, 0)
 _CROSSHAIR_ARM = 8
@@ -66,19 +69,31 @@ def _paint_crosshair(painter: QPainter) -> None:
         painter.drawLine(cx, cy - _CROSSHAIR_ARM, cx, cy + _CROSSHAIR_ARM)
 
 
-def _paint_badge_backdrop(painter: QPainter) -> None:
-    """A light rounded chip behind the glyph.
+_HALO_OFFSETS = ((-1, 0), (1, 0), (0, -1), (0, 1), (-1, -1), (1, -1), (-1, 1), (1, 1))
 
-    Same rationale as the crosshair's white halo: the badge must read clearly
-    over arbitrary (often dark) viewport geometry. It also keeps the badge
-    corner reliably legible regardless of how sparse a given glyph's own
-    strokes are -- our icon set is thin single-stroke outlines, not filled
-    shapes, so the glyph alone cannot be relied on to dominate its quadrant.
+
+def _paint_badge(painter: QPainter, stem: str, dpr: float) -> None:
+    """Composite `stem`'s glyph into the lower-right corner, haloed in white.
+
+    Same technique as `_paint_crosshair`'s white underlay: the glyph is
+    painted once per offset in `_HALO_OFFSETS` in white, then once more on
+    top in black, so the badge reads clearly over arbitrary (often dark)
+    viewport geometry without a filled backdrop panel.
+
+    The offsets are device-independent pixels, matching the coordinate space
+    `painter` is already operating in; the glyph pixmaps themselves are
+    rendered at `dpr` physical pixels and tagged with `setDevicePixelRatio`
+    so both the halo and the ink stay crisp at any ratio.
     """
-    x, y = BADGE_ORIGIN
-    painter.setPen(Qt.PenStyle.NoPen)
-    painter.setBrush(_OUTLINE)
-    painter.drawRoundedRect(QRectF(x, y, BADGE_SIZE, BADGE_SIZE), 3.0, 3.0)
+    size = round(BADGE_SIZE * dpr)
+    white = icon_pixmap(stem, size, _OUTLINE)
+    white.setDevicePixelRatio(dpr)
+    for dx, dy in _HALO_OFFSETS:
+        painter.drawPixmap(_BADGE_ORIGIN[0] + dx, _BADGE_ORIGIN[1] + dy, white)
+
+    ink = icon_pixmap(stem, size, _INK)
+    ink.setDevicePixelRatio(dpr)
+    painter.drawPixmap(*_BADGE_ORIGIN, ink)
 
 
 def _paint_arrow(painter: QPainter) -> None:
@@ -119,10 +134,7 @@ def compose_cursor(style: CursorStyle, stem: str, dpr: float = 1.0) -> QCursor:
         _paint_arrow(painter)
         hotspot = ARROW_HOTSPOT
 
-    _paint_badge_backdrop(painter)
-    badge = icon_pixmap(stem, round(BADGE_SIZE * dpr), _INK)
-    badge.setDevicePixelRatio(dpr)
-    painter.drawPixmap(*BADGE_ORIGIN, badge)
+    _paint_badge(painter, stem, dpr)
     painter.end()
 
     built = QCursor(pixmap, hotspot[0], hotspot[1])

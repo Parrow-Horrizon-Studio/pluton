@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import pytest
+from PySide6.QtGui import QPainter
 
 from pluton.ui import actions, cursors
 
@@ -32,13 +33,16 @@ def test_cursor_pixmap_is_the_declared_size(qtbot):
 
 
 def test_badge_ink_lands_in_the_lower_right_quadrant(qtbot):
-    # The glyph must not sit under the hotspot, or it would obscure the point
-    # being placed. Compare ink in the lower-right quadrant against the
-    # upper-left one for a tool whose icon is a solid shape.
-    image = cursors.cursor_for("tool_rectangle").pixmap().toImage()
+    # The glyph must land in its own corner without disturbing the hotspot's
+    # corner. Comparing the composed cursor straight against itself (e.g.
+    # lower-right ink vs. upper-left ink) doesn't prove that: the crosshair's
+    # own arms put more ink in the hotspot's quadrant than a thin badge ever
+    # puts in its own, so that comparison can never distinguish a
+    # well-placed badge from a missing or misplaced one. Instead compare
+    # against a crosshair-only baseline in the *same* quadrants.
     half = cursors.CURSOR_SIZE // 2
 
-    def ink(x0, y0):
+    def ink(image, x0, y0):
         return sum(
             1
             for y in range(y0, y0 + half)
@@ -46,7 +50,24 @@ def test_badge_ink_lands_in_the_lower_right_quadrant(qtbot):
             if image.pixelColor(x, y).alpha() > 0
         )
 
-    assert ink(half, half) > ink(0, 0)
+    baseline_pixmap = cursors._blank(1.0)
+    baseline_painter = QPainter(baseline_pixmap)
+    baseline_painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+    cursors._paint_crosshair(baseline_painter)
+    baseline_painter.end()
+    baseline_image = baseline_pixmap.toImage()
+
+    composed_image = cursors.cursor_for("tool_rectangle").pixmap().toImage()
+
+    hotspot_x, hotspot_y = cursors.CROSSHAIR_HOTSPOT
+    hotspot_quadrant = (0 if hotspot_x < half else half, 0 if hotspot_y < half else half)
+    badge_quadrant = (half, half)
+
+    # The badge landed in the lower-right corner: that quadrant gained ink
+    # relative to the crosshair-only baseline (which has none there).
+    assert ink(composed_image, *badge_quadrant) > ink(baseline_image, *badge_quadrant)
+    # The badge did not drift onto the hotspot: its quadrant is untouched.
+    assert ink(composed_image, *hotspot_quadrant) == ink(baseline_image, *hotspot_quadrant)
 
 
 def test_cursors_are_cached(qtbot):
