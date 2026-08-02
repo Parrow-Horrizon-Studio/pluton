@@ -142,12 +142,17 @@ def compose_cursor(style: CursorStyle, stem: str, dpr: float = 1.0) -> QCursor:
     return built
 
 
-def cursor_for(action_id: str) -> QCursor:
-    """The cursor for a tool action. Raises ValueError for a non-tool action."""
+def cursor_for(action_id: str, dpr: float = 1.0) -> QCursor:
+    """The cursor for a tool action. Raises ValueError for a non-tool action.
+
+    `dpr` is forwarded to `compose_cursor` unchanged; pass the widget's own
+    `devicePixelRatioF()` so the cursor stays crisp on a HiDPI display. It
+    defaults to 1.0 for callers (and tests) that don't care.
+    """
     spec = action_by_id(action_id)
     if spec.cursor is None or spec.icon is None:
         raise ValueError(f"{action_id} declares no cursor style")
-    return compose_cursor(spec.cursor, spec.icon)
+    return compose_cursor(spec.cursor, spec.icon, dpr)
 
 
 def clear_cursor_cache() -> None:

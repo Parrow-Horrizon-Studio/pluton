@@ -80,12 +80,23 @@ def test_non_tool_action_has_no_cursor(qtbot):
         cursors.cursor_for("file_save")
 
 
+def test_cursor_for_composes_at_the_given_dpr(qtbot):
+    # cursor_for is the only entry point MainWindow calls (M7.2 Task 12); if
+    # it silently dropped a passed-in ratio, every cursor would ship at 1x
+    # and blur on a HiDPI display regardless of what the caller asked for.
+    cursor = cursors.cursor_for("tool_line", dpr=2.0)
+    pixmap = cursor.pixmap()
+    assert pixmap.devicePixelRatio() == pytest.approx(2.0)
+    assert pixmap.width() == cursors.CURSOR_SIZE * 2
+    assert (cursor.hotSpot().x(), cursor.hotSpot().y()) == cursors.CROSSHAIR_HOTSPOT
+
+
 # --- dpr and cache-key correctness -------------------------------------
 #
-# cursor_for() always composes at dpr=1.0, so the tests above never exercise
-# the dpr path. compose_cursor() is exercised directly here instead, since a
-# HiDPI cursor with a mishandled ratio or an aliased cache entry would still
-# pass every test above.
+# cursor_for() defaults to dpr=1.0 when the caller doesn't pass one, so the
+# tests above never exercise the dpr path by default. compose_cursor() is
+# exercised directly here instead, since a HiDPI cursor with a mishandled
+# ratio or an aliased cache entry would still pass every test above.
 
 
 def test_compose_cursor_at_2x_dpr_scales_the_pixmap_but_keeps_the_hotspot(qtbot):

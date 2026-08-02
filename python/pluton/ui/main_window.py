@@ -56,6 +56,7 @@ from pluton.tools.paint_tool import PaintTool
 from pluton.tools.roof_tool import RoofTool
 from pluton.tools.text_tool import TextTool
 from pluton.tools.wall_tool import WallTool
+from pluton.ui.cursors import cursor_for
 from pluton.ui.document_controller import DocumentController
 from pluton.ui.materials_dock import MaterialsDock
 from pluton.ui.opening_options_bar import OpeningOptionsBar
@@ -470,6 +471,13 @@ class MainWindow(QMainWindow):
                 action_id = self._tool_action_id_for_shortcut(active.shortcut)
                 if action_id is not None:
                     self._actions[action_id].setChecked(True)
+                    # Viewport only: the tool cursor must not leak over docks,
+                    # the menu bar, or the per-tool option bars. The ratio
+                    # comes from the widget itself (not a global) since a
+                    # window can move between monitors with different
+                    # scaling (M7.2, Task 12).
+                    dpr = self._viewport.devicePixelRatioF()
+                    self._viewport.setCursor(cursor_for(action_id, dpr=dpr))
 
     @staticmethod
     def _tool_action_id_for_shortcut(shortcut: str) -> str | None:

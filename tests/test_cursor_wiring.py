@@ -1,0 +1,60 @@
+"""The viewport cursor follows the armed tool (M7.2 Task 12)."""
+
+from __future__ import annotations
+
+import pytest
+
+from pluton.ui import cursors
+
+
+def test_arming_a_crosshair_tool_sets_the_crosshair_hotspot(qtbot, main_window):
+    main_window._activate("L")
+    hotspot = main_window._viewport.cursor().hotSpot()
+    assert (hotspot.x(), hotspot.y()) == cursors.CROSSHAIR_HOTSPOT
+
+
+def test_arming_an_arrow_tool_sets_the_arrow_hotspot(qtbot, main_window):
+    main_window._activate("Space")
+    hotspot = main_window._viewport.cursor().hotSpot()
+    assert (hotspot.x(), hotspot.y()) == cursors.ARROW_HOTSPOT
+
+
+def test_switching_tools_switches_the_cursor(qtbot, main_window):
+    main_window._activate("Space")
+    first = main_window._viewport.cursor().pixmap().toImage()
+    main_window._activate("C")
+    second = main_window._viewport.cursor().pixmap().toImage()
+    assert first != second
+
+
+def test_the_cursor_is_set_on_the_viewport_not_the_window(qtbot, main_window):
+    # Setting it on the window would leak the tool cursor over the docks,
+    # menu bar, and option bars.
+    main_window._activate("L")
+    assert main_window._viewport.testAttribute.__self__ is main_window._viewport
+    assert main_window._viewport.cursor().hotSpot() != main_window.cursor().hotSpot()
+
+
+def test_every_tool_can_be_armed_without_raising(qtbot, main_window):
+    from pluton.ui.actions import ACTIONS, TOOL_GROUP
+
+    for spec in ACTIONS:
+        if spec.group == TOOL_GROUP:
+            main_window._activate(spec.shortcut)
+            assert not main_window._viewport.cursor().pixmap().isNull(), spec.id
+
+
+def test_the_wired_cursor_is_composed_at_the_viewports_device_pixel_ratio(
+    qtbot, main_window, monkeypatch
+):
+    # A window can move between monitors with different scaling, so the
+    # ratio must be read from the widget itself at activation time rather
+    # than baked in as a global 1.0 (M7.2 Task 12 -- closing the Task 5 gap
+    # where cursor_for always composed at dpr=1.0).
+    monkeypatch.setattr(main_window._viewport, "devicePixelRatioF", lambda: 2.0)
+
+    main_window._activate("L")
+
+    pixmap = main_window._viewport.cursor().pixmap()
+    assert pixmap.devicePixelRatio() == pytest.approx(2.0)
+    assert pixmap.width() == cursors.CURSOR_SIZE * 2
