@@ -28,6 +28,11 @@ class TagsDock(QDockWidget):
 
     def __init__(self, library: TagLibrary, parent=None) -> None:
         super().__init__("Tags", parent)
+        # QMainWindow.saveState() silently drops docks without an object name
+        # (see tests/test_ui_builder_toolbars.py for the toolbar equivalent).
+        # This name is a persistence key: never rename it, or saved layouts
+        # silently lose this dock's state.
+        self.setObjectName("tags_dock")
         self._library = library
         self._active_id = TagLibrary.UNTAGGED_ID
         self._rebuilding = False

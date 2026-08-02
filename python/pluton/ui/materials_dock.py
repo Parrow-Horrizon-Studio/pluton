@@ -33,6 +33,11 @@ class MaterialsDock(QDockWidget):
 
     def __init__(self, library: MaterialLibrary, parent=None) -> None:
         super().__init__("Materials", parent)
+        # QMainWindow.saveState() silently drops docks without an object name
+        # (see tests/test_ui_builder_toolbars.py for the toolbar equivalent).
+        # This name is a persistence key: never rename it, or saved layouts
+        # silently lose this dock's state.
+        self.setObjectName("materials_dock")
         self._library = library
         self._active_id = MaterialLibrary.DEFAULT_ID
         self._buttons: dict[int, QPushButton] = {}

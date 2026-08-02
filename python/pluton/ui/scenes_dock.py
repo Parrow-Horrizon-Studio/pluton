@@ -33,6 +33,11 @@ class ScenesDock(QDockWidget):
 
     def __init__(self, library, parent=None) -> None:
         super().__init__("Scenes", parent)
+        # QMainWindow.saveState() silently drops docks without an object name
+        # (see tests/test_ui_builder_toolbars.py for the toolbar equivalent).
+        # This name is a persistence key: never rename it, or saved layouts
+        # silently lose this dock's state.
+        self.setObjectName("scenes_dock")
         self._library = library
         self._rebuilding = False
 
