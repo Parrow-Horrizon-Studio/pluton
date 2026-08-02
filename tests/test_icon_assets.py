@@ -81,3 +81,17 @@ def test_renders_to_a_non_empty_pixmap(stem, text, qtbot):
         if image.pixelColor(x, y).alpha() > 0
     )
     assert inked > 20, f"{stem} renders nearly blank ({inked} inked pixels)"
+
+
+def test_every_declared_icon_has_an_asset_file():
+    stems = icons.available_icon_stems()
+    declared = sorted({s.icon for s in actions.ACTIONS if s.icon is not None})
+    missing = [stem for stem in declared if stem not in stems]
+    assert missing == [], f"declared but missing: {missing}"
+    assert len(declared) == 29, f"expected 29 declared icons, got {len(declared)}"
+
+
+def test_no_orphan_asset_files():
+    declared = {s.icon for s in actions.ACTIONS if s.icon is not None}
+    orphans = sorted(icons.available_icon_stems() - declared)
+    assert orphans == [], f"asset files no action references: {orphans}"
