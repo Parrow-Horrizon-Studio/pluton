@@ -4,10 +4,11 @@ from __future__ import annotations
 
 import math
 from pathlib import Path
+from typing import ClassVar
 
 import numpy as np
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QAction, QActionGroup, QKeySequence, QShortcut
+from PySide6.QtGui import QKeySequence, QShortcut
 from PySide6.QtWidgets import QMainWindow, QVBoxLayout, QWidget
 
 from pluton.commands import CommandStack
@@ -72,6 +73,19 @@ from pluton.views.capture import apply_tags_and_style, capture_view
 
 class MainWindow(QMainWindow):
     """Top-level Pluton window."""
+
+    # Maps the current render style back to the registry action id that
+    # represents it (M7.2, Task 10) -- used to seed the face-style radio
+    # group's initial checked state from self._render_style.
+    _FACE_STYLE_ACTION_IDS: ClassVar[dict[FaceStyle, str]] = {
+        FaceStyle.WIREFRAME: "view_style_wireframe",
+        FaceStyle.HIDDEN_LINE: "view_style_hidden_line",
+        FaceStyle.MONOCHROME: "view_style_monochrome",
+        FaceStyle.SHADED: "view_style_shaded",
+    }
+
+    def _face_style_action_id(self) -> str:
+        return self._FACE_STYLE_ACTION_IDS[self._render_style.face_style]
 
     def __init__(self) -> None:
         super().__init__()
@@ -212,27 +226,8 @@ class MainWindow(QMainWindow):
         self._command_stack.add_undo_listener(self._on_after_undo_redo)
         self._command_stack.add_redo_listener(self._on_after_undo_redo)
 
-        # Keyboard shortcuts
-        QShortcut(QKeySequence("L"), self, activated=lambda: self._activate("L"))
-        QShortcut(QKeySequence("R"), self, activated=lambda: self._activate("R"))
-        QShortcut(QKeySequence("P"), self, activated=lambda: self._activate("P"))
-        QShortcut(QKeySequence("C"), self, activated=lambda: self._activate("C"))
-        QShortcut(QKeySequence("G"), self, activated=lambda: self._activate("G"))
-        QShortcut(QKeySequence("A"), self, activated=lambda: self._activate("A"))
-        QShortcut(QKeySequence(Qt.Key.Key_Space), self, activated=lambda: self._activate("Space"))
-        QShortcut(QKeySequence("B"), self, activated=lambda: self._activate("B"))
-        QShortcut(QKeySequence("E"), self, activated=lambda: self._activate("E"))
-        QShortcut(QKeySequence("M"), self, activated=lambda: self._activate("M"))
-        QShortcut(QKeySequence("Q"), self, activated=lambda: self._activate("Q"))
-        QShortcut(QKeySequence("S"), self, activated=lambda: self._activate("S"))
-        QShortcut(QKeySequence("T"), self, activated=lambda: self._activate("T"))
-        QShortcut(QKeySequence("W"), self, activated=lambda: self._activate("W"))
-        QShortcut(QKeySequence("D"), self, activated=lambda: self._activate("D"))
-        QShortcut(QKeySequence("O"), self, activated=lambda: self._activate("O"))
-        QShortcut(QKeySequence("I"), self, activated=lambda: self._activate("I"))
-        QShortcut(QKeySequence("N"), self, activated=lambda: self._activate("N"))
-        QShortcut(QKeySequence(Qt.Key.Key_Delete), self, activated=self._on_delete_selection)
-        QShortcut(QKeySequence(Qt.Key.Key_Backspace), self, activated=self._on_delete_selection)
+        # Keyboard shortcuts not covered by the action registry (M7.2, Task 10)
+        # -- these are not commands and have no menu entry.
         QShortcut(
             QKeySequence(Qt.Key.Key_Up), self, activated=lambda: self._on_tool_key(Qt.Key.Key_Up)
         )
@@ -244,16 +239,6 @@ class MainWindow(QMainWindow):
         QShortcut(QKeySequence("Esc"), self, activated=self._on_escape)
         QShortcut(QKeySequence(Qt.Key.Key_Return), self, activated=self._on_finish_gesture)
         QShortcut(QKeySequence(Qt.Key.Key_Enter), self, activated=self._on_finish_gesture)
-        QShortcut(QKeySequence("Ctrl+N"), self, activated=self._on_file_new)
-        QShortcut(QKeySequence("Ctrl+O"), self, activated=self._on_file_open)
-        QShortcut(QKeySequence("Ctrl+S"), self, activated=self._on_file_save)
-        QShortcut(QKeySequence("Ctrl+Shift+S"), self, activated=self._on_file_save_as)
-        QShortcut(QKeySequence("Ctrl+Z"), self, activated=self._on_undo)
-        QShortcut(QKeySequence("Ctrl+Y"), self, activated=self._on_redo)
-        QShortcut(QKeySequence("Ctrl+Shift+Z"), self, activated=self._on_redo)
-        QShortcut(QKeySequence("Ctrl+G"), self, activated=self._on_make_group)
-        QShortcut(QKeySequence("Ctrl+Shift+G"), self, activated=self._on_make_component)
-        QShortcut(QKeySequence("Ctrl+Shift+E"), self, activated=self._on_explode)
 
         # Install the VCB event filter on the QApplication so it intercepts
         # key events (and ShortcutOverride) before any QShortcut fires.
@@ -264,74 +249,24 @@ class MainWindow(QMainWindow):
         if _app is not None:
             _app.installEventFilter(self)
 
-        # File menu (M6a) — leftmost.
-        menubar = self.menuBar()
-        self._file_menu = menubar.addMenu("File")
-        self._file_menu.addAction("New\tCtrl+N", self._on_file_new)
-        self._file_menu.addAction("Open…\tCtrl+O", self._on_file_open)
-        self._file_menu.addSeparator()
-        self._file_menu.addAction("Save\tCtrl+S", self._on_file_save)
-        self._file_menu.addAction("Save As…\tCtrl+Shift+S", self._on_file_save_as)
-        self._file_menu.addSeparator()
-        self._file_menu.addAction("Import OBJ…", self._on_import_obj)
-        self._file_menu.addAction("Export OBJ…", self._on_export_obj)
-        self._file_menu.addAction("Import glTF…", self._on_import_gltf)
-        self._file_menu.addAction("Export glTF…", self._on_export_gltf)
+        # Menu bar + actions + shortcuts, built from the declarative registry
+        # in pluton.ui.actions (M7.2, Task 10).
+        from pluton.ui.ui_builder import build_all_actions, build_menubar, build_shortcuts
 
-        # Edit menu
-        self._edit_menu = menubar.addMenu("Edit")
-        self._edit_menu.addAction("Make Group\tCtrl+G", self._on_make_group)
-        self._edit_menu.addAction("Make Component…\tCtrl+Shift+G", self._on_make_component)
-        self._edit_menu.addSeparator()
-        self._edit_menu.addAction("Explode\tCtrl+Shift+E", self._on_explode)
-        self._edit_menu.addAction("Make Unique", self._on_make_unique)
-        self._edit_menu.addSeparator()
-        self._edit_menu.addAction("Clear Active Context", self._on_clear_scene)
+        build_all_actions(self)
+        self._menus = build_menubar(self)
+        build_shortcuts(self)
 
-        # Units menu
-        self._units_menu = menubar.addMenu("Units")
-        for label, fn in (
-            ("Metric — m", lambda: self._set_units_metric("m")),
-            ("Metric — cm", lambda: self._set_units_metric("cm")),
-            ("Metric — mm", lambda: self._set_units_metric("mm")),
-            ("Imperial — architectural", self._set_units_imperial),
-        ):
-            self._units_menu.addAction(label, fn)
+        # Reflect current document state in the exclusive groups.
+        self._actions[self._face_style_action_id()].setChecked(True)
+        self._face_style_actions = {
+            style: self._actions[action_id]
+            for style, action_id in self._FACE_STYLE_ACTION_IDS.items()
+        }
+        self._xray_action = self._actions["view_xray"]
 
-        # Tools menu (M7a, Task 5) — the tool roster is otherwise shortcut-driven
-        # with no per-tool menu items; Wall gets one entry mirroring that idiom.
-        self._tools_menu = menubar.addMenu("Tools")
-        self._tools_menu.addAction("Wall\tW", lambda: self._activate("W"))
-        self._tools_menu.addAction("Door/Window\tD", lambda: self._activate("D"))
-        self._tools_menu.addAction("Roof\tO", lambda: self._activate("O"))
-        self._tools_menu.addAction("Dimension\tI", lambda: self._activate("I"))
-        self._tools_menu.addAction("Text\tN", lambda: self._activate("N"))
-
-        # View menu (M5a) — face-style radio group + independent X-Ray toggle.
-        self._view_menu = menubar.addMenu("View")
-        self._face_style_group = QActionGroup(self)
-        self._face_style_group.setExclusive(True)
-        self._face_style_actions: dict[FaceStyle, QAction] = {}
-        for label, style in (
-            ("Wireframe", FaceStyle.WIREFRAME),
-            ("Hidden Line", FaceStyle.HIDDEN_LINE),
-            ("Monochrome", FaceStyle.MONOCHROME),
-            ("Shaded", FaceStyle.SHADED),
-        ):
-            action = QAction(label, self, checkable=True)
-            action.setActionGroup(self._face_style_group)
-            action.triggered.connect(lambda _checked, s=style: self._on_set_face_style(s))
-            self._view_menu.addAction(action)
-            self._face_style_actions[style] = action
-        self._face_style_actions[self._render_style.face_style].setChecked(True)
-        self._view_menu.addSeparator()
-        self._xray_action = QAction("X-Ray", self, checkable=True)
-        self._xray_action.toggled.connect(self._on_toggle_xray)
-        self._view_menu.addAction(self._xray_action)
-
-        # Panel toggles — re-show a dock the user closed via its close button.
-        # toggleViewAction() is a ready-made checkable QAction that mirrors and
-        # controls the dock's visibility (text defaults to the dock title).
+        # Dynamic View entries: dock toggles come from the docks themselves.
+        self._view_menu = self._menus["View"]
         self._view_menu.addSeparator()
         self._materials_dock_action = self._materials_dock.toggleViewAction()
         self._view_menu.addAction(self._materials_dock_action)
@@ -339,6 +274,10 @@ class MainWindow(QMainWindow):
         self._view_menu.addAction(self._tags_dock_action)
         self._scenes_dock_action = self._scenes_dock.toggleViewAction()
         self._view_menu.addAction(self._scenes_dock_action)
+
+        # Back-compat aliases for tests that read a named menu by attribute.
+        self._file_menu = self._menus["File"]
+        self._units_menu = self._menus["Units"]
 
         self._update_window_title()
 

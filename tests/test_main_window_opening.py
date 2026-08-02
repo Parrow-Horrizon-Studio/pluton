@@ -18,15 +18,16 @@ def test_opening_options_bar_visible_only_for_tool(qtbot):
     w._tool_manager.activate_by_shortcut("D")
     w._refresh_tool_options()
     assert w._opening_options_bar.isVisibleTo(w)
-    w._tool_manager.activate_by_shortcut("L")   # line tool
+    w._tool_manager.activate_by_shortcut("L")  # line tool
     w._refresh_tool_options()
     assert not w._opening_options_bar.isVisibleTo(w)
 
 
 def test_d_key_shortcut_registered(qtbot):
-    from PySide6.QtGui import QShortcut
-
+    # M7.2 Task 10: D is no longer a raw QShortcut -- it is the
+    # tool_door_window action's registry shortcut, wired to fire at window
+    # scope by build_shortcuts() (added to w.actions()).
     w = MainWindow()
     qtbot.addWidget(w)
-    keys = {sc.key().toString() for sc in w.findChildren(QShortcut)}
-    assert "D" in keys
+    assert w._actions["tool_door_window"].shortcut().toString().upper() == "D"
+    assert w._actions["tool_door_window"] in w.actions()

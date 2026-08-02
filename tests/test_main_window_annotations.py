@@ -36,12 +36,15 @@ def test_text_tool_registered_with_n(qtbot):
 
 
 def test_i_and_n_key_shortcuts_registered(qtbot):
-    from PySide6.QtGui import QShortcut
-
+    # M7.2 Task 10: I/N are no longer raw QShortcuts -- they are the
+    # tool_dimension/tool_text actions' registry shortcuts, wired to fire at
+    # window scope by build_shortcuts() (added to w.actions()).
     w = MainWindow()
     qtbot.addWidget(w)
-    keys = {sc.key().toString() for sc in w.findChildren(QShortcut)}
-    assert "I" in keys and "N" in keys
+    assert w._actions["tool_dimension"].shortcut().toString().upper() == "I"
+    assert w._actions["tool_text"].shortcut().toString().upper() == "N"
+    assert w._actions["tool_dimension"] in w.actions()
+    assert w._actions["tool_text"] in w.actions()
 
 
 # ---------------------------------------------------------------------------
@@ -49,6 +52,7 @@ def test_i_and_n_key_shortcuts_registered(qtbot):
 # document's live units, not left unset (which would silently default every
 # dimension label to `Units()` regardless of the Units menu selection).
 # ---------------------------------------------------------------------------
+
 
 def test_viewport_units_provider_wired_to_doc_units(qtbot):
     w = MainWindow()
@@ -78,6 +82,7 @@ def test_viewport_units_provider_reflects_imperial_change(qtbot):
 # Part C (Task 7 carry-over): Selection.counts() widened to a 4-tuple and
 # _refresh_selection_status now reports the annotation count.
 # ---------------------------------------------------------------------------
+
 
 def test_selection_status_blank_when_nothing_selected(qtbot):
     w = MainWindow()
