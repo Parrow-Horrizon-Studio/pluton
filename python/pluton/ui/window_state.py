@@ -43,6 +43,10 @@ def save_window_state(window: QMainWindow, settings: QSettings) -> None:
 def restore_window_state(window: QMainWindow, settings: QSettings) -> bool:
     """Reapply a saved layout. Returns True only if both parts restored.
 
+    Atomic: either both geometry and state end up applied, or neither does.
+    If the state restore fails after geometry already changed, the geometry
+    is rolled back to what it was before this call.
+
     False means "use the defaults" and is the normal result on first run.
     """
     geometry = settings.value(GEOMETRY_KEY)
@@ -50,13 +54,19 @@ def restore_window_state(window: QMainWindow, settings: QSettings) -> bool:
     if geometry is None or state is None:
         return False
 
+    previous_geometry = window.saveGeometry()
+
     try:
         if not window.restoreGeometry(geometry):
             return False
-        return bool(window.restoreState(state, WINDOW_STATE_VERSION))
+        if window.restoreState(state, WINDOW_STATE_VERSION):
+            return True
+        window.restoreGeometry(previous_geometry)
+        return False
     except (TypeError, ValueError):
         # A blob of the wrong type entirely (hand-edited INI, foreign writer).
         logger.warning("discarding unreadable saved window state", exc_info=True)
+        window.restoreGeometry(previous_geometry)
         return False
 
 

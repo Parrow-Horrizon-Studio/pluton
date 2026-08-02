@@ -28,12 +28,19 @@ def test_restore_returns_false_when_nothing_is_saved(qtbot, tmp_path):
 def test_save_then_restore_round_trips(qtbot, tmp_path):
     settings = _settings(tmp_path)
     saved = _window(qtbot)
-    saved.resize(900, 640)
+    # 640x480 stays comfortably inside the 800x800 offscreen virtual screen
+    # that CI uses (see tests/conftest.py), with headroom for the window
+    # frame that QMainWindow.restoreGeometry() accounts for when clamping to
+    # the available screen. It also differs from QMainWindow's own default
+    # size (200x100), so the assertion below proves a genuine round-trip
+    # rather than an accidental match against the default.
+    saved.resize(640, 480)
     window_state.save_window_state(saved, settings)
 
     restored = _window(qtbot)
     assert window_state.restore_window_state(restored, settings) is True
-    assert restored.size().width() == 900
+    assert restored.size().width() == 640
+    assert restored.size().height() == 480
 
 
 def test_restore_survives_a_corrupt_blob(qtbot, tmp_path):
@@ -53,6 +60,39 @@ def test_restore_rejects_a_state_from_a_different_version(qtbot, tmp_path):
     settings.setValue(
         window_state.STATE_KEY, saved.saveState(window_state.WINDOW_STATE_VERSION + 1)
     )
+
+    assert window_state.restore_window_state(_window(qtbot), settings) is False
+
+
+def test_restore_is_atomic_when_state_restore_fails(qtbot, tmp_path):
+    settings = _settings(tmp_path)
+    saved = _window(qtbot)
+    settings.setValue(window_state.GEOMETRY_KEY, saved.saveGeometry())
+    # A state blob saved under a different version always fails Qt's own
+    # version check inside restoreState(), even though the geometry blob
+    # right above it is perfectly valid.
+    settings.setValue(
+        window_state.STATE_KEY, saved.saveState(window_state.WINDOW_STATE_VERSION + 1)
+    )
+
+    restored = _window(qtbot)
+    restored.resize(555, 444)
+    size_before = restored.size()
+
+    assert window_state.restore_window_state(restored, settings) is False
+    # The geometry half must not have been left applied -- either both parts
+    # restore or neither does.
+    assert restored.size() == size_before
+
+
+def test_restore_survives_a_wrong_type_value(qtbot, tmp_path):
+    settings = _settings(tmp_path)
+    # An INI-format QSettings can hand back a plain str where a QByteArray
+    # was written (e.g. hand-edited, or written by a non-Qt tool). That's a
+    # distinct failure mode from garbage bytes: restoreGeometry() raises
+    # instead of returning False, which is what the except clause guards.
+    settings.setValue(window_state.GEOMETRY_KEY, "not-a-blob")
+    settings.setValue(window_state.STATE_KEY, "also-not-a-blob")
 
     assert window_state.restore_window_state(_window(qtbot), settings) is False
 
