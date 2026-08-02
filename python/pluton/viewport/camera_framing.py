@@ -11,6 +11,8 @@ no corner of the box can poke outside the frustum at an oblique angle.
 
 from __future__ import annotations
 
+import math
+
 import numpy as np
 
 MIN_RADIUS = 1e-3
@@ -35,7 +37,18 @@ def frame_bounds(
     margin:    fraction of slack around the model (1.15 = 15% breathing room).
 
     Returns (position, target) as float64 arrays.
+
+    Raises:
+        ValueError: if `fov_y` is not in the open interval (0, pi) radians --
+            this is almost always a caller passing degrees by mistake (e.g.
+            `Camera.fov_y_deg` unconverted).
     """
+    if not (0.0 < fov_y < math.pi):
+        raise ValueError(
+            f"fov_y must be in radians, in the open interval (0, pi); got {fov_y!r}. "
+            "Did you pass degrees instead of radians (e.g. Camera.fov_y_deg)?"
+        )
+
     lo = np.asarray(bmin, dtype=np.float64)
     hi = np.asarray(bmax, dtype=np.float64)
     target = (lo + hi) / 2.0
