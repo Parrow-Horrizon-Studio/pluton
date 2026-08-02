@@ -7,6 +7,8 @@ fixture style already used by tests/test_main_window_scenes.py.
 from __future__ import annotations
 
 import numpy as np
+from pluton.model.annotation import Dimension, Label
+from PySide6.QtWidgets import QInputDialog
 
 
 def test_select_all_selects_the_active_context(qtbot, main_window_with_square):
@@ -99,3 +101,125 @@ def test_edit_group_with_nothing_selected_is_a_no_op(qtbot, main_window):
     main_window._selection.clear()
     main_window._on_edit_group()
     assert main_window._model.active_path == []
+
+
+# ---------------------------------------------------------------------------
+# Fix wave: _on_paint_selection and _on_edit_label_text (Task 9's own
+# deliverables) had zero committed coverage. Added here, following the
+# fixture/assertion style already used above -- observable state (material on
+# the face, text on the annotation, command-stack depth), not method calls.
+# ---------------------------------------------------------------------------
+
+
+def _two_faces(window):
+    """Two triangular faces sharing an edge -- mirrors the _two_face_scene
+    helper in tests/test_scene_materials.py, built on the live MainWindow
+    scene so _on_paint_selection can be exercised through the real handler."""
+    scene = window.scene
+    a = [
+        scene.add_vertex(np.array([0.0, 0.0, 0.0], dtype=np.float32)),
+        scene.add_vertex(np.array([1.0, 0.0, 0.0], dtype=np.float32)),
+        scene.add_vertex(np.array([0.0, 1.0, 0.0], dtype=np.float32)),
+    ]
+    fa = scene.add_face_from_loop(a)
+    b = [a[1], scene.add_vertex(np.array([1.0, 1.0, 0.0], dtype=np.float32)), a[2]]
+    fb = scene.add_face_from_loop(b)
+    return scene, fa, fb
+
+
+def test_paint_selection_paints_every_face_and_one_undo_restores_all(qtbot, main_window):
+    window = main_window
+    scene, fa, fb = _two_faces(window)
+    materials = window._model.materials.materials()
+    active_id = materials[1].id
+    previous_id = materials[2].id
+    # fa starts unpainted (Default, id 0); fb starts painted with a DIFFERENT
+    # material. Two distinct starting materials prove the composite undo
+    # restores each face's own prior value, not a single shared one.
+    scene.set_face_material(fb, previous_id)
+    window._active_material_id = active_id
+    window._selection.replace(faces=[fa, fb])
+
+    assert len(window._command_stack._undo) == 0
+    window._on_paint_selection()
+
+    assert scene.face_material(fa) == active_id
+    assert scene.face_material(fb) == active_id
+    # Painting N faces must land as ONE undo-stack entry (a CompositeCommand
+    # wrapping N PaintFaceCommands), so a single Ctrl+Z undoes the whole
+    # paint gesture at once.
+    assert len(window._command_stack._undo) == 1
+
+    assert window._command_stack.undo() is True
+    assert scene.face_material(fa) == 0
+    assert scene.face_material(fb) == previous_id
+    assert len(window._command_stack._undo) == 0
+
+
+def test_paint_selection_with_nothing_selected_is_a_no_op(qtbot, main_window_with_square):
+    window = main_window_with_square
+    window._selection.clear()
+    depth_before = len(window._command_stack._undo)
+
+    window._on_paint_selection()
+
+    assert len(window._command_stack._undo) == depth_before
+
+
+def _label(window, text):
+    ann = Label(window._model.new_annotation_id(), (0.0, 0.0, 0.0), (1.0, 1.0, 0.0), text)
+    window._model.active_context.annotations.append(ann)
+    return ann
+
+
+def test_edit_label_text_applies_change_and_undo_restores_original(qtbot, main_window, monkeypatch):
+    window = main_window
+    ann = _label(window, "Hello")
+    window._selection.replace(annotations=[ann.id])
+    monkeypatch.setattr(QInputDialog, "getText", staticmethod(lambda *a, **k: ("Renamed", True)))
+    depth_before = len(window._command_stack._undo)
+
+    window._on_edit_label_text()
+
+    assert ann.text == "Renamed"
+    assert len(window._command_stack._undo) == depth_before + 1
+
+    assert window._command_stack.undo() is True
+    assert ann.text == "Hello"
+    assert len(window._command_stack._undo) == depth_before
+
+
+def test_edit_label_text_cancel_is_a_no_op(qtbot, main_window, monkeypatch):
+    window = main_window
+    ann = _label(window, "Hello")
+    window._selection.replace(annotations=[ann.id])
+    monkeypatch.setattr(QInputDialog, "getText", staticmethod(lambda *a, **k: ("Renamed", False)))
+    depth_before = len(window._command_stack._undo)
+
+    window._on_edit_label_text()
+
+    assert ann.text == "Hello"
+    assert len(window._command_stack._undo) == depth_before
+
+
+def test_edit_label_text_on_a_non_label_annotation_is_a_no_op(qtbot, main_window, monkeypatch):
+    """Pins the `kind == "label"` guard: a selected Dimension must be left
+    untouched and must never even reach the text dialog."""
+    window = main_window
+    ann = Dimension(
+        window._model.new_annotation_id(), (0.0, 0.0, 0.0), (4.0, 0.0, 0.0), (0.0, -2.0, 0.0)
+    )
+    window._model.active_context.annotations.append(ann)
+    window._selection.replace(annotations=[ann.id])
+    before = (ann.p1, ann.p2, ann.offset)
+
+    def _fail_if_called(*_a, **_k):
+        raise AssertionError("QInputDialog.getText must not be reached for a non-label kind")
+
+    monkeypatch.setattr(QInputDialog, "getText", staticmethod(_fail_if_called))
+    depth_before = len(window._command_stack._undo)
+
+    window._on_edit_label_text()
+
+    assert (ann.p1, ann.p2, ann.offset) == before
+    assert len(window._command_stack._undo) == depth_before
