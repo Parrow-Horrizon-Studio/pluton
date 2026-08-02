@@ -2,6 +2,7 @@
 
 import os
 
+import numpy as np
 import pytest
 from pluton.commands.group_commands import MakeGroupCommand
 from pluton.model.model import Model
@@ -62,3 +63,34 @@ def group_factory():
         return command.created_instance
 
     return make
+
+
+@pytest.fixture
+def main_window(qtbot):
+    from pluton.ui.main_window import MainWindow
+
+    window = MainWindow()
+    qtbot.addWidget(window)
+    return window
+
+
+@pytest.fixture
+def main_window_with_square(main_window):
+    scene = main_window._model.active_context.mesh
+    v = [
+        scene.add_vertex(np.array([0.0, 0.0, 0.0], dtype=np.float32)),
+        scene.add_vertex(np.array([1.0, 0.0, 0.0], dtype=np.float32)),
+        scene.add_vertex(np.array([1.0, 1.0, 0.0], dtype=np.float32)),
+        scene.add_vertex(np.array([0.0, 1.0, 0.0], dtype=np.float32)),
+    ]
+    scene.add_face_from_loop(v)
+    return main_window
+
+
+@pytest.fixture
+def main_window_with_group(main_window_with_square):
+    window = main_window_with_square
+    window._on_select_all()
+    window._on_make_group()
+    window._selection.clear()
+    return window

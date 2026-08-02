@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import math
 from pathlib import Path
 
+import numpy as np
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QAction, QActionGroup, QKeySequence, QShortcut
 from PySide6.QtWidgets import QMainWindow, QVBoxLayout, QWidget
@@ -748,6 +750,102 @@ class MainWindow(QMainWindow):
             self._command_stack.push_executed(composite, self._model.active_scene)
         sel.clear()
         self._refresh_selection_status()
+        self._viewport.update()
+
+    # --- M7.2 selection + view commands ------------------------------------
+
+    def _on_select_all(self) -> None:
+        """Select every entity in the active editing context."""
+        from pluton.model.model_queries import select_all_ids
+
+        edges, faces, instances = select_all_ids(self._model)
+        self._selection.replace(edges=edges, faces=faces, instances=instances)
+        self._refresh_selection_status()
+        self._viewport.update()
+
+    def _on_select_none(self) -> None:
+        """Clear the selection."""
+        self._selection.clear()
+        self._refresh_selection_status()
+        self._viewport.update()
+
+    def _on_zoom_extents(self) -> None:
+        """Frame everything visible without changing the view direction."""
+        from pluton.model.model_queries import model_bounds
+        from pluton.viewport.camera_framing import frame_bounds
+
+        bounds = model_bounds(self._model)
+        if bounds is None:
+            return  # Nothing visible -- leave the camera exactly where it is.
+
+        camera = self._viewport.camera
+        width, height = self._viewport.width(), self._viewport.height()
+        aspect = width / height if height else 1.0
+
+        position = np.asarray(camera.position, dtype=np.float64)
+        target = np.asarray(camera.target, dtype=np.float64)
+        new_position, new_target = frame_bounds(
+            bounds[0], bounds[1], target - position, aspect, math.radians(camera.fov_y_deg)
+        )
+        camera.position = new_position.astype(np.float32)
+        camera.target = new_target.astype(np.float32)
+        self._viewport.update()
+
+    def _on_edit_group(self) -> None:
+        """Enter the selected group/component for editing."""
+        instance_ids = set(self._selection.instances)
+        if len(instance_ids) != 1:
+            return
+        target_id = next(iter(instance_ids))
+        for child in self._model.active_context.children:
+            if child.id == target_id:
+                self._model.enter(child)
+                self._selection.clear()
+                self._on_active_context_changed()
+                self._refresh_selection_status()
+                return
+
+    def _on_close_group(self) -> None:
+        """Step out one editing context. A no-op at the root."""
+        if not self._model.active_path:
+            return
+        self._model.exit_one()
+        self._selection.clear()
+        self._on_active_context_changed()
+        self._refresh_selection_status()
+
+    def _on_paint_selection(self) -> None:
+        """Apply the active material to every selected face."""
+        from pluton.commands import CompositeCommand
+        from pluton.commands.material_commands import PaintFaceCommand
+
+        face_ids = sorted(self._selection.faces)
+        if not face_ids:
+            return
+        children = [PaintFaceCommand(f_id, self._active_material_id) for f_id in face_ids]
+        composite = CompositeCommand(name="Paint Selection", children=children)
+        self._command_stack.execute(composite, self._model.active_scene)
+        self._viewport.update()
+
+    def _on_edit_label_text(self) -> None:
+        """Retype the selected text annotation's label."""
+        from PySide6.QtWidgets import QInputDialog
+
+        from pluton.commands.annotation_commands import EditLabelTextCommand
+
+        annotation_ids = sorted(self._selection.annotations)
+        if len(annotation_ids) != 1:
+            return
+        context = self._model.active_context
+        ann = next((a for a in context.annotations if a.id == annotation_ids[0]), None)
+        if ann is None or getattr(ann, "kind", None) != "label":
+            return
+        text, ok = QInputDialog.getText(self, "Text", "Label:", text=ann.text)
+        if not ok or not text.strip() or text.strip() == ann.text:
+            return
+        self._command_stack.execute(
+            EditLabelTextCommand(annotation_ids[0], text.strip(), context), self._model
+        )
         self._viewport.update()
 
     def _refresh_selection_status(self) -> None:
