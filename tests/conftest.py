@@ -14,6 +14,36 @@ if os.environ.get("CI") == "true" or os.environ.get("QT_QPA_PLATFORM"):
 
 
 @pytest.fixture(autouse=True)
+def _scratch_window_settings(tmp_path, monkeypatch):
+    """Keep MainWindow's window-state persistence (M7.2, Task 11) off the
+    real user registry during tests.
+
+    MainWindow.__init__ builds `self._settings` from a default-constructed
+    QSettings(), which is correct for the real app (app.py sets the
+    organization/application name on QApplication before creating the
+    window) but would write to the real HKCU registry on Windows for every
+    MainWindow() built anywhere in this suite -- including the many test
+    files that construct one directly rather than through the `main_window`
+    fixture below. Patch the name main_window.py resolves at call time so
+    every QSettings() it creates is actually an ini-backed scratch store
+    unique to this test.
+    """
+    try:
+        import pluton.ui.main_window as main_window_module
+    except Exception:
+        return
+
+    from PySide6.QtCore import QSettings
+
+    ini_path = str(tmp_path / "window_state.ini")
+
+    def _scratch_settings(*_args, **_kwargs):
+        return QSettings(ini_path, QSettings.Format.IniFormat)
+
+    monkeypatch.setattr(main_window_module, "QSettings", _scratch_settings)
+
+
+@pytest.fixture(autouse=True)
 def _no_blocking_close_dialog(monkeypatch):
     """Keep MainWindow's unsaved-changes modal from hanging test teardown.
 

@@ -14,9 +14,9 @@ instead of searching menus by label.
 
 from __future__ import annotations
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QSize, Qt
 from PySide6.QtGui import QAction, QActionGroup, QKeySequence
-from PySide6.QtWidgets import QMainWindow, QMenu
+from PySide6.QtWidgets import QMainWindow, QMenu, QToolBar
 
 from pluton.ui import actions
 from pluton.ui.icons import icon
@@ -105,6 +105,34 @@ def build_menubar(window: QMainWindow) -> dict[str, QMenu]:
         menus[menu_spec.title] = menu
 
     return menus
+
+
+def build_toolbars(window: QMainWindow) -> dict[str, QToolBar]:
+    """Create the declared toolbars and add them to the window.
+
+    Every toolbar gets setObjectName(spec.id): QMainWindow.saveState() silently
+    skips toolbars without an object name, so omitting this makes layout
+    persistence fail invisibly. Toolbars reference the same QAction objects the
+    menus were built from (looked up in `_actions` by id) rather than building
+    parallel ones -- that identity is what lets one QAction's state (checked,
+    enabled, icon) show up consistently in both surfaces.
+    """
+    built = getattr(window, ACTION_REGISTRY_ATTR)
+    toolbars: dict[str, QToolBar] = {}
+
+    for spec in actions.TOOLBARS:
+        toolbar = QToolBar(spec.title, window)
+        toolbar.setObjectName(spec.id)
+        toolbar.setIconSize(QSize(24, 24))
+        for action_id in spec.action_ids:
+            if action_id is None:
+                toolbar.addSeparator()
+            else:
+                toolbar.addAction(built[action_id])
+        window.addToolBar(toolbar)
+        toolbars[spec.id] = toolbar
+
+    return toolbars
 
 
 def build_shortcuts(window: QMainWindow) -> None:

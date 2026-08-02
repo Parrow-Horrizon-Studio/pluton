@@ -75,5 +75,4 @@ def test_every_handler_name_exists_on_the_window_class(qtbot):
     from pluton.ui.main_window import MainWindow
 
     missing = sorted({s.handler for s in actions.ACTIONS if not hasattr(MainWindow, s.handler)})
-    # _on_reset_toolbars arrives with the toolbars in Task 11.
-    assert missing in ([], ["_on_reset_toolbars"]), missing
+    assert missing == []

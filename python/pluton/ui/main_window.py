@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import ClassVar
 
 import numpy as np
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QSettings, Qt
 from PySide6.QtGui import QKeySequence, QShortcut
 from PySide6.QtWidgets import QMainWindow, QVBoxLayout, QWidget
 
@@ -65,6 +65,12 @@ from pluton.ui.status_bar import StatusBar
 from pluton.ui.tags_dock import TagsDock
 from pluton.ui.value_control_box import ValueControlBox
 from pluton.ui.wall_options_bar import WallOptionsBar
+from pluton.ui.window_state import (
+    WINDOW_STATE_VERSION,
+    reset_window_state,
+    restore_window_state,
+    save_window_state,
+)
 from pluton.viewport.render_style import FaceStyle, RenderStyle
 from pluton.viewport.view_animator import ViewAnimator
 from pluton.viewport.viewport_widget import ViewportWidget
@@ -275,6 +281,33 @@ class MainWindow(QMainWindow):
         self._scenes_dock_action = self._scenes_dock.toggleViewAction()
         self._view_menu.addAction(self._scenes_dock_action)
 
+        # Seven dockable toolbars (M7.2, Task 11), sharing the same QAction
+        # objects the menus above were built from.
+        from pluton.ui.ui_builder import build_toolbars
+
+        self._toolbars = build_toolbars(self)
+
+        # View ▸ Toolbars -- one checkbox per toolbar, plus the escape hatch.
+        # Reset Toolbars lives in this menu (not on a toolbar) because
+        # restoreState() can hide every toolbar but cannot touch the menu bar.
+        self._view_menu.addSeparator()
+        self._toolbars_menu = self._view_menu.addMenu("Toolbars")
+        for toolbar in self._toolbars.values():
+            self._toolbars_menu.addAction(toolbar.toggleViewAction())
+        self._toolbars_menu.addSeparator()
+        self._toolbars_menu.addAction(self._actions["view_reset_toolbars"])
+
+        # Window/toolbar-layout persistence (M7.2, Task 8 + 11). Must run
+        # AFTER every toolbar and dock above exists: QMainWindow.restoreState()
+        # only reattaches toolbars/docks it can find by object name at the
+        # time it runs, so restoring any earlier would silently restore
+        # nothing. `_default_window_state` captures the just-built default
+        # arrangement before any saved layout is applied, so Reset Toolbars
+        # has a known-good state to fall back to.
+        self._settings = QSettings()
+        self._default_window_state = self.saveState(WINDOW_STATE_VERSION)
+        restore_window_state(self, self._settings)
+
         # Back-compat aliases for tests that read a named menu by attribute.
         self._file_menu = self._menus["File"]
         self._units_menu = self._menus["Units"]
@@ -428,6 +461,28 @@ class MainWindow(QMainWindow):
             self._refresh_status_text()
             self._refresh_tool_options()
             self._viewport.update()
+            # Keep the toolbar/menu button in sync when the tool was armed by
+            # a raw keyboard shortcut rather than by triggering its QAction
+            # (Qt only auto-checks a QActionGroup member when the action
+            # itself fires) -- otherwise the toolbar would lie about which
+            # tool is active (M7.2, Task 11).
+            if active is not None:
+                action_id = self._tool_action_id_for_shortcut(active.shortcut)
+                if action_id is not None:
+                    self._actions[action_id].setChecked(True)
+
+    @staticmethod
+    def _tool_action_id_for_shortcut(shortcut: str) -> str | None:
+        from pluton.ui.actions import ACTIONS, TOOL_GROUP
+
+        for spec in ACTIONS:
+            if (
+                spec.group == TOOL_GROUP
+                and spec.shortcut
+                and spec.shortcut.upper() == shortcut.upper()
+            ):
+                return spec.id
+        return None
 
     def _refresh_tool_options(self) -> None:
         """Show the Wall options bar iff the Wall tool is active (M7a, Task 5).
@@ -870,6 +925,13 @@ class MainWindow(QMainWindow):
         self._render_style.xray = bool(checked)
         self._viewport.set_render_style(self._render_style)
 
+    # --- Toolbars (M7.2, Task 11) -----------------------------------------
+
+    def _on_reset_toolbars(self) -> None:
+        """Forget the saved layout and reapply the default arrangement live."""
+        reset_window_state(self._settings)
+        self.restoreState(self._default_window_state, WINDOW_STATE_VERSION)
+
     # --- Scenes (M7e) ----------------------------------------------------
 
     def _sync_render_style_ui(self) -> None:
@@ -1124,6 +1186,9 @@ class MainWindow(QMainWindow):
         return False
 
     def closeEvent(self, event):
+        # Persist before the unsaved-changes guard runs, so the layout is
+        # remembered even if the user then cancels the close.
+        save_window_state(self, self._settings)
         if self._confirm_discard_if_dirty():
             event.accept()
         else:
