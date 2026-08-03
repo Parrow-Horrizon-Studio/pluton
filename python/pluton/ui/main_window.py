@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import ClassVar
 
 import numpy as np
-from PySide6.QtCore import QSettings, Qt
+from PySide6.QtCore import QPoint, QSettings, Qt
 from PySide6.QtGui import QKeySequence, QShortcut
 from PySide6.QtWidgets import QMainWindow, QVBoxLayout, QWidget
 
@@ -228,6 +228,12 @@ class MainWindow(QMainWindow):
 
         self._viewport.set_status_bar(self._status_bar)
         self._viewport.set_event_finished_callback(self._refresh_status_text)
+        # M7.2 Task 14: real right-clicks always show the menu (exec_menu=True);
+        # _on_context_menu_requested defaults exec_menu to False so tests can
+        # call it directly without entering QMenu.exec()'s modal loop.
+        self._viewport.context_menu_requested.connect(
+            lambda x, y: self._on_context_menu_requested(x, y, exec_menu=True)
+        )
 
         # Clear selection after any undo or redo.
         self._command_stack.add_undo_listener(self._on_after_undo_redo)
@@ -339,6 +345,17 @@ class MainWindow(QMainWindow):
             self._tags_dock.set_selection_tag("(multiple)")
 
     def _on_assign_tag(self) -> None:
+        """TagsDock's "Assign to Selection" button -- assigns the dock's active tag."""
+        self._assign_tag(self._active_tag_id)
+
+    def _assign_tag(self, tag_id: int) -> None:
+        """Assign `tag_id` to every selected instance via TagInstancesCommand.
+
+        Shared by TagsDock's "Assign to Selection" button (_on_assign_tag,
+        which assigns the dock's active tag) and the right-click menu's
+        Assign Tag submenu (M7.2 Task 14, which assigns whichever tag the
+        user picked directly) -- one command construction, not two.
+        """
         from pluton.commands.tag_commands import TagInstancesCommand
 
         sel = self._selection
@@ -348,9 +365,9 @@ class MainWindow(QMainWindow):
         if not selected:
             self._status_bar.set_status("Select objects to assign a tag.")
             return
-        cmd = TagInstancesCommand(selected, self._active_tag_id)
+        cmd = TagInstancesCommand(selected, tag_id)
         self._command_stack.execute(cmd, self._model)
-        name = self._model.tags.get(self._active_tag_id).name
+        name = self._model.tags.get(tag_id).name
         self._status_bar.set_status(f"Assigned tag '{name}' to {len(selected)} object(s).")
         self._update_selection_tag_indicator()
         self._viewport.update()
@@ -849,6 +866,107 @@ class MainWindow(QMainWindow):
             EditLabelTextCommand(annotation_ids[0], text.strip(), context), self._model
         )
         self._viewport.update()
+
+    # --- Context menu (M7.2 Task 14) --------------------------------------
+
+    def _on_context_menu_requested(self, x: int, y: int, exec_menu: bool = False) -> None:
+        """Resolve a right-click at viewport pixel (x, y), select the target
+        (if any), and show its context menu.
+
+        exec_menu defaults to False so tests can drive resolution and the
+        selection guard directly without entering QMenu.exec()'s modal event
+        loop; the real signal connection (see __init__) always passes
+        exec_menu=True.
+        """
+        from pluton.ui.actions import ContextTarget
+        from pluton.ui.context_menu import build_context_menu, resolve_context_target
+
+        target, entity_id = resolve_context_target(
+            self._model,
+            self._viewport.camera,
+            x,
+            y,
+            self._viewport.width(),
+            self._viewport.height(),
+            self._doc.units,
+        )
+
+        # Right-clicking an unselected entity selects it first (SketchUp's
+        # behaviour); right-clicking empty space leaves the selection alone --
+        # Select None is right there for the explicit case. An already-selected
+        # entity keeps a multi-entity selection intact rather than collapsing it.
+        if target is not ContextTarget.EMPTY and entity_id is not None:
+            if not self._selection_contains(target, entity_id):
+                self._select_only(target, entity_id)
+
+        menu = build_context_menu(self, target, entity_id)
+        try:
+            if exec_menu:
+                self._exec_context_menu(menu, self._viewport.mapToGlobal(QPoint(x, y)))
+        finally:
+            # build_context_menu disables entries on the SAME QAction objects
+            # the menu bar holds (Task 13's design: context menus, the menu
+            # bar, and the toolbars all share one action registry so label /
+            # icon / shortcut can never drift between surfaces). Re-enabling
+            # unconditionally in a finally -- not a step after menu.exec()
+            # that an early return could skip -- is what stops a disabled
+            # context entry from leaving the matching menu-bar item
+            # permanently greyed out.
+            self._reenable_all_actions()
+
+    def _exec_context_menu(self, menu, global_pos) -> None:
+        """Pop the context menu modally at `global_pos`.
+
+        Its own method purely so a test can replace it on the instance.
+        QMenu.exec cannot be monkeypatched: PySide6 dispatches the call
+        straight to C++, so assigning QMenu.exec is accepted but has no
+        effect, and the real modal loop runs. Under the offscreen platform
+        CI uses there is nothing to dismiss it, so such a test hangs
+        forever rather than failing.
+        """
+        menu.exec(global_pos)
+
+    def _select_only(self, target, entity_id: int) -> None:
+        """Replace the selection with the single right-clicked entity."""
+        from pluton.ui.actions import ContextTarget
+
+        self._selection.clear()
+        if target is ContextTarget.FACE:
+            self._selection.toggle_face(entity_id)
+        elif target is ContextTarget.EDGE:
+            self._selection.toggle_edge(entity_id)
+        elif target is ContextTarget.INSTANCE:
+            self._selection.toggle_instance(entity_id)
+        elif target is ContextTarget.ANNOTATION:
+            self._selection.toggle_annotation(entity_id)
+        self._refresh_selection_status()
+        self._viewport.update()
+
+    def _selection_contains(self, target, entity_id: int) -> bool:
+        """Whether the right-clicked entity is already part of the selection
+        (dispatches to the matching Selection.contains_* predicate the same
+        way _select_only dispatches to toggle_*)."""
+        from pluton.ui.actions import ContextTarget
+
+        if target is ContextTarget.FACE:
+            return self._selection.contains_face(entity_id)
+        if target is ContextTarget.EDGE:
+            return self._selection.contains_edge(entity_id)
+        if target is ContextTarget.INSTANCE:
+            return self._selection.contains_instance(entity_id)
+        if target is ContextTarget.ANNOTATION:
+            return self._selection.contains_annotation(entity_id)
+        return False
+
+    def _reenable_all_actions(self) -> None:
+        """Undo build_context_menu's per-entry disabling.
+
+        Context menus reuse the same QAction objects the menu bar holds, so a
+        disabled context entry would otherwise leave the matching menu-bar
+        item permanently greyed out.
+        """
+        for action in self._actions.values():
+            action.setEnabled(True)
 
     def _refresh_selection_status(self) -> None:
         ne, nf, ni, na = self._selection.counts()

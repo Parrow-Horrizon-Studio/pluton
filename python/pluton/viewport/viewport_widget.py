@@ -11,11 +11,11 @@ Qt mouse events into:
 from __future__ import annotations
 
 import numpy as np
-from PySide6.QtCore import QPoint, Qt
+from PySide6.QtCore import QPoint, Qt, Signal
 from PySide6.QtGui import QMouseEvent, QWheelEvent
 from PySide6.QtOpenGLWidgets import QOpenGLWidget
 
-from pluton.tools.select_tool import _HOVER_EDGE_COLOR
+from pluton.tools.select_tool import _HOVER_EDGE_COLOR, SelectTool
 from pluton.viewport.camera import Camera
 from pluton.viewport.scene_renderer import SceneRenderer
 from pluton.viewport.snap_engine import SnapEngine, SnapKind
@@ -23,6 +23,10 @@ from pluton.viewport.snap_engine import SnapEngine, SnapKind
 
 class ViewportWidget(QOpenGLWidget):
     """The 3D viewport. Renders scene + active tool overlay; routes mouse events."""
+
+    # M7.2 Task 14: emitted on a right-click release with the event's widget-local
+    # pixel position; MainWindow resolves it into a right-click menu.
+    context_menu_requested = Signal(int, int)
 
     def __init__(self, model=None, tool_manager=None, parent=None) -> None:
         super().__init__(parent)
@@ -189,6 +193,28 @@ class ViewportWidget(QOpenGLWidget):
         ndc = self._cursor_to_ndc(cursor.x(), cursor.y())
         self.camera.zoom(scroll_delta=notches, cursor_ndc=ndc)
         self.update()
+        event.accept()
+
+    def contextMenuEvent(self, event) -> None:
+        """M7.2 Task 14: emit a right-click resolution request for MainWindow.
+
+        Suppressed while a tool is genuinely mid-gesture (a multi-click draw,
+        or a click-drag in progress): right-click during one of those means
+        "cancel", which Esc already handles, so this defers to that instead
+        of popping a menu. SelectTool is exempted from this check: its
+        has_active_gesture is True whenever there is *any* selection (that
+        is what lets Esc clear one -- see Tool.has_active_gesture users in
+        MainWindow), not "mid gesture" in the click sense, and a right-click
+        on an existing selection is the ordinary case this task exists to
+        support -- treating it as "mid gesture" would silently swallow the
+        most common right-click.
+        """
+        active = self.tool_manager.active if self.tool_manager is not None else None
+        if active is not None and not isinstance(active, SelectTool) and active.has_active_gesture:
+            event.ignore()
+            return
+        position = event.pos()
+        self.context_menu_requested.emit(position.x(), position.y())
         event.accept()
 
     # --- Helpers ----------------------------------------------------------
