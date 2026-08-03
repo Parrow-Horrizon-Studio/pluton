@@ -109,3 +109,31 @@ def test_every_handler_name_now_exists(qtbot):
 
     missing = sorted({s.handler for s in actions.ACTIONS if not hasattr(MainWindow, s.handler)})
     assert missing == []
+
+
+def test_a_missing_icon_asset_does_not_stop_the_window_from_building(qtbot, monkeypatch):
+    """A damaged install should cost one glyph, not the whole application.
+
+    icon() stays strict so a typo'd stem fails a test; build_action
+    degrades so a quarantined or truncated asset at runtime leaves a
+    labelled, working, icon-less button instead of an unhandled KeyError
+    out of MainWindow.__init__.
+    """
+    from pluton.ui import icons as icons_module
+    from pluton.ui.main_window import MainWindow
+
+    real = icons_module.icon
+
+    def _one_missing(stem, color=None):
+        if stem == "tool_line":
+            raise KeyError(stem)
+        return real(stem, color)
+
+    monkeypatch.setattr("pluton.ui.ui_builder.icon", _one_missing)
+
+    window = MainWindow()
+    qtbot.addWidget(window)
+
+    assert window._actions["tool_line"].icon().isNull()
+    assert window._actions["tool_line"].text() == "Line"
+    assert not window._actions["tool_rectangle"].icon().isNull()

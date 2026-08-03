@@ -14,6 +14,8 @@ instead of searching menus by label.
 
 from __future__ import annotations
 
+import logging
+
 from PySide6.QtCore import QSize, Qt
 from PySide6.QtGui import QAction, QActionGroup, QKeySequence
 from PySide6.QtWidgets import QMainWindow, QMenu, QToolBar
@@ -57,7 +59,18 @@ def build_action(
     action.setStatusTip(spec.effective_tooltip)
 
     if spec.icon is not None:
-        action.setIcon(icon(spec.icon, window.palette().windowText().color()))
+        try:
+            action.setIcon(icon(spec.icon, window.palette().windowText().color()))
+        except KeyError:
+            # icon() is deliberately strict so a typo'd stem fails a test
+            # rather than shipping a blank button. But at runtime the only
+            # way here is a damaged install -- a quarantined or truncated
+            # asset -- and refusing to build the action would take the whole
+            # window down over one missing glyph. Degrade to a labelled,
+            # working, icon-less action instead.
+            logging.getLogger(__name__).warning(
+                "icon asset %r is missing; %r will render without one", spec.icon, spec.id
+            )
 
     keys = [k for k in (spec.shortcut, *spec.extra_shortcuts) if k]
     if len(keys) == 1:

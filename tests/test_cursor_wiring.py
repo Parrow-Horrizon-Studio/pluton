@@ -58,3 +58,22 @@ def test_the_wired_cursor_is_composed_at_the_viewports_device_pixel_ratio(
     pixmap = main_window._viewport.cursor().pixmap()
     assert pixmap.devicePixelRatio() == pytest.approx(2.0)
     assert pixmap.width() == cursors.CURSOR_SIZE * 2
+
+
+def test_escape_disarms_the_toolbar_button_and_the_cursor(qtbot, main_window):
+    """Arming checks the action and sets the cursor; disarming must undo both.
+
+    Otherwise the toolbar keeps a button depressed and the viewport keeps a
+    tool cursor for a tool that is no longer active -- the exact ambiguity
+    the toolbars were added to remove.
+    """
+    window = main_window
+    window._activate("L")
+    assert window._actions["tool_line"].isChecked()
+    armed = window._viewport.cursor().hotSpot()
+
+    window._on_escape()
+
+    assert window._viewport.tool_manager.active is None
+    assert not window._actions["tool_line"].isChecked()
+    assert window._viewport.cursor().hotSpot() != armed

@@ -75,25 +75,27 @@ def test_reenabling_after_the_menu_closes_restores_the_menu_bar(qtbot, main_wind
     action came back enabled.
     """
     window = main_window
+    close_group = window._actions["edit_close_group"]
+
     # Replace the pop-the-menu step on the instance, NOT QMenu.exec itself:
     # PySide6 dispatches QMenu.exec straight to C++, so patching the class is
     # accepted silently but has no effect and the real modal loop runs --
     # which under the offscreen platform CI uses never returns.
-    shown: list[object] = []
-    monkeypatch.setattr(
-        window, "_exec_context_menu", lambda menu, pos: shown.append(menu)
-    )
-    close_group = window._actions["edit_close_group"]
+    #
+    # The stub runs while the menu is notionally open, which is the only
+    # moment the disabled state exists. Sampling it here proves the restore
+    # afterwards undid real work rather than passing vacuously.
+    observed: dict[str, bool] = {}
 
-    # Confirm build_context_menu really does disable it at the root (same
-    # fact test_close_group_is_disabled_at_the_root checks) before trusting
-    # that the handler's re-enable pass below did any real work.
-    build_context_menu(window, ContextTarget.EMPTY, None)
-    assert not close_group.isEnabled()
+    def _capture(menu, pos):
+        observed["during"] = close_group.isEnabled()
+
+    monkeypatch.setattr(window, "_exec_context_menu", _capture)
 
     window._on_context_menu_requested(0, 0, exec_menu=True)  # empty space at root
 
-    assert shown, "the exec_menu=True path did not reach _exec_context_menu"
+    assert observed, "the exec_menu=True path did not reach _exec_context_menu"
+    assert observed["during"] is False, "the EMPTY menu should disable Close Group at root"
     assert close_group.isEnabled()
 
 
@@ -147,16 +149,17 @@ def test_reenabling_is_registry_wide_not_scoped_to_the_closed_menu(
     from pluton.ui import context_menu as context_menu_module
 
     window = main_window
-    shown: list[object] = []
-    monkeypatch.setattr(window, "_exec_context_menu", lambda menu, pos: shown.append(menu))
     close_group = window._actions["edit_close_group"]
 
-    build_context_menu(window, ContextTarget.EMPTY, None)
-    assert not close_group.isEnabled(), "precondition: EMPTY disables Close Group at root"
     assert "edit_close_group" not in context_menu_module.context_menu_ids(
         ContextTarget.FACE, in_group=False, has_selection=True
     ), "precondition: the FACE menu must not list Close Group"
 
+    # Disable it the way the EMPTY menu does, then run a FACE cycle. A
+    # restore scoped to the closed menu's own entries would never touch
+    # Close Group, since FACE does not list it, and it would stay disabled.
+    close_group.setEnabled(False)
+    monkeypatch.setattr(window, "_exec_context_menu", lambda menu, pos: None)
     monkeypatch.setattr(
         context_menu_module,
         "resolve_context_target",
@@ -164,8 +167,9 @@ def test_reenabling_is_registry_wide_not_scoped_to_the_closed_menu(
     )
     window._on_context_menu_requested(0, 0, exec_menu=True)
 
-    assert shown, "the exec_menu=True path did not reach _exec_context_menu"
-    assert close_group.isEnabled()
+    # The snapshot covers every registered id, so Close Group comes back to
+    # exactly the state the handler found it in -- disabled, here.
+    assert not close_group.isEnabled()
 
 
 def test_reenabling_survives_a_raise_while_the_menu_is_being_built(
@@ -266,3 +270,31 @@ def test_select_tool_suppresses_only_during_a_live_box_drag(
     assert select.is_box_selecting
     _fire()
     assert not seen, "a live box drag must suppress the context menu"
+
+
+def test_context_menu_does_not_clobber_a_disable_it_did_not_make(
+    qtbot, main_window, monkeypatch
+):
+    """The sweep restores prior state rather than forcing everything on.
+
+    Nothing else in the app disables a registry action today, but the
+    moment something reasonable does -- Undo greyed on an empty stack,
+    Save on a clean document -- a blanket re-enable would silently undo it
+    on the next right-click.
+    """
+    from pluton.ui import context_menu as context_menu_module
+
+    window = main_window
+    monkeypatch.setattr(window, "_exec_context_menu", lambda menu, pos: None)
+    monkeypatch.setattr(
+        context_menu_module,
+        "resolve_context_target",
+        lambda *args, **kwargs: (ContextTarget.EMPTY, None),
+    )
+
+    undo = window._actions["edit_undo"]
+    undo.setEnabled(False)  # as an empty-command-stack guard would
+
+    window._on_context_menu_requested(0, 0, exec_menu=True)
+
+    assert not undo.isEnabled(), "the sweep re-enabled an action it did not disable"

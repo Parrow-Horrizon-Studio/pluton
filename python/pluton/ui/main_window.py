@@ -496,6 +496,24 @@ class MainWindow(QMainWindow):
                     dpr = self._viewport.devicePixelRatioF()
                     self._viewport.setCursor(cursor_for(action_id, dpr=dpr))
 
+    def _disarm_tool_ui(self) -> None:
+        """Undo _activate's visible effects when no tool is armed.
+
+        Arming a tool checks its action (depressing the toolbar button) and
+        puts that tool's cursor on the viewport. Disarming has to undo both,
+        or the toolbar and the cursor keep advertising a tool that is no
+        longer active -- the exact ambiguity the toolbars exist to remove.
+        QActionGroup is exclusive, so nothing unchecks the member for us.
+        """
+        from pluton.ui.actions import TOOL_GROUP
+
+        group = self._action_groups.get(TOOL_GROUP)
+        if group is not None and group.checkedAction() is not None:
+            group.setExclusive(False)
+            group.checkedAction().setChecked(False)
+            group.setExclusive(True)
+        self._viewport.unsetCursor()
+
     @staticmethod
     def _tool_action_id_for_shortcut(shortcut: str) -> str | None:
         from pluton.ui.actions import ACTIONS, TOOL_GROUP
@@ -550,6 +568,7 @@ class MainWindow(QMainWindow):
             self._tool_manager.deactivate_current()
             self._status_bar.set_tool("")
             self._status_bar.set_snap("")
+            self._disarm_tool_ui()
             self._refresh_tool_options()
         self._refresh_status_text()
         self._viewport.update()
@@ -899,6 +918,7 @@ class MainWindow(QMainWindow):
             if not self._selection_contains(target, entity_id):
                 self._select_only(target, entity_id)
 
+        enablement = {aid: a.isEnabled() for aid, a in self._actions.items()}
         try:
             # Inside the try, not before it: build_context_menu disables
             # entries as it goes, so a raise partway through would otherwise
@@ -915,7 +935,7 @@ class MainWindow(QMainWindow):
             # that an early return could skip -- is what stops a disabled
             # context entry from leaving the matching menu-bar item
             # permanently greyed out.
-            self._reenable_all_actions()
+            self._restore_action_enablement(enablement)
 
     def _exec_context_menu(self, menu, global_pos) -> None:
         """Pop the context menu modally at `global_pos`.
@@ -961,15 +981,22 @@ class MainWindow(QMainWindow):
             return self._selection.contains_annotation(entity_id)
         return False
 
-    def _reenable_all_actions(self) -> None:
+    def _restore_action_enablement(self, snapshot: dict[str, bool]) -> None:
         """Undo build_context_menu's per-entry disabling.
 
         Context menus reuse the same QAction objects the menu bar holds, so a
         disabled context entry would otherwise leave the matching menu-bar
         item permanently greyed out.
+
+        This restores the state captured before the menu was built rather
+        than forcing everything enabled. Forcing works only while nothing
+        else in the app ever disables a registry action -- true today, but
+        it would break silently the moment something reasonable (greying out
+        Undo on an empty stack, Save when the document is clean) arrives,
+        and any right-click would be the trigger.
         """
-        for action in self._actions.values():
-            action.setEnabled(True)
+        for action_id, was_enabled in snapshot.items():
+            self._actions[action_id].setEnabled(was_enabled)
 
     def _refresh_selection_status(self) -> None:
         ne, nf, ni, na = self._selection.counts()
