@@ -201,18 +201,22 @@ class ViewportWidget(QOpenGLWidget):
         Suppressed while a tool is genuinely mid-gesture (a multi-click draw,
         or a click-drag in progress): right-click during one of those means
         "cancel", which Esc already handles, so this defers to that instead
-        of popping a menu. SelectTool is exempted from this check: its
-        has_active_gesture is True whenever there is *any* selection (that
-        is what lets Esc clear one -- see Tool.has_active_gesture users in
-        MainWindow), not "mid gesture" in the click sense, and a right-click
-        on an existing selection is the ordinary case this task exists to
-        support -- treating it as "mid gesture" would silently swallow the
-        most common right-click.
+        of popping a menu.
+
+        SelectTool needs a narrower test than the others. Its
+        has_active_gesture is also True for a merely non-empty selection --
+        that is what lets Esc clear one -- and a right-click on an existing
+        selection is the ordinary case this whole feature exists to serve,
+        so treating that as "mid gesture" would swallow the most common
+        right-click of all. But a live box-select drag *is* a gesture in the
+        click sense, so is_box_selecting is what we consult for Select.
         """
         active = self.tool_manager.active if self.tool_manager is not None else None
-        if active is not None and not isinstance(active, SelectTool) and active.has_active_gesture:
-            event.ignore()
-            return
+        if active is not None and active.has_active_gesture:
+            mid_gesture = active.is_box_selecting if isinstance(active, SelectTool) else True
+            if mid_gesture:
+                event.ignore()
+                return
         position = event.pos()
         self.context_menu_requested.emit(position.x(), position.y())
         event.accept()

@@ -379,6 +379,16 @@ class SelectTool(Tool):
         return self._selection is not None and not self._selection.is_empty()
 
     @property
+    def is_box_selecting(self) -> bool:
+        """True only while a box-select drag is actually in progress.
+
+        has_active_gesture is deliberately broader -- it also reports True
+        for a merely non-empty selection, which is what lets Esc clear one.
+        Callers that mean "mid gesture in the click sense" want this.
+        """
+        return self._is_box
+
+    @property
     def anchor_or_none(self) -> np.ndarray | None:
         return None
 

@@ -899,8 +899,11 @@ class MainWindow(QMainWindow):
             if not self._selection_contains(target, entity_id):
                 self._select_only(target, entity_id)
 
-        menu = build_context_menu(self, target, entity_id)
         try:
+            # Inside the try, not before it: build_context_menu disables
+            # entries as it goes, so a raise partway through would otherwise
+            # leave whatever it had already disabled stuck that way.
+            menu = build_context_menu(self, target, entity_id)
             if exec_menu:
                 self._exec_context_menu(menu, self._viewport.mapToGlobal(QPoint(x, y)))
         finally:

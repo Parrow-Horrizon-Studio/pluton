@@ -132,3 +132,137 @@ def test_right_click_on_an_already_selected_face_keeps_the_multi_selection(
     window._on_context_menu_requested(0, 0)
 
     assert window._selection.faces == {face_a, face_b}
+
+
+def test_reenabling_is_registry_wide_not_scoped_to_the_closed_menu(
+    qtbot, main_window, monkeypatch
+):
+    """The discriminating case the same-target test cannot see.
+
+    edit_close_group appears only on the EMPTY table. Disable it by
+    building an EMPTY menu, then open and close a FACE menu -- which never
+    lists it. A sweep scoped to the closed menu's own entries would leave
+    it stuck disabled; only a whole-registry sweep brings it back.
+    """
+    from pluton.ui import context_menu as context_menu_module
+
+    window = main_window
+    shown: list[object] = []
+    monkeypatch.setattr(window, "_exec_context_menu", lambda menu, pos: shown.append(menu))
+    close_group = window._actions["edit_close_group"]
+
+    build_context_menu(window, ContextTarget.EMPTY, None)
+    assert not close_group.isEnabled(), "precondition: EMPTY disables Close Group at root"
+    assert "edit_close_group" not in context_menu_module.context_menu_ids(
+        ContextTarget.FACE, in_group=False, has_selection=True
+    ), "precondition: the FACE menu must not list Close Group"
+
+    monkeypatch.setattr(
+        context_menu_module,
+        "resolve_context_target",
+        lambda *args, **kwargs: (ContextTarget.FACE, None),
+    )
+    window._on_context_menu_requested(0, 0, exec_menu=True)
+
+    assert shown, "the exec_menu=True path did not reach _exec_context_menu"
+    assert close_group.isEnabled()
+
+
+def test_reenabling_survives_a_raise_while_the_menu_is_being_built(
+    qtbot, main_window, monkeypatch
+):
+    """build_context_menu disables entries as it goes, so it must run inside
+    the try -- otherwise a raise partway through strands whatever it had
+    already disabled."""
+    from pluton.ui import context_menu as context_menu_module
+
+    window = main_window
+    close_group = window._actions["edit_close_group"]
+
+    def _boom(win, target, entity_id):
+        close_group.setEnabled(False)  # partial work, as the real builder does
+        raise RuntimeError("menu construction blew up")
+
+    monkeypatch.setattr(context_menu_module, "build_context_menu", _boom)
+    monkeypatch.setattr(
+        context_menu_module,
+        "resolve_context_target",
+        lambda *args, **kwargs: (ContextTarget.EMPTY, None),
+    )
+
+    try:
+        window._on_context_menu_requested(0, 0, exec_menu=True)
+    except RuntimeError:
+        pass
+
+    assert close_group.isEnabled(), "a raise during build left an action stuck disabled"
+
+
+def test_right_click_is_suppressed_while_a_tool_is_mid_gesture(
+    qtbot, main_window, monkeypatch
+):
+    """Right-click during a live gesture means cancel, which Esc owns."""
+    window = main_window
+    # MainWindow's live connection runs the handler with exec_menu=True, so
+    # without this the emitted signal reaches the real modal QMenu.exec and
+    # hangs headlessly -- the same trap _exec_context_menu exists to defuse.
+    monkeypatch.setattr(window, "_exec_context_menu", lambda menu, pos: None)
+    window._activate("L")  # Line tool
+    line = window._viewport.tool_manager.active
+    seen: list[tuple[int, int]] = []
+    window._viewport.context_menu_requested.connect(lambda x, y: seen.append((x, y)))
+
+    from PySide6.QtCore import QPoint
+    from PySide6.QtGui import QContextMenuEvent
+
+    def _fire():
+        window._viewport.contextMenuEvent(
+            QContextMenuEvent(QContextMenuEvent.Reason.Mouse, QPoint(5, 5))
+        )
+
+    _fire()
+    assert seen, "an idle Line tool must not suppress the context menu"
+
+    seen.clear()
+    from pluton.tools.line_tool import _State
+
+    line._state = _State.DRAWING  # mid multi-click draw
+    assert line.has_active_gesture
+    _fire()
+    assert not seen, "a mid-gesture tool must suppress the context menu"
+
+
+def test_select_tool_suppresses_only_during_a_live_box_drag(
+    qtbot, main_window_with_square, monkeypatch
+):
+    """SelectTool.has_active_gesture is also True for a merely non-empty
+    selection -- right-clicking a selection is the ordinary case and must
+    not be swallowed. A live box drag is the one Select case that is a
+    gesture in the click sense."""
+    from PySide6.QtCore import QPoint
+    from PySide6.QtGui import QContextMenuEvent
+
+    window = main_window_with_square
+    monkeypatch.setattr(window, "_exec_context_menu", lambda menu, pos: None)
+    window._activate("Space")  # Select tool
+    select = window._viewport.tool_manager.active
+    seen: list[tuple[int, int]] = []
+    window._viewport.context_menu_requested.connect(lambda x, y: seen.append((x, y)))
+
+    def _fire():
+        window._viewport.contextMenuEvent(
+            QContextMenuEvent(QContextMenuEvent.Reason.Mouse, QPoint(5, 5))
+        )
+
+    faces = list(window._model.active_context.mesh.faces_iter())
+    window._selection.replace(faces=[faces[0].id])
+    assert select.has_active_gesture, "precondition: a selection reports a gesture"
+    assert not select.is_box_selecting
+    _fire()
+    assert seen, "right-click on an existing selection must still open the menu"
+
+    seen.clear()
+    select._is_box = True  # live box-select drag
+    assert select.is_box_selecting
+    _fire()
+    assert not seen, "a live box drag must suppress the context menu"
