@@ -89,6 +89,23 @@ def _entity_is_component(window, target: ContextTarget, entity_id) -> bool:
     return False
 
 
+def _selection_is_one_label(window) -> bool:
+    """True when exactly one annotation is selected and it is a Label.
+
+    Mirrors _on_edit_label_text's own guards: it returns silently for a
+    Dimension (which has no editable text) and for any selection that is
+    not exactly one annotation.
+    """
+    annotation_ids = window._selection.annotations
+    if len(annotation_ids) != 1:
+        return False
+    only = next(iter(annotation_ids))
+    for annotation in window._model.active_context.annotations:
+        if annotation.id == only:
+            return getattr(annotation, "kind", None) == "label"
+    return False
+
+
 def _add_assign_tag_submenu(window, menu, entity_id) -> None:
     """One checkable entry per tag, assigning it to the current selection."""
     submenu = menu.addMenu("Assign Tag")
@@ -120,6 +137,8 @@ def build_context_menu(window, target: ContextTarget, entity_id):
     in_group = bool(window._model.active_path)
     has_selection = not window._selection.is_empty()
     is_component = _entity_is_component(window, target, entity_id)
+    single_instance = len(window._selection.instances) == 1
+    editable_label = _selection_is_one_label(window)
 
     for action_id in context_menu_ids(target, in_group=in_group, has_selection=has_selection):
         if action_id is None:
@@ -133,6 +152,8 @@ def build_context_menu(window, target: ContextTarget, entity_id):
                 in_group=in_group,
                 is_component=is_component,
                 has_selection=has_selection,
+                single_instance=single_instance,
+                editable_label=editable_label,
             )
         )
         menu.addAction(action)
@@ -162,16 +183,31 @@ def is_enabled(
     in_group: bool,
     is_component: bool,
     has_selection: bool,
+    single_instance: bool = False,
+    editable_label: bool = False,
 ) -> bool:
     """Whether a context-menu entry should be clickable.
 
     is_component distinguishes a component instance (which can be made
     unique) from a plain group (which cannot).
+
+    single_instance and editable_label exist because their handlers guard
+    the same conditions and return silently when they fail. An entry that
+    is clickable but does nothing is worse than a greyed-out one: this
+    module's rule is to disable rather than hide, so the entry stays
+    visible and its unavailability is legible.
     """
     if action_id == "edit_close_group":
         return in_group
     if action_id == "edit_make_unique":
         return is_component
-    if action_id in ("edit_select_none", "edit_erase", "edit_paint_selection", "edit_label_text"):
+    if action_id == "edit_edit_group":
+        # _on_edit_group returns early unless exactly one instance is selected.
+        return single_instance
+    if action_id == "edit_label_text":
+        # _on_edit_label_text returns early for a Dimension, or for anything
+        # other than a single selected annotation.
+        return editable_label
+    if action_id in ("edit_select_none", "edit_erase", "edit_paint_selection"):
         return has_selection
     return True

@@ -298,3 +298,48 @@ def test_context_menu_does_not_clobber_a_disable_it_did_not_make(
     window._on_context_menu_requested(0, 0, exec_menu=True)
 
     assert not undo.isEnabled(), "the sweep re-enabled an action it did not disable"
+
+
+def test_edit_group_is_disabled_for_a_multi_instance_selection(qtbot, main_window_with_group):
+    """_on_edit_group returns early unless exactly one instance is selected,
+    so offering it enabled for two would be a control that does nothing."""
+    window = main_window_with_group
+    instance = window._model.active_context.children[-1]
+
+    window._selection.clear()
+    window._selection.toggle_instance(instance.id)
+    menu = build_context_menu(window, ContextTarget.INSTANCE, instance.id)
+    single = next(a for a in menu.actions() if a.text() == "Edit Group")
+    assert single.isEnabled()
+
+    window._selection.toggle_instance(instance.id + 999)  # a second instance
+    menu = build_context_menu(window, ContextTarget.INSTANCE, instance.id)
+    multi = next(a for a in menu.actions() if a.text() == "Edit Group")
+    assert not multi.isEnabled()
+
+
+def test_edit_text_is_disabled_for_a_dimension(qtbot, main_window):
+    """_on_edit_label_text returns early for any annotation that is not a
+    Label, so a Dimension must not offer it enabled."""
+    from pluton.model.annotation import Dimension, Label
+
+    window = main_window
+    context = window._model.active_context
+    origin = np.zeros(3, dtype=np.float32)
+    unit = np.ones(3, dtype=np.float32)
+
+    label = Label(id=901, anchor=origin, text_pos=unit, text="hello")
+    context.annotations.append(label)
+    window._selection.clear()
+    window._selection.toggle_annotation(label.id)
+    menu = build_context_menu(window, ContextTarget.ANNOTATION, label.id)
+    on_label = next(a for a in menu.actions() if a.text().startswith("Edit Text"))
+    assert on_label.isEnabled()
+
+    dim = Dimension(id=902, p1=origin, p2=unit, offset=origin)
+    context.annotations.append(dim)
+    window._selection.clear()
+    window._selection.toggle_annotation(dim.id)
+    menu = build_context_menu(window, ContextTarget.ANNOTATION, dim.id)
+    on_dim = next(a for a in menu.actions() if a.text().startswith("Edit Text"))
+    assert not on_dim.isEnabled()
