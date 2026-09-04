@@ -164,3 +164,17 @@ def parse_length(text: str | None, units: Units) -> float | None:
         except ValueError:
             return None
     return _parse_metric(t, units)
+
+
+_SQ_FT_PER_SQ_M = 1.0 / (INCH_M * 12.0) ** 2
+
+
+def format_area(square_meters: float, units: Units) -> str:
+    """Area as m² or ft², to two decimals.
+
+    Metric area is always m², regardless of units.metric_unit: mm² and cm²
+    produce unreadable magnitudes for anything at architectural scale.
+    """
+    if units.system is UnitSystem.IMPERIAL:
+        return f"{square_meters * _SQ_FT_PER_SQ_M:.2f} ft²"
+    return f"{square_meters:.2f} m²"

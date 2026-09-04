@@ -130,6 +130,49 @@ def outliner_rows(model) -> tuple[OutlinerRow, ...]:
     return tuple(rows)
 
 
+def _subtree(definition, world):
+    """(definition, world_transform) for `definition` and everything under it."""
+    yield definition, world
+    for inst in definition.children:
+        yield from _subtree(inst.definition, world @ inst.transform)
+
+
+def selection_bounds(model, selection) -> tuple[np.ndarray, np.ndarray] | None:
+    """World-space AABB of the selected instances, or None when none are selected.
+
+    Measures actual transformed vertex positions rather than scaling each
+    definition's local AABB by its matrix -- the latter is wrong as soon as an
+    instance is rotated, which is the common case for anything placed by hand.
+    """
+    if not selection.instances:
+        return None
+
+    lo: np.ndarray | None = None
+    hi: np.ndarray | None = None
+    base = model.active_world_transform
+
+    for inst in model.active_context.children:
+        if inst.id not in selection.instances:
+            continue
+        for definition, world in _subtree(inst.definition, base @ inst.transform):
+            positions = [v.position for v in definition.mesh.vertices_iter()]
+            if not positions:
+                continue
+            local = np.asarray(positions, dtype=np.float32).reshape(-1, 3)
+            world_points = apply_mat(local, world)
+            def_lo = world_points.min(axis=0)
+            def_hi = world_points.max(axis=0)
+            if lo is None:
+                lo, hi = def_lo, def_hi
+            else:
+                lo = np.minimum(lo, def_lo)
+                hi = np.maximum(hi, def_hi)
+
+    if lo is None:
+        return None
+    return lo, hi
+
+
 def instance_path(model, instance_id: int) -> tuple | None:
     """Root-first ancestor chain ending at `instance_id`, or None if unreachable.
 
