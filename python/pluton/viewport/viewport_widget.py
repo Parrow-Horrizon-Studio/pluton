@@ -16,6 +16,8 @@ from PySide6.QtGui import QMouseEvent, QWheelEvent
 from PySide6.QtOpenGLWidgets import QOpenGLWidget
 
 from pluton.tools.select_tool import _HOVER_EDGE_COLOR, SelectTool
+from pluton.ui.status_bar import format_coordinates
+from pluton.units import Units
 from pluton.viewport.camera import Camera
 from pluton.viewport.scene_renderer import SceneRenderer
 from pluton.viewport.snap_engine import SnapEngine, SnapKind
@@ -144,6 +146,14 @@ class ViewportWidget(QOpenGLWidget):
             active.on_mouse_move(event, snap)
             if self._status_bar is not None:
                 self._status_bar.set_snap(snap.label if snap.kind != SnapKind.NONE else "")
+                # Coordinates ride the snap the tools already compute. That
+                # ties the readout to "a tool is active" -- pressing Esc
+                # blanks it (see MainWindow._on_escape's disarm branch).
+                # Computing an inference point on every move regardless would
+                # cost work on every event for a state users pass through,
+                # not sit in.
+                units = self._units_provider() if self._units_provider is not None else Units()
+                self._status_bar.set_coordinates(format_coordinates(snap.world_position, units))
             if self._on_event_finished is not None:
                 self._on_event_finished()
             self.update()
@@ -268,7 +278,6 @@ class ViewportWidget(QOpenGLWidget):
         from PySide6.QtGui import QColor, QFont, QPainter
 
         from pluton.annotations.draw_plan import FONT_PX, collect_annotation_plans
-        from pluton.units import Units
         from pluton.viewport.annotation_painter import paint_annotation_plans
         from pluton.viewport.scene_renderer import _DIM_ALPHA_BLEND
 

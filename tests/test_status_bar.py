@@ -8,7 +8,7 @@ def test_status_bar_starts_empty(qtbot):
 
     bar = StatusBar()
     qtbot.addWidget(bar)
-    assert bar.text() == ""
+    assert bar.prompt_text() == ""
 
 
 def test_status_bar_shows_tool_only_when_no_snap(qtbot):
@@ -18,7 +18,7 @@ def test_status_bar_shows_tool_only_when_no_snap(qtbot):
     qtbot.addWidget(bar)
     bar.set_tool("Line")
     bar.set_snap("")
-    assert bar.text() == "Line · —"
+    assert bar.prompt_text() == "Line · —"
 
 
 def test_status_bar_shows_tool_and_snap(qtbot):
@@ -28,7 +28,7 @@ def test_status_bar_shows_tool_and_snap(qtbot):
     qtbot.addWidget(bar)
     bar.set_tool("Line")
     bar.set_snap("Endpoint")
-    assert bar.text() == "Line · Endpoint"
+    assert bar.prompt_text() == "Line · Endpoint"
 
 
 def test_status_bar_clear_tool_blanks_everything(qtbot):
@@ -39,4 +39,4 @@ def test_status_bar_clear_tool_blanks_everything(qtbot):
     bar.set_tool("Line")
     bar.set_snap("Grid")
     bar.set_tool("")  # no active tool
-    assert bar.text() == ""
+    assert bar.prompt_text() == ""

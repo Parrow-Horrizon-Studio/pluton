@@ -383,7 +383,7 @@ class MainWindow(QMainWindow):
         did_assign, message = selection_controller.assign_tag(
             self._model, self._selection, self._command_stack, tag_id
         )
-        self._status_bar.set_status(message)
+        self._status_bar.set_message(message)
         if did_assign:
             self._update_selection_tag_indicator()
             self._viewport.update()
@@ -594,6 +594,7 @@ class MainWindow(QMainWindow):
             self._tool_manager.deactivate_current()
             self._status_bar.set_tool("")
             self._status_bar.set_snap("")
+            self._status_bar.set_coordinates("")
             self._disarm_tool_ui()
             self._refresh_tool_options()
         self._refresh_status_text()
@@ -636,7 +637,7 @@ class MainWindow(QMainWindow):
 
         sel = self._selection
         if not (sel.edges or sel.faces):
-            self._status_bar.set_status("Select edges or faces to group.")
+            self._status_bar.set_message("Select edges or faces to group.")
             return
         vertex_ids = selection_vertices(self._model.active_scene, sel)
         edge_ids = list(sel.edges)
@@ -663,7 +664,7 @@ class MainWindow(QMainWindow):
 
         sel = self._selection
         if not (sel.edges or sel.faces):
-            self._status_bar.set_status("Select edges or faces to make a component.")
+            self._status_bar.set_message("Select edges or faces to make a component.")
             return
         default = f"Component #{self._model._next_def_id}"
         name = self._prompt_component_name(default)
@@ -693,7 +694,7 @@ class MainWindow(QMainWindow):
 
         sel = self._selection
         if not sel.instances:
-            self._status_bar.set_status("Select an instance to explode.")
+            self._status_bar.set_message("Select an instance to explode.")
             return
         inst_id = next(iter(sel.instances))
         inst = next((c for c in self._model.active_context.children if c.id == inst_id), None)
@@ -720,7 +721,7 @@ class MainWindow(QMainWindow):
 
         sel = self._selection
         if not sel.instances:
-            self._status_bar.set_status("Select an instance to make unique.")
+            self._status_bar.set_message("Select an instance to make unique.")
             return
         inst_id = next(iter(sel.instances))
         inst = next((c for c in self._model.active_context.children if c.id == inst_id), None)
@@ -1131,7 +1132,7 @@ class MainWindow(QMainWindow):
 
         instances = selection_controller.selected_instances(self._model, self._selection)
         if not instances:
-            self._status_bar.set_status("Select objects to hide or unhide.")
+            self._status_bar.set_message("Select objects to hide or unhide.")
             return
         self._command_stack.execute(HideInstancesCommand(instances, hidden), self._model)
         self._viewport.update()
@@ -1152,7 +1153,7 @@ class MainWindow(QMainWindow):
 
         hidden = [inst for inst in self._model.active_context.children if inst.hidden]
         if not hidden:
-            self._status_bar.set_status("Nothing is hidden here.")
+            self._status_bar.set_message("Nothing is hidden here.")
             return
         self._command_stack.execute(HideInstancesCommand(hidden, False), self._model)
         self._viewport.update()
@@ -1364,7 +1365,7 @@ class MainWindow(QMainWindow):
 
             QMessageBox.critical(self, "Export failed", str(e))
             return
-        self._status_bar.set_status(f"Exported {Path(path).name}")
+        self._status_bar.set_message(f"Exported {Path(path).name}")
 
     def _on_import_obj(self) -> None:
         path = self._prompt_open_path("OBJ files (*.obj)", "Import OBJ")
@@ -1387,7 +1388,7 @@ class MainWindow(QMainWindow):
             msg += f" in {s.objects} object(s)"
         if s.faces_skipped:
             msg += f" (skipped {s.faces_skipped} faces)"
-        self._status_bar.set_status(msg)
+        self._status_bar.set_message(msg)
         self._refresh_breadcrumb()
         self._viewport.update()
 
@@ -1405,7 +1406,7 @@ class MainWindow(QMainWindow):
 
             QMessageBox.critical(self, "Export failed", str(e))
             return
-        self._status_bar.set_status(f"Exported {Path(path).name}")
+        self._status_bar.set_message(f"Exported {Path(path).name}")
 
     def _on_import_gltf(self) -> None:
         path = self._prompt_open_path("glTF (*.glb *.gltf)", "Import glTF")
@@ -1426,7 +1427,7 @@ class MainWindow(QMainWindow):
         msg = f"Imported {s.faces_imported} faces in {s.nodes} object(s)"
         if s.faces_skipped:
             msg += f" (skipped {s.faces_skipped} faces)"
-        self._status_bar.set_status(msg)
+        self._status_bar.set_message(msg)
         self._refresh_breadcrumb()
         self._viewport.update()
 
@@ -1453,7 +1454,7 @@ class MainWindow(QMainWindow):
         self._doc_controller.set_path(path)
         self._doc_controller.mark_clean()
         self._update_window_title()
-        self._status_bar.set_status(f"Saved {Path(path).name}")
+        self._status_bar.set_message(f"Saved {Path(path).name}")
         return True
 
     def _on_file_save(self) -> bool:

@@ -259,6 +259,10 @@ def test_clear_active_context_is_undoable(qtbot):
 
 
 class TestStatusBarThirdSlot:
+    # M7.3 Task 15 split set_status's target out of the joined prompt string
+    # into its own Measurements box, so what was once the "third segment" of
+    # bar.text() is now bar.measurements_text(); the prompt keeps only tool
+    # and snap.
     def test_set_status_appends_third_segment(self, qtbot):  # noqa: ARG002
         from pluton.ui.status_bar import StatusBar
 
@@ -267,7 +271,8 @@ class TestStatusBarThirdSlot:
         bar.set_tool("Push/Pull")
         bar.set_snap("")
         bar.set_status("depth: 1.500")
-        assert bar.text() == "Push/Pull · — · depth: 1.500"
+        assert bar.prompt_text() == "Push/Pull · —"
+        assert bar.measurements_text() == "depth: 1.500"
 
     def test_set_status_empty_omits_the_third_segment(self, qtbot):  # noqa: ARG002
         from pluton.ui.status_bar import StatusBar
@@ -277,7 +282,8 @@ class TestStatusBarThirdSlot:
         bar.set_tool("Rectangle")
         bar.set_snap("Endpoint")
         bar.set_status("")  # PushPullTool's status_text returns None outside DRAGGING
-        assert bar.text() == "Rectangle · Endpoint"
+        assert bar.prompt_text() == "Rectangle · Endpoint"
+        assert bar.measurements_text() == ""
 
 
 class TestPushPullToolIntegration:

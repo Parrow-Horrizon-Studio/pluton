@@ -47,6 +47,6 @@ def test_paint_tool_status_text_refreshes_without_error(win):
     assert isinstance(inspect.getattr_static(PaintTool, "status_text"), property)
     win._activate("B")  # activates Paint AND sets the status-bar tool name
     win._refresh_status_text()  # would raise TypeError before the fix
-    text = win._status_bar.text()
+    text = win._status_bar.prompt_text()
     assert isinstance(text, str)
     assert "Paint" in text
