@@ -6,13 +6,16 @@ Pluton is a long-horizon project inspired by Blender's development model, intend
 
 ## Status
 
-**Alpha — v0.4.0.** Phase 2 (Modeling App) is complete: you can draw, push/pull, transform,
+**Alpha, v0.5.0.** Phase 2 (Modeling App) is complete: you can draw, push/pull, transform,
 organize, paint, annotate, save, and import/export real models. v0.4.0 gave it the surface of a
-real application — seven dockable toolbars over an original icon set, per-tool cursors,
-right-click context menus, and a layout that persists between runs. Still missing: the Outliner
-and Properties panels ([M7.3](docs/2026-05-16-pluton-design.md)), the rest of
-[Phase 2.5 — Parity & Polish](docs/2026-05-16-pluton-design.md) (v0.4 → v0.8), and installers —
-run it from source.
+real application: seven dockable toolbars over an original icon set, per-tool cursors,
+right-click context menus, and a layout that persists between runs. v0.5.0
+([M7.3](docs/2026-05-16-pluton-design.md)) replaced the right-hand Materials, Tags and Scenes
+docks and the three floating tool-option bars with a single Outliner and Properties panel: a
+model hierarchy with per-instance visibility and rename, above five icon tabs (Tool Settings,
+Entity Info, Material, Tags, Scenes). Still missing: the rest of
+[Phase 2.5 (Parity & Polish)](docs/2026-05-16-pluton-design.md) (v0.4 to v0.8), and installers.
+Run it from source.
 
 ## What works today
 
