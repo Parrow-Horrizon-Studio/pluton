@@ -140,6 +140,15 @@ def build_context_menu(window, target: ContextTarget, entity_id):
     single_instance = len(window._selection.instances) == 1
     editable_label = _selection_is_one_label(window)
     has_hidden = any(inst.hidden for inst in window._model.active_context.children)
+    # Distinct from has_hidden above: this is about what is *selected*, not
+    # what merely exists in the context, and it is what edit_unhide needs --
+    # per the spec, Unhide is enabled only when the selection itself
+    # contains a hidden instance, not whenever anything at all is selected.
+    has_hidden_selected = any(
+        inst.hidden
+        for inst in window._model.active_context.children
+        if inst.id in window._selection.instances
+    )
 
     for action_id in context_menu_ids(target, in_group=in_group, has_selection=has_selection):
         if action_id is None:
@@ -156,6 +165,7 @@ def build_context_menu(window, target: ContextTarget, entity_id):
                 single_instance=single_instance,
                 editable_label=editable_label,
                 has_hidden=has_hidden,
+                has_hidden_selected=has_hidden_selected,
             )
         )
         menu.addAction(action)
@@ -188,6 +198,7 @@ def is_enabled(
     single_instance: bool = False,
     editable_label: bool = False,
     has_hidden: bool = False,
+    has_hidden_selected: bool = False,
 ) -> bool:
     """Whether a context-menu entry should be clickable.
 
@@ -203,6 +214,13 @@ def is_enabled(
     has_hidden says at least one instance in the active context is hidden --
     Unhide All is the only route back for an object you cannot right-click,
     so it is offered exactly when it would do something.
+
+    has_hidden_selected says at least one instance in the *selection* is
+    hidden. This is a different signal from has_hidden: has_hidden asks
+    about the whole context, has_hidden_selected asks about what is
+    selected. edit_unhide needs the latter -- a hidden instance can enter
+    the selection through the Outliner even though it cannot be
+    right-clicked, so a visible-only selection must not offer Unhide.
     """
     if action_id == "edit_close_group":
         return in_group
@@ -217,8 +235,10 @@ def is_enabled(
         return editable_label
     if action_id in ("edit_select_none", "edit_erase", "edit_paint_selection"):
         return has_selection
-    if action_id in ("edit_hide", "edit_unhide"):
+    if action_id == "edit_hide":
         return has_selection
+    if action_id == "edit_unhide":
+        return has_hidden_selected
     if action_id == "edit_unhide_all":
         # The escape hatch is pointless when nothing is hidden, and offering
         # it anyway would train people to click a no-op.

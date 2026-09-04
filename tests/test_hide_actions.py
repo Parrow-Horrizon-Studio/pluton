@@ -69,6 +69,22 @@ def test_hide_needs_a_selection():
     assert is_enabled("edit_hide", has_selection=False, **kwargs) is False
 
 
+def test_unhide_needs_a_hidden_instance_selected():
+    # Per the spec (docs/2026-08-03-M7.3-outliner-properties-design.md
+    # sec.1.3), edit_unhide is enabled when the *selection* contains a
+    # hidden instance -- not merely when something, anything, is selected.
+    # has_selection=True here (a normal, visible selection) must NOT be
+    # enough on its own: this is what the bare has_selection gate got wrong.
+    kwargs = dict(
+        target=actions.ContextTarget.INSTANCE,
+        in_group=False,
+        is_component=False,
+        has_selection=True,
+    )
+    assert is_enabled("edit_unhide", has_hidden_selected=True, **kwargs) is True
+    assert is_enabled("edit_unhide", has_hidden_selected=False, **kwargs) is False
+
+
 def test_unhide_all_needs_something_hidden():
     kwargs = dict(
         target=actions.ContextTarget.EMPTY,
@@ -90,6 +106,24 @@ def test_hiding_the_selection_is_undoable(main_window):
     assert instance.hidden is True
     main_window._command_stack.undo()
     assert instance.hidden is False
+
+
+def test_unhiding_a_selected_hidden_instance_works(main_window):
+    # End-to-end: the edit_unhide gating change must not make Unhide itself
+    # unreachable. A hidden instance can be selected via the Outliner (not
+    # exercised here directly, but selection.replace stands in for it, since
+    # _on_unhide only cares about what is selected) and Unhide must still
+    # reveal it and remain undoable.
+    _square(main_window)
+    instance = _group(main_window)
+    instance.hidden = True
+    main_window._selection.replace(instances=[instance.id])
+
+    main_window._on_unhide()
+
+    assert instance.hidden is False
+    main_window._command_stack.undo()
+    assert instance.hidden is True
 
 
 def test_hide_with_no_selection_does_nothing(main_window):
