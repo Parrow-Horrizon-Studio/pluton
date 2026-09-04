@@ -51,6 +51,30 @@ def test_the_measurements_field_carries_the_status_text(qtbot):
     assert "3600" not in bar.prompt_text()
 
 
+def test_the_prompt_carries_the_message_text(qtbot):
+    # Mirrors test_the_measurements_field_carries_the_status_text above, but
+    # for set_message -- the setter this whole split exists to make safe.
+    # Before the split, a sentence like this one rendered inside the
+    # Measurements box because set_status carried both measurements and
+    # messages; set_message must land only in the prompt.
+    bar = _bar(qtbot)
+    bar.set_message("Nothing is hidden here.")
+    assert "Nothing is hidden here." in bar.prompt_text()
+    assert "Nothing is hidden here." not in bar.measurements_text()
+
+
+def test_set_status_and_set_message_are_independent(qtbot):
+    # Calling both must route each to its own field without either clobbering
+    # the other -- the two setters share no state.
+    bar = _bar(qtbot)
+    bar.set_status("3600")
+    bar.set_message("Nothing is hidden here.")
+    assert "3600" in bar.measurements_text()
+    assert "3600" not in bar.prompt_text()
+    assert "Nothing is hidden here." in bar.prompt_text()
+    assert "Nothing is hidden here." not in bar.measurements_text()
+
+
 def test_the_measurements_field_is_labelled(qtbot):
     # It stops being an unlabelled run of text among four others -- that is
     # the discoverability problem this task exists to fix.

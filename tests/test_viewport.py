@@ -286,6 +286,48 @@ class TestStatusBarThirdSlot:
         assert bar.measurements_text() == ""
 
 
+class TestCoordinatesWithNoSnap:
+    # M7.3 Task 15 review finding 2: SnapResult.world_position
+    # (python/pluton/viewport/snap_engine.py:43) is a non-optional np.ndarray,
+    # always populated even when kind == SnapKind.NONE. So with no snap match
+    # the coordinates readout should still show the inferred point -- only the
+    # snap *label* goes blank (viewport_widget.py's mouseMoveEvent feed site
+    # calls set_coordinates unconditionally but set_snap only when kind !=
+    # SnapKind.NONE).
+    def test_no_snap_still_fills_coordinates_but_blanks_the_snap_label(
+        self, qtbot, main_window, monkeypatch
+    ):
+        from PySide6.QtCore import QPointF
+        from pluton.viewport.snap_engine import SnapKind, SnapResult
+
+        main_window._activate("L")
+
+        forced = SnapResult(
+            kind=SnapKind.NONE,
+            world_position=np.array([5.0, 6.0, 0.0], dtype=np.float32),
+            axis=None,
+            vertex_id=None,
+            label="Should Not Appear",
+        )
+        monkeypatch.setattr(main_window._viewport, "_snap_for_event", lambda event: forced)
+
+        event = QMouseEvent(
+            QMouseEvent.Type.MouseMove,
+            QPointF(40.0, 40.0),
+            Qt.MouseButton.NoButton,
+            Qt.MouseButton.NoButton,
+            Qt.KeyboardModifier.NoModifier,
+        )
+        main_window._viewport.mouseMoveEvent(event)
+
+        coords = main_window._status_bar.coordinates_text()
+        assert "5 m" in coords
+        assert "6 m" in coords
+        # The label from the forced SnapKind.NONE result must not leak into
+        # the prompt -- only the inferred point (via coordinates) survives.
+        assert "Should Not Appear" not in main_window._status_bar.prompt_text()
+
+
 class TestPushPullToolIntegration:
     def test_p_keybind_activates_push_pull_tool(self, qtbot):
         from PySide6.QtCore import Qt
