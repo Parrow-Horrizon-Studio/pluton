@@ -61,6 +61,8 @@ from pluton.ui.cursors import cursor_for
 from pluton.ui.document_controller import DocumentController
 from pluton.ui.materials_dock import MaterialsDock
 from pluton.ui.opening_options_bar import OpeningOptionsBar
+from pluton.ui.outliner_tree import OutlinerTree
+from pluton.ui.properties_dock import PropertiesDock
 from pluton.ui.roof_options_bar import RoofOptionsBar
 from pluton.ui.scenes_dock import ScenesDock
 from pluton.ui.status_bar import StatusBar
@@ -174,6 +176,20 @@ class MainWindow(QMainWindow):
         self._scenes_dock.rename_requested.connect(self._on_rename_view)
         self._scenes_dock.reorder_requested.connect(self._on_reorder_view)
         self._scenes_dock.recall_requested.connect(self._on_recall_view)
+
+        # Properties panel (M7.3) — Outliner over an icon-tabbed editor.
+        # Must be added BEFORE restore_window_state() below: restoreState()
+        # only reattaches docks it can find by object name at the time it runs.
+        self._properties_dock = PropertiesDock(self)
+        self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, self._properties_dock)
+        self._outliner = OutlinerTree(self._properties_dock)
+        self._properties_dock.set_outliner(self._outliner)
+        self._outliner.instance_clicked.connect(self._on_outliner_clicked)
+        self._outliner.instance_activated.connect(self._on_outliner_activated)
+        self._outliner.hide_toggled.connect(self._on_outliner_hide_toggled)
+        self._outliner.rename_requested.connect(self._on_outliner_rename)
+        self._command_stack.add_change_listener(self._rebuild_outliner)
+        self._rebuild_outliner()
 
         # Camera tween animator (M7e). Owns the same live camera object the
         # viewport mutates in place; a manual camera move cancels a running tween.
@@ -981,6 +997,7 @@ class MainWindow(QMainWindow):
 
     def _refresh_selection_status(self) -> None:
         self._status_bar.set_selection(selection_controller.selection_status_text(self._selection))
+        self._sync_outliner_selection()
 
     def _refresh_breadcrumb(self) -> None:
         """Task 15: rebuild the breadcrumb from model.active_path and push to status bar.
@@ -1003,7 +1020,82 @@ class MainWindow(QMainWindow):
         for the new active editing context and update the breadcrumb."""
         self._rebuild_tool_context()
         self._refresh_breadcrumb()
+        self._rebuild_outliner()
         self._viewport.update()
+
+    # --- Outliner (M7.3, Task 10) ----------------------------------------
+
+    def _rebuild_outliner(self) -> None:
+        """Repopulate the tree from the model. Structural changes only."""
+        from pluton.model.model_queries import outliner_rows
+
+        self._outliner.set_rows(outliner_rows(self._model), self._model.root.name)
+        self._sync_outliner_selection()
+
+    def _sync_outliner_selection(self) -> None:
+        """Push the current selection into the tree as highlight, no rebuild."""
+        self._outliner.set_selected_ids(self._selection.instances)
+
+    def _outliner_instance(self, instance_id: int):
+        """The Instance for a row id, or None if it no longer resolves."""
+        from pluton.model.model_queries import instance_path
+
+        path = instance_path(self._model, instance_id)
+        return path[-1] if path else None
+
+    def _on_outliner_clicked(self, instance_id: int) -> None:
+        """Select the row's instance, re-rooting the active path to its parents.
+
+        Selection is only meaningful inside the active context -- every tool,
+        the dim pass and pick_selectable assume it -- so selecting a nested row
+        without moving the context would leave a highlighted object no tool
+        could touch. The breadcrumb and dim pass both update, so the context
+        change is visible rather than silent.
+        """
+        from pluton.model.model_queries import instance_path
+
+        path = instance_path(self._model, instance_id)
+        if path is None:
+            return
+        parents = list(path[:-1])
+        if [i.id for i in self._model.active_path] != [i.id for i in parents]:
+            self._model.active_path = parents
+            self._on_active_context_changed()
+        self._selection.replace(instances=[instance_id])
+        self._refresh_selection_status()
+        self._viewport.update()
+
+    def _on_outliner_activated(self, instance_id: int) -> None:
+        """Double-click: enter that instance, like double-clicking it in 3D."""
+        from pluton.model.model_queries import instance_path
+
+        path = instance_path(self._model, instance_id)
+        if path is None:
+            return
+        self._model.active_path = list(path)
+        self._selection.clear()
+        self._on_active_context_changed()
+        self._refresh_selection_status()
+        self._rebuild_outliner()
+
+    def _on_outliner_hide_toggled(self, instance_id: int, hidden: bool) -> None:
+        from pluton.commands.visibility_commands import HideInstancesCommand
+
+        instance = self._outliner_instance(instance_id)
+        if instance is None:
+            return
+        self._command_stack.execute(HideInstancesCommand([instance], hidden), self._model)
+        self._viewport.update()
+
+    def _on_outliner_rename(self, instance_id: int, new_name: str) -> None:
+        from pluton.commands.naming_commands import RenameInstanceCommand
+
+        instance = self._outliner_instance(instance_id)
+        if instance is None:
+            return
+        if instance.name == new_name.strip():
+            return
+        self._command_stack.execute(RenameInstanceCommand(instance, new_name), self._model)
 
     def _on_after_undo_redo(self) -> None:
         """Called by CommandStack listeners after every successful undo or redo."""
