@@ -97,6 +97,24 @@ def test_new_resets_to_clean_untitled(app, tmp_path):
     assert not win._command_stack.can_undo  # history cleared
 
 
+def test_new_rebuilds_the_outliner(app):
+    # CommandStack.clear() (called by _reset_document) fires no listeners --
+    # so without an explicit rebuild, the Outliner keeps showing the PREVIOUS
+    # document's hierarchy until the user happens to run any command.
+    win = MainWindow()
+    _draw_something(win)
+    win._on_select_all()
+    win._on_make_group()
+    instance_id = next(iter(win._selection.instances))
+    assert win._outliner.item_for(instance_id) is not None  # sanity: row exists pre-New
+
+    win._prompt_discard = lambda: "discard"
+    win._on_file_new()
+
+    assert win._outliner.item_for(instance_id) is None
+    assert win._outliner.topLevelItem(0).childCount() == 0
+
+
 def test_open_success_swaps_model_and_clears_history(app, tmp_path, monkeypatch):
     # First, save a file with a known box.
     saver = MainWindow()

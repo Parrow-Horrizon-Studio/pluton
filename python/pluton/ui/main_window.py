@@ -32,6 +32,7 @@ from pluton.io import (
 )
 from pluton.io.document_codec import CameraState
 from pluton.model import Model
+from pluton.model.model_queries import instance_path
 from pluton.model.tag import TagLibrary
 from pluton.selection import Selection
 from pluton.tools import (
@@ -163,6 +164,9 @@ class MainWindow(QMainWindow):
         self._tags_page = TagsPage(self._model.tags, self)
         self._tags_page.active_tag_changed.connect(self._on_active_tag_changed)
         self._tags_page.visibility_changed.connect(self._viewport.update)
+        # Spec 1.7: "Tag visibility toggled -> full rebuild (tag_hidden
+        # moved)" -- a highlight-only sync would never move the dimming.
+        self._tags_page.visibility_changed.connect(self._rebuild_outliner)
         self._tags_page.assign_to_selection_requested.connect(self._on_assign_tag)
 
         # Scenes page (M7e).
@@ -551,6 +555,10 @@ class MainWindow(QMainWindow):
         on another tab would silently not show them. Tools without settings
         never steal the tab -- otherwise every tool switch would yank the user
         out of whatever they were inspecting.
+
+        This SWITCHES the tab (spec 1.6) rather than calling
+        _show_properties_tab, which also un-hides the whole dock -- arming a
+        tool must not reopen a panel the user deliberately closed.
         """
         active = self._tool_manager.active
         key = None
@@ -570,7 +578,7 @@ class MainWindow(QMainWindow):
 
         self._tool_settings_page.show_bar(key)
         if key is not None:
-            self._show_properties_tab("tool_settings")
+            self._properties_dock.show_tab("tool_settings")
 
     def _on_escape(self) -> None:
         active = self._tool_manager.active
@@ -1066,8 +1074,6 @@ class MainWindow(QMainWindow):
 
     def _outliner_instance(self, instance_id: int):
         """The Instance for a row id, or None if it no longer resolves."""
-        from pluton.model.model_queries import instance_path
-
         path = instance_path(self._model, instance_id)
         return path[-1] if path else None
 
@@ -1080,8 +1086,6 @@ class MainWindow(QMainWindow):
         could touch. The breadcrumb and dim pass both update, so the context
         change is visible rather than silent.
         """
-        from pluton.model.model_queries import instance_path
-
         path = instance_path(self._model, instance_id)
         if path is None:
             return
@@ -1095,16 +1099,15 @@ class MainWindow(QMainWindow):
 
     def _on_outliner_activated(self, instance_id: int) -> None:
         """Double-click: enter that instance, like double-clicking it in 3D."""
-        from pluton.model.model_queries import instance_path
-
         path = instance_path(self._model, instance_id)
         if path is None:
             return
         self._model.active_path = list(path)
         self._selection.clear()
+        # _on_active_context_changed() already rebuilds the outliner -- a
+        # second explicit rebuild here just repopulated the same tree twice.
         self._on_active_context_changed()
         self._refresh_selection_status()
-        self._rebuild_outliner()
 
     def _on_outliner_hide_toggled(self, instance_id: int, hidden: bool) -> None:
         from pluton.commands.visibility_commands import HideInstancesCommand
@@ -1122,6 +1125,10 @@ class MainWindow(QMainWindow):
         if instance is None:
             return
         if instance.name == new_name.strip():
+            # No command runs, so nothing fires _rebuild_outliner -- without
+            # this, the row keeps whatever raw text the user typed (padding
+            # whitespace included) instead of the canonical stored name.
+            self._rebuild_outliner()
             return
         self._command_stack.execute(RenameInstanceCommand(instance, new_name), self._model)
 
@@ -1175,6 +1182,10 @@ class MainWindow(QMainWindow):
 
         instances = selection_controller.selected_instances(self._model, self._selection)
         if len(instances) != 1 or instances[0].name == new_name.strip():
+            # No command runs on a no-op commit, so nothing repopulates the
+            # page -- without this, the Name field keeps whatever raw text
+            # the user typed (padding whitespace included).
+            self._refresh_entity_info()
             return
         self._command_stack.execute(RenameInstanceCommand(instances[0], new_name), self._model)
 
@@ -1534,6 +1545,11 @@ class MainWindow(QMainWindow):
         self._doc_controller.mark_clean()
         self._rebuild_tool_context()
         self._refresh_breadcrumb()
+        # CommandStack.clear() fires no listeners (by design -- it is not an
+        # undoable edit), so without this the Outliner keeps showing the
+        # PREVIOUS document's hierarchy under the previous root label (spec
+        # 1.7: "Document New / Open -> rebuild and rebind libraries").
+        self._rebuild_outliner()
         self._refresh_status_text()
         self._update_window_title()
         self._viewport.update()

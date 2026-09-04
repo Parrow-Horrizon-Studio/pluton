@@ -23,3 +23,19 @@ def test_options_bar_visible_only_for_wall(qtbot):
     w._tool_manager.activate_by_shortcut("L")  # line tool
     w._refresh_tool_options()
     assert not w._wall_options_bar.isVisibleTo(w)
+
+
+def test_arming_a_tool_with_settings_does_not_reopen_a_closed_panel(qtbot):
+    # Spec 1.6: arming a tool with settings SWITCHES the Tool Settings tab; it
+    # must not also un-hide a panel the user deliberately closed.
+    w = MainWindow()
+    qtbot.addWidget(w)
+    w.show()
+    w._properties_dock.hide()
+    assert w._properties_dock.isHidden()
+
+    w._tool_manager.activate_by_shortcut("W")
+    w._refresh_tool_options()
+
+    assert w._properties_dock.current_tab_id == "tool_settings"
+    assert w._properties_dock.isHidden()

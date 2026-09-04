@@ -64,6 +64,8 @@ ignore = []
 "python/pluton/viewport/viewport_widget.py" = ["N802"]
 # Qt dispatches virtual overrides by exact camelCase name (eventFilter, closeEvent).
 "python/pluton/ui/main_window.py" = ["N802"]
+# Qt dispatches virtual overrides by exact camelCase name (mousePressEvent).
+"python/pluton/ui/outliner_tree.py" = ["N802"]
 
 [tool.ruff.format]
 quote-style = "double"

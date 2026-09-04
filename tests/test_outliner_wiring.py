@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import numpy as np
+from PySide6.QtCore import Qt
 from pluton.ui.outliner_tree import OutlinerTree
 
 
@@ -163,3 +164,81 @@ def test_a_stale_row_id_is_ignored(main_window):
     main_window._outliner.rename_requested.emit(9999, "x")
 
     assert main_window._model.active_path == []
+
+
+def test_toggling_tag_visibility_rebuilds_the_outliner(main_window):
+    # Spec 1.7: "Tag visibility toggled -> full rebuild (tag_hidden moved)".
+    # visibility_changed was wired only to a viewport repaint + dirty-marking,
+    # which left tag_hidden -- and the row's dimming -- stale.
+    _square(main_window)
+    instance = _group(main_window)
+    tag = main_window._model.tags.add("Hidden Tag")
+    instance.tag_id = tag.id
+    main_window._rebuild_outliner()
+    assert not main_window._outliner.is_dimmed(main_window._outliner.item_for(instance.id))
+
+    main_window._model.tags.set_visible(tag.id, False)
+    main_window._tags_page.visibility_changed.emit()
+
+    assert main_window._outliner.is_dimmed(main_window._outliner.item_for(instance.id))
+
+
+def test_clicking_the_eye_column_does_not_re_root_the_active_context(main_window, qtbot):
+    # itemSelectionChanged fires (from the mouse press) before itemClicked --
+    # so toggling visibility on a nested row used to yank the user into that
+    # row's parent context a moment before the eye toggle itself ran.
+    #
+    # A real (not synthesized-via-signal) click is required to reproduce this
+    # -- itemSelectionChanged only fires ahead of itemClicked as a side effect
+    # of QAbstractItemView's actual mousePressEvent handling. The window must
+    # also be shown: a QTreeWidget that has never been shown/laid out does
+    # not deliver synthetic QTest mouse events to its items at all, fix or
+    # no fix, which would make this test pass for the wrong reason.
+    main_window.show()
+    _square(main_window)
+    outer = _group(main_window)
+    main_window._model.enter(outer)
+    _square(main_window)
+    main_window._on_select_all()
+    main_window._on_make_group()
+    inner = main_window._model.active_context.children[-1]
+    main_window._selection.clear()
+    main_window._model.exit_one()
+    main_window._rebuild_outliner()
+
+    tree = main_window._outliner
+    tree.item_for(outer.id).setExpanded(True)
+    point = tree.visualRect(tree.indexFromItem(tree.item_for(inner.id), tree.EYE_COLUMN)).center()
+
+    qtbot.mouseClick(tree.viewport(), Qt.MouseButton.LeftButton, pos=point)
+
+    assert main_window._model.active_path == []
+
+
+def test_double_click_activation_rebuilds_the_outliner_once(main_window):
+    # _on_active_context_changed (called from _on_outliner_activated) already
+    # rebuilds the tree -- an extra explicit rebuild after it just repopulated
+    # the same tree a second time for nothing.
+    _square(main_window)
+    instance = _group(main_window)
+    calls = []
+    original = main_window._rebuild_outliner
+    main_window._rebuild_outliner = lambda: (calls.append(1), original())[1]
+
+    main_window._on_outliner_activated(instance.id)
+
+    assert calls == [1]
+
+
+def test_a_no_op_rename_restores_the_items_canonical_label(main_window):
+    # No command runs on a no-op rename, so nothing used to rebuild the tree
+    # -- the row kept whatever raw text (padding whitespace included) the
+    # user had just typed.
+    _square(main_window)
+    instance = _group(main_window)
+    main_window._outliner.rename_requested.emit(instance.id, "Wall")
+    item = main_window._outliner.item_for(instance.id)
+
+    item.setText(0, "Wall  ")  # same name, extra whitespace the user typed
+
+    assert main_window._outliner.item_for(instance.id).text(0) == "Wall"

@@ -14,7 +14,7 @@ just called in.
 from __future__ import annotations
 
 from PySide6.QtCore import Qt, Signal
-from PySide6.QtGui import QBrush
+from PySide6.QtGui import QBrush, QMouseEvent
 from PySide6.QtWidgets import QAbstractItemView, QHeaderView, QTreeWidget, QTreeWidgetItem
 
 from pluton.ui.icons import icon
@@ -42,10 +42,20 @@ class OutlinerTree(QTreeWidget):
         super().__init__(parent)
         self._applying = False
         self._items: dict[int, QTreeWidgetItem] = {}
+        # Set for the duration of a single mousePressEvent, so a real click on
+        # the eye column can be told apart from any other selection change
+        # (see mousePressEvent / _on_selection_changed).
+        self._press_column: int | None = None
 
         self.setColumnCount(2)
         self.setHeaderHidden(True)
-        self.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
+        # Single-selection only: _on_selection_changed emits one instance id
+        # (MainWindow replaces the whole Selection with it), so advertising
+        # ExtendedSelection promised a multi-select the rest of the pipeline
+        # could not honour -- a shift-click range visually snapped back to
+        # one row the moment the click landed. Carrying a full id set through
+        # is real M7.4 scope, not a fix for this contract.
+        self.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
         self.setEditTriggers(QAbstractItemView.EditTrigger.DoubleClicked)
         header = self.header()
         header.setSectionResizeMode(self.LABEL_COLUMN, QHeaderView.ResizeMode.Stretch)
@@ -153,9 +163,32 @@ class OutlinerTree(QTreeWidget):
         finally:
             self._applying = False
 
+    # --- mouse -------------------------------------------------------------
+    def mousePressEvent(self, event: QMouseEvent) -> None:
+        """Record which column the press landed in for _on_selection_changed.
+
+        Qt updates the current item / selection (firing itemSelectionChanged)
+        synchronously inside the base class's mousePressEvent, BEFORE
+        itemClicked fires on release -- so a press on the eye column would
+        otherwise re-root the active context (via instance_clicked) a moment
+        before the eye toggle itself is handled. Cleared again once the base
+        implementation returns so an unrelated selection change (keyboard
+        navigation, a programmatic set_selected_ids) is never suppressed by a
+        stale value from an earlier click.
+        """
+        self._press_column = self.columnAt(int(event.position().x()))
+        try:
+            super().mousePressEvent(event)
+        finally:
+            self._press_column = None
+
     # --- signals ---------------------------------------------------------
     def _on_selection_changed(self) -> None:
         if self._applying:
+            return
+        if self._press_column == self.EYE_COLUMN:
+            # The eye toggle only ever writes `hidden`; it must not also move
+            # the current selection / active context.
             return
         item = self.currentItem()
         if item is None:

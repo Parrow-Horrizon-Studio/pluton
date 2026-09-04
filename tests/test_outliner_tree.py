@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from PySide6.QtCore import Qt
+from PySide6.QtWidgets import QAbstractItemView
 
 from pluton.model.model_queries import OutlinerRow
 from pluton.ui.outliner_tree import OutlinerTree
@@ -215,6 +216,16 @@ def test_a_component_row_gets_a_different_icon_than_a_group(qtbot):
 # nesting (below) and the OR itself (test_an_inherited_hidden_row_is_greyed...
 # above) -- without adding coverage, so it was removed rather than kept
 # alongside a redundant assertion.
+
+
+def test_the_tree_only_supports_single_selection(qtbot):
+    # ExtendedSelection advertised a multi-select the rest of the pipeline
+    # could not honour: _on_selection_changed emits one instance id, and
+    # MainWindow replaces the whole Selection with it, so a shift-click range
+    # visually snapped back to one row. SingleSelection is honest about the
+    # contract actually shipped; a full id set is M7.4 scope.
+    tree = _tree(qtbot, [_row(1), _row(2)])
+    assert tree.selectionMode() == QAbstractItemView.SelectionMode.SingleSelection
 
 
 def test_rows_nest_three_levels_deep(qtbot):
