@@ -30,12 +30,6 @@ from pluton.units import format_area, format_length
 
 _PLACEHOLDER = "—"
 
-# The only kinds backed by real Instances -- the sole selection shape that
-# carries a hidden flag or a tag_id worth editing. Everything else (Face,
-# Edge, Nothing, Mixed cross-type, and the Label/Dimension annotation kinds)
-# has no coherent value for either, so both fields disable on the kind alone.
-_INSTANCE_KINDS = ("Group", "Component")
-
 
 class EntityInfoPage(QWidget):
     """A read-out of the selection plus four editable fields."""
@@ -129,7 +123,12 @@ class EntityInfoPage(QWidget):
                 self._hidden.setCheckState(Qt.CheckState.PartiallyChecked)
             else:
                 self._hidden.setChecked(bool(summary.hidden))
-            self._hidden.setEnabled(summary.kind in _INSTANCE_KINDS)
+            # instances_only covers Group, Component, AND a same-type but
+            # heterogeneous Group+Component selection ("Mixed") -- Hidden
+            # applies to any instance selection (spec 1.4), not just a
+            # homogeneous one. A cross-type Mixed (instances + faces, say)
+            # leaves instances_only False and stays disabled.
+            self._hidden.setEnabled(summary.instances_only)
 
             self._fill_tags(summary, tag_library)
             self._fill_materials(summary, material_library)
@@ -163,7 +162,9 @@ class EntityInfoPage(QWidget):
         self._tag.clear()
         for tag in tag_library.tags():
             self._tag.addItem(tag.name, tag.id)
-        self._tag.setEnabled(summary.kind in _INSTANCE_KINDS)
+        # See the comment on _hidden's setEnabled above -- Tag applies to any
+        # instance selection, including a heterogeneous Group+Component one.
+        self._tag.setEnabled(summary.instances_only)
         if summary.tag_id is None:
             self._tag.setCurrentIndex(-1)
             return

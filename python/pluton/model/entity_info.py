@@ -20,7 +20,16 @@ _KIND_MIXED = "Mixed"
 
 @dataclass(frozen=True, slots=True)
 class EntitySummary:
-    """A read-out of the selection. Fields are None when they do not apply."""
+    """A read-out of the selection. Fields are None when they do not apply.
+
+    `kind == "Mixed"` is ambiguous on its own: `_instance_kind` returns it for
+    a same-type selection of instances with heterogeneous definitions (a
+    Group and a Component together), while `entity_summary` also returns it
+    for a cross-type selection (instances plus faces, say). Those two cases
+    need different behaviour -- Tag and Hidden apply to any instance
+    selection, homogeneous or not, but not to a cross-type one -- so
+    `instances_only` discriminates them without overloading `kind` further.
+    """
 
     kind: str
     count: int
@@ -35,6 +44,7 @@ class EntitySummary:
     tag_id: int | None = None
     material_id: int | None = None
     hidden: bool | None = None
+    instances_only: bool = False
 
 
 def _polygon_area(points: np.ndarray) -> float:
@@ -111,6 +121,7 @@ def entity_summary(model, selection) -> EntitySummary:
             size=size,
             tag_id=_common(inst.tag_id for inst in instances),
             hidden=_common(bool(inst.hidden) for inst in instances),
+            instances_only=True,
         )
 
     if face_ids:

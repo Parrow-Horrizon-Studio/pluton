@@ -145,7 +145,35 @@ def test_mixed_kinds_report_mixed(model_factory, group_factory):
     selection = Selection()
     selection.replace(faces=[face_id], instances=[instance.id])
 
-    assert entity_summary(model, selection).kind == "Mixed"
+    summary = entity_summary(model, selection)
+
+    assert summary.kind == "Mixed"
+    # A cross-type selection (instances + faces here) is a DIFFERENT "Mixed"
+    # from a same-type-but-heterogeneous instance selection (see the test
+    # below) -- Entity Info's Tag/Hidden fields must stay disabled for this
+    # one, and instances_only is what tells the two apart.
+    assert summary.instances_only is False
+
+
+def test_mixed_group_and_component_reports_instances_only(model_factory, group_factory):
+    # A Group and a Component together are the SAME selection shape
+    # (instances only) but heterogeneous definitions -- _instance_kind
+    # collapses that to "Mixed" too, just like the cross-type case above.
+    # instances_only is what lets Entity Info tell them apart: Tag and
+    # Hidden apply to any instance selection (spec 1.4), homogeneous or not.
+    model = model_factory()
+    _square(model)
+    group = group_factory(model)
+    component_def = model.new_definition("Chair", is_group=False)
+    component = model.new_instance(component_def)
+    model.active_context.children.append(component)
+    selection = Selection()
+    selection.replace(instances=[group.id, component.id])
+
+    summary = entity_summary(model, selection)
+
+    assert summary.kind == "Mixed"
+    assert summary.instances_only is True
 
 
 def test_hidden_is_none_when_the_selection_disagrees(model_factory, group_factory):

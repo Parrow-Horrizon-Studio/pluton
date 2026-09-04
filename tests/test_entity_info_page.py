@@ -155,7 +155,10 @@ def test_length_is_formatted_for_an_edge(qtbot):
 
 def test_the_name_field_is_disabled_for_a_multi_selection(qtbot):
     page = _page(qtbot)
-    _refresh(page, EntitySummary(kind="Group", count=2, name=None, hidden=False))
+    _refresh(
+        page,
+        EntitySummary(kind="Group", count=2, name=None, hidden=False, instances_only=True),
+    )
     assert not page.name_field().isEnabled()
     assert page.hidden_field().isEnabled()
 
@@ -197,7 +200,7 @@ def test_refreshing_does_not_emit(qtbot):
 
 def test_toggling_hidden_emits_the_intent(qtbot):
     page = _page(qtbot)
-    _refresh(page, EntitySummary(kind="Group", count=1, hidden=False))
+    _refresh(page, EntitySummary(kind="Group", count=1, hidden=False, instances_only=True))
 
     with qtbot.waitSignal(page.hidden_requested) as blocker:
         page.hidden_field().click()
@@ -218,6 +221,25 @@ def test_the_page_is_installed_and_renames_through_a_command(main_window):
     assert instance.name == "Renamed"
     main_window._command_stack.undo()
     assert instance.name == ""
+
+
+def test_a_no_op_entity_rename_restores_the_pages_canonical_name(main_window):
+    # No command runs on a no-op commit, so nothing used to repopulate the
+    # page -- the Name field kept whatever raw text (padding whitespace
+    # included) the user had just typed.
+    _square(main_window)
+    main_window._on_select_all()
+    main_window._on_make_group()
+    instance = main_window._model.root.children[-1]
+    main_window._selection.replace(instances=[instance.id])
+    main_window._refresh_selection_status()
+    main_window._entity_info_page.rename_requested.emit("Wall")
+    assert instance.name == "Wall"
+
+    main_window._entity_info_page.name_field().setText("Wall  ")
+    main_window._entity_info_page.rename_requested.emit("Wall  ")
+
+    assert main_window._entity_info_page.name_field().text() == "Wall"
 
 
 def test_hiding_from_the_page_goes_through_a_command(main_window):
@@ -282,6 +304,29 @@ def test_an_annotation_selection_disables_hidden_and_tag(qtbot):
     assert not page.hidden_field().isEnabled()
     assert not page.tag_field().isEnabled()
     assert not page.name_field().isEnabled()
+
+
+def test_a_mixed_group_and_component_selection_enables_tag_and_hidden(qtbot):
+    # A same-type (instances-only) but heterogeneous selection -- a Group and
+    # a Component together -- reports kind="Mixed" just like a cross-type one
+    # does, but both underlying commands (TagInstancesCommand,
+    # HideInstancesCommand) accept it and the right-click Hide entry is
+    # enabled for it too (spec 1.4: "any instance selection"). instances_only
+    # is what lets this page tell the two "Mixed" cases apart.
+    page = _page(qtbot)
+    _refresh(page, EntitySummary(kind="Mixed", count=2, hidden=None, instances_only=True))
+    assert page.hidden_field().isEnabled()
+    assert page.tag_field().isEnabled()
+
+
+def test_a_cross_type_mixed_selection_still_disables_tag_and_hidden(qtbot):
+    # Instances plus faces (say) is the OTHER "Mixed": instances_only is
+    # False here (the default), so Tag and Hidden must stay disabled -- there
+    # is no coherent instance to apply either to.
+    page = _page(qtbot)
+    _refresh(page, EntitySummary(kind="Mixed", count=2))
+    assert not page.hidden_field().isEnabled()
+    assert not page.tag_field().isEnabled()
 
 
 def test_painting_from_the_page_goes_through_one_undoable_command(main_window):
