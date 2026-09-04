@@ -250,6 +250,12 @@ ACTIONS: tuple[ActionSpec, ...] = (
         shortcut="Shift+Z",
     ),
     ActionSpec("view_reset_toolbars", "Reset Toolbars", "_on_reset_toolbars"),
+    # Panel focus (M7.3). These replace the toggleViewAction()s that vanished
+    # with the Materials/Tags/Scenes docks. No icon: they are menu entries,
+    # never toolbar buttons, and test_icon_assets pins the declared-icon count.
+    ActionSpec("view_materials", "Materials", "_on_show_material_tab"),
+    ActionSpec("view_tags", "Tags", "_on_show_tags_tab"),
+    ActionSpec("view_scenes", "Scenes", "_on_show_scenes_tab"),
 )
 
 _BY_ID: dict[str, ActionSpec] = {spec.id: spec for spec in ACTIONS}
@@ -388,6 +394,10 @@ MENUS: tuple[MenuSpec, ...] = (
             "view_xray",
             None,
             "view_zoom_extents",
+            None,
+            "view_materials",
+            "view_tags",
+            "view_scenes",
         ),
     ),
 )

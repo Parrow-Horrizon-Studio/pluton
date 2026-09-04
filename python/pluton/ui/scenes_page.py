@@ -1,8 +1,9 @@
-"""The Scenes dock (M7e): a list panel of saved Scenes with recall + management.
+"""The Scenes page (M7e, a Properties tab since M7.3): saved Scenes with recall
++ management.
 
 Clicking a row recalls that Scene; Add captures the current view; Update
 overwrites the selected Scene; Delete removes it; the arrows reorder. Rename is
-inline (double-click). A near-clone of TagsDock. The dock only emits intent
+inline (double-click). A near-clone of TagsPage. The page only emits intent
 signals — MainWindow routes them through CommandStack / the view animator.
 """
 
@@ -11,7 +12,6 @@ from __future__ import annotations
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
     QAbstractItemView,
-    QDockWidget,
     QHBoxLayout,
     QListWidget,
     QListWidgetItem,
@@ -21,7 +21,7 @@ from PySide6.QtWidgets import (
 )
 
 
-class ScenesDock(QDockWidget):
+class ScenesPage(QWidget):
     """Saved-Scene list + Add/Update/Delete/reorder controls."""
 
     create_requested = Signal()
@@ -32,16 +32,11 @@ class ScenesDock(QDockWidget):
     recall_requested = Signal(int)
 
     def __init__(self, library, parent=None) -> None:
-        super().__init__("Scenes", parent)
-        # QMainWindow.saveState() silently drops docks without an object name
-        # (see tests/test_ui_builder_toolbars.py for the toolbar equivalent).
-        # This name is a persistence key: never rename it, or saved layouts
-        # silently lose this dock's state.
-        self.setObjectName("scenes_dock")
+        super().__init__(parent)
         self._library = library
         self._rebuilding = False
 
-        container = QWidget(self)
+        container = self
         layout = QVBoxLayout(container)
 
         self._list = QListWidget(container)
@@ -72,7 +67,6 @@ class ScenesDock(QDockWidget):
         arrows.addWidget(self._down_btn)
         layout.addLayout(arrows)
 
-        self.setWidget(container)
         self._rebuild()
 
     # --- current-row helpers ---------------------------------------------

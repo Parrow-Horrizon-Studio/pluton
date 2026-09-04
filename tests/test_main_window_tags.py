@@ -3,7 +3,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 from pluton.ui.main_window import MainWindow
-from pluton.ui.tags_dock import TagsDock
+from pluton.ui.tags_page import TagsPage
 
 
 @pytest.fixture
@@ -13,18 +13,14 @@ def win(qtbot):
     return w
 
 
-def test_has_tags_dock(win):
-    assert isinstance(win._tags_dock, TagsDock)
+def test_has_tags_page(win):
+    assert isinstance(win._tags_page, TagsPage)
 
 
-def test_view_menu_has_tags_toggle(win):
-    assert win._tags_dock_action in win._view_menu.actions()
-
-
-def test_active_tag_tracks_dock(win):
+def test_active_tag_tracks_page(win):
     walls = win._model.tags.add("Walls")
-    win._tags_dock._rebuild()
-    win._tags_dock.set_active(walls.id)
+    win._tags_page._rebuild()
+    win._tags_page.set_active(walls.id)
     assert win._active_tag_id == walls.id
 
 
@@ -70,13 +66,13 @@ def test_selection_indicator_reflects_selected_object(win):
     win._selection.replace(faces=[f])
     win._on_make_group()                      # new group inherits Walls; selects the instance
     win._update_selection_tag_indicator()
-    assert win._tags_dock._selection_label.text() == "Selection: Walls"
+    assert win._tags_page._selection_label.text() == "Selection: Walls"
 
 
 def test_selection_indicator_empty_when_no_instance(win):
     win._selection.replace()                  # clear selection
     win._update_selection_tag_indicator()
-    assert win._tags_dock._selection_label.text() == "Selection: —"
+    assert win._tags_page._selection_label.text() == "Selection: —"
 
 
 def test_assign_updates_selection_indicator(win):
@@ -90,4 +86,4 @@ def test_assign_updates_selection_indicator(win):
     walls = win._model.tags.add("Walls")
     win._active_tag_id = walls.id
     win._on_assign_tag()
-    assert win._tags_dock._selection_label.text() == "Selection: Walls"
+    assert win._tags_page._selection_label.text() == "Selection: Walls"

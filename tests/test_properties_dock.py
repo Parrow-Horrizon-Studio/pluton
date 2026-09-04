@@ -77,6 +77,24 @@ def test_set_page_replaces_the_placeholder(qtbot):
     assert dock.current_page() is page
 
 
+def test_set_page_called_twice_shows_the_second_widget(qtbot):
+    # Task 11 installs three real pages through set_page after Task 8's own
+    # placeholder-replacement already occupies the slot -- untested until now,
+    # even though set_page's remove-then-insert-at-old-index arithmetic was
+    # traced correct by hand during Task 8's review.
+    dock = PropertiesDock()
+    qtbot.addWidget(dock)
+    first = QLabel("first page")
+    second = QLabel("second page")
+
+    dock.set_page("entity_info", first)
+    dock.set_page("entity_info", second)
+    dock.show_tab("entity_info")
+
+    assert dock.current_page() is second
+    assert dock._stack.indexOf(first) == -1
+
+
 def test_set_outliner_installs_the_widget_above_the_tabs(qtbot):
     dock = PropertiesDock()
     qtbot.addWidget(dock)

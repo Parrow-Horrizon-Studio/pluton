@@ -123,31 +123,30 @@ def test_toolbar_visibility_survives_a_round_trip(qtbot, tmp_path):
     assert restored.findChild(QToolBar, "standard").isHidden()
 
 
-def test_every_dock_has_an_object_name_so_state_can_persist(qtbot, main_window):
+def test_properties_dock_has_an_object_name_so_state_can_persist(qtbot, main_window):
     # QMainWindow.saveState() silently drops docks without an object name,
     # exactly like toolbars -- see
     # tests/test_ui_builder_toolbars.py::test_every_toolbar_has_an_object_name_so_state_can_persist.
-    for dock in (
-        main_window._materials_dock,
-        main_window._tags_dock,
-        main_window._scenes_dock,
-    ):
-        assert dock.objectName() != ""
+    # Materials/Tags/Scenes were docks through this exact scenario before
+    # M7.3 Task 11 turned them into plain Properties-panel pages; Properties
+    # itself (M7.3 Task 8) is the sole surviving real dock.
+    assert main_window._properties_dock.objectName() != ""
 
 
 def test_dock_visibility_and_floating_state_survive_a_round_trip(qtbot, tmp_path, main_window):
-    # Reproduces the Task 11 review finding directly: before the three docks
-    # had object names, restore_window_state() still returned True (Qt's
-    # restoreState() drops unnamed widgets silently, with no error), but
-    # every dock came back in its default state instead of the saved one.
-    # Both isHidden() and isFloating() default to False on a never-shown
-    # window (verified separately), so a passing assertion below cannot be
-    # an accidental match against the default -- it proves a genuine
-    # restore of dock-specific state, not just the toolbar/geometry halves.
+    # Reproduces the Task 11 (M7.2) review finding directly: before a dock
+    # had an object name, restore_window_state() still returned True (Qt's
+    # restoreState() drops unnamed widgets silently, with no error), but the
+    # dock came back in its default state instead of the saved one. Both
+    # isHidden() and isFloating() default to False on a never-shown window
+    # (verified separately), so a passing assertion below cannot be an
+    # accidental match against the default -- it proves a genuine restore of
+    # dock-specific state, not just the toolbar/geometry halves. Properties
+    # is the only real dock left after M7.3 Task 11.
     settings = _settings(tmp_path)
 
-    main_window._materials_dock.setVisible(False)
-    main_window._tags_dock.setFloating(True)
+    main_window._properties_dock.setVisible(False)
+    main_window._properties_dock.setFloating(True)
     window_state.save_window_state(main_window, settings)
 
     from pluton.ui.main_window import MainWindow
@@ -156,5 +155,5 @@ def test_dock_visibility_and_floating_state_survive_a_round_trip(qtbot, tmp_path
     qtbot.addWidget(restored)
 
     assert window_state.restore_window_state(restored, settings) is True
-    assert restored._materials_dock.isHidden()
-    assert restored._tags_dock.isFloating()
+    assert restored._properties_dock.isHidden()
+    assert restored._properties_dock.isFloating()

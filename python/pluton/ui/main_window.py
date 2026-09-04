@@ -59,14 +59,14 @@ from pluton.tools.wall_tool import WallTool
 from pluton.ui import selection_controller
 from pluton.ui.cursors import cursor_for
 from pluton.ui.document_controller import DocumentController
-from pluton.ui.materials_dock import MaterialsDock
+from pluton.ui.materials_page import MaterialsPage
 from pluton.ui.opening_options_bar import OpeningOptionsBar
 from pluton.ui.outliner_tree import OutlinerTree
 from pluton.ui.properties_dock import PropertiesDock
 from pluton.ui.roof_options_bar import RoofOptionsBar
-from pluton.ui.scenes_dock import ScenesDock
+from pluton.ui.scenes_page import ScenesPage
 from pluton.ui.status_bar import StatusBar
-from pluton.ui.tags_dock import TagsDock
+from pluton.ui.tags_page import TagsPage
 from pluton.ui.value_control_box import ValueControlBox
 from pluton.ui.wall_options_bar import WallOptionsBar
 from pluton.ui.window_state import (
@@ -148,34 +148,29 @@ class MainWindow(QMainWindow):
         self._viewport.set_units_provider(lambda: self._doc.units)
         self._status_bar = StatusBar()
 
-        # Materials dock — must exist BEFORE _rebuild_tool_context() so the
-        # lambda `set_active_material=self._materials_dock.set_active` captures
+        # Materials page — must exist BEFORE _rebuild_tool_context() so the
+        # lambda `set_active_material=self._materials_page.set_active` captures
         # a live reference.
         self._active_material_id = self._model.materials.DEFAULT_ID
-        self._materials_dock = MaterialsDock(self._model.materials, self)
-        self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, self._materials_dock)
-        self._materials_dock.active_material_changed.connect(self._on_active_material_changed)
+        self._materials_page = MaterialsPage(self._model.materials, self)
+        self._materials_page.active_material_changed.connect(self._on_active_material_changed)
 
-        # Tags dock — tabbed with Materials on the right. Not referenced by the
-        # ToolContext (tag assignment uses the existing Select tool + Selection).
+        # Tags page. Not referenced by the ToolContext (tag assignment uses the
+        # existing Select tool + Selection).
         self._active_tag_id = TagLibrary.UNTAGGED_ID
-        self._tags_dock = TagsDock(self._model.tags, self)
-        self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, self._tags_dock)
-        self.tabifyDockWidget(self._materials_dock, self._tags_dock)
-        self._tags_dock.active_tag_changed.connect(self._on_active_tag_changed)
-        self._tags_dock.visibility_changed.connect(self._viewport.update)
-        self._tags_dock.assign_to_selection_requested.connect(self._on_assign_tag)
+        self._tags_page = TagsPage(self._model.tags, self)
+        self._tags_page.active_tag_changed.connect(self._on_active_tag_changed)
+        self._tags_page.visibility_changed.connect(self._viewport.update)
+        self._tags_page.assign_to_selection_requested.connect(self._on_assign_tag)
 
-        # Scenes dock (M7e) — tabbed with Materials/Tags on the right.
-        self._scenes_dock = ScenesDock(self._model.views, self)
-        self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, self._scenes_dock)
-        self.tabifyDockWidget(self._tags_dock, self._scenes_dock)
-        self._scenes_dock.create_requested.connect(self._on_create_view)
-        self._scenes_dock.update_requested.connect(self._on_update_view)
-        self._scenes_dock.delete_requested.connect(self._on_delete_view)
-        self._scenes_dock.rename_requested.connect(self._on_rename_view)
-        self._scenes_dock.reorder_requested.connect(self._on_reorder_view)
-        self._scenes_dock.recall_requested.connect(self._on_recall_view)
+        # Scenes page (M7e).
+        self._scenes_page = ScenesPage(self._model.views, self)
+        self._scenes_page.create_requested.connect(self._on_create_view)
+        self._scenes_page.update_requested.connect(self._on_update_view)
+        self._scenes_page.delete_requested.connect(self._on_delete_view)
+        self._scenes_page.rename_requested.connect(self._on_rename_view)
+        self._scenes_page.reorder_requested.connect(self._on_reorder_view)
+        self._scenes_page.recall_requested.connect(self._on_recall_view)
 
         # Properties panel (M7.3) — Outliner over an icon-tabbed editor.
         # Must be added BEFORE restore_window_state() below: restoreState()
@@ -191,6 +186,12 @@ class MainWindow(QMainWindow):
         self._command_stack.add_change_listener(self._rebuild_outliner)
         self._rebuild_outliner()
 
+        # Materials/Tags/Scenes pages (M7.3, Task 11) — installed into the
+        # Properties panel's tab stack right after the Outliner above.
+        self._properties_dock.set_page("material", self._materials_page)
+        self._properties_dock.set_page("tags", self._tags_page)
+        self._properties_dock.set_page("scenes", self._scenes_page)
+
         # Camera tween animator (M7e). Owns the same live camera object the
         # viewport mutates in place; a manual camera move cancels a running tween.
         self._view_animator = ViewAnimator(self._viewport.camera, self._viewport.update, self)
@@ -199,9 +200,9 @@ class MainWindow(QMainWindow):
         # Document session state (path / dirty / title) + dirty signal sources.
         self._doc_controller = DocumentController()
         self._command_stack.add_change_listener(self._on_document_changed)
-        self._materials_dock.library_changed.connect(self._on_document_changed)
-        self._tags_dock.library_changed.connect(self._on_document_changed)
-        self._tags_dock.visibility_changed.connect(self._on_document_changed)
+        self._materials_page.library_changed.connect(self._on_document_changed)
+        self._tags_page.library_changed.connect(self._on_document_changed)
+        self._tags_page.visibility_changed.connect(self._on_document_changed)
 
         # NOW we can build the ToolContext that includes the viewport refs.
         self._rebuild_tool_context()
@@ -295,15 +296,14 @@ class MainWindow(QMainWindow):
         }
         self._xray_action = self._actions["view_xray"]
 
-        # Dynamic View entries: dock toggles come from the docks themselves.
+        # Dynamic View entries: the Properties panel is still a real dock, so
+        # it keeps a genuine toggleViewAction. Materials/Tags/Scenes are now
+        # tabs inside it and are declared actions instead (see actions.py).
         self._view_menu = self._menus["View"]
         self._view_menu.addSeparator()
-        self._materials_dock_action = self._materials_dock.toggleViewAction()
-        self._view_menu.addAction(self._materials_dock_action)
-        self._tags_dock_action = self._tags_dock.toggleViewAction()
-        self._view_menu.addAction(self._tags_dock_action)
-        self._scenes_dock_action = self._scenes_dock.toggleViewAction()
-        self._view_menu.addAction(self._scenes_dock_action)
+        self._properties_dock_action = self._properties_dock.toggleViewAction()
+        self._properties_dock_action.setText("Properties Panel")
+        self._view_menu.addAction(self._properties_dock_action)
 
         # Seven dockable toolbars (M7.2, Task 11), sharing the same QAction
         # objects the menus above were built from.
@@ -349,12 +349,12 @@ class MainWindow(QMainWindow):
         self._active_tag_id = tag_id
 
     def _update_selection_tag_indicator(self) -> None:
-        self._tags_dock.set_selection_tag(
+        self._tags_page.set_selection_tag(
             selection_controller.selection_tag_label(self._model, self._selection)
         )
 
     def _on_assign_tag(self) -> None:
-        """TagsDock's "Assign to Selection" button -- assigns the dock's active tag."""
+        """TagsPage's "Assign to Selection" button -- assigns the page's active tag."""
         self._assign_tag(self._active_tag_id)
 
     def _assign_tag(self, tag_id: int) -> None:
@@ -398,7 +398,7 @@ class MainWindow(QMainWindow):
             model=self._model,
             request_context_rebuild=self._on_active_context_changed,
             active_material_provider=lambda: self._model.materials.get(self._active_material_id),
-            set_active_material=self._materials_dock.set_active,
+            set_active_material=self._materials_page.set_active,
         )
         self._tool_manager.set_context(ctx)
         # Re-activate the current tool so it picks up the new context/scene.
@@ -1107,7 +1107,7 @@ class MainWindow(QMainWindow):
         self._refresh_selection_status()
         self._rebuild_tool_context()
         self._refresh_breadcrumb()
-        self._scenes_dock.refresh()
+        self._scenes_page.refresh()
 
     def _prune_selection(self) -> None:
         """Keep only selected entities still live in the active context (#46)."""
@@ -1128,6 +1128,23 @@ class MainWindow(QMainWindow):
         """Forget the saved layout and reapply the default arrangement live."""
         reset_window_state(self._settings)
         self.restoreState(self._default_window_state, WINDOW_STATE_VERSION)
+
+    # --- Properties tabs (M7.3, Task 11) ----------------------------------
+
+    def _show_properties_tab(self, tab_id: str) -> None:
+        """Reveal the panel (it may be closed) and focus one tab."""
+        self._properties_dock.show()
+        self._properties_dock.raise_()
+        self._properties_dock.show_tab(tab_id)
+
+    def _on_show_material_tab(self) -> None:
+        self._show_properties_tab("material")
+
+    def _on_show_tags_tab(self) -> None:
+        self._show_properties_tab("tags")
+
+    def _on_show_scenes_tab(self) -> None:
+        self._show_properties_tab("scenes")
 
     # --- Scenes (M7e) ----------------------------------------------------
 
@@ -1150,7 +1167,7 @@ class MainWindow(QMainWindow):
             self._render_style,
         )
         self._command_stack.execute(CreateViewCommand(view), self._model)
-        self._scenes_dock.refresh(select_id=view.id)
+        self._scenes_page.refresh(select_id=view.id)
 
     def _on_update_view(self, view_id: int) -> None:
         old = self._model.views.get(int(view_id))
@@ -1160,22 +1177,22 @@ class MainWindow(QMainWindow):
             old.id, old.name, self._viewport.camera, self._model.tags, self._render_style
         )
         self._command_stack.execute(UpdateViewCommand(old.id, new_view), self._model)
-        self._scenes_dock.refresh(select_id=old.id)
+        self._scenes_page.refresh(select_id=old.id)
 
     def _on_delete_view(self, view_id: int) -> None:
         if self._model.views.get(int(view_id)) is None:
             return
         self._command_stack.execute(DeleteViewCommand(int(view_id)), self._model)
-        self._scenes_dock.refresh()
+        self._scenes_page.refresh()
 
     def _on_rename_view(self, view_id: int, name: str) -> None:
         name = str(name).strip()
         old = self._model.views.get(int(view_id))
         if old is None or not name or name == old.name:
-            self._scenes_dock.refresh(select_id=int(view_id))
+            self._scenes_page.refresh(select_id=int(view_id))
             return
         self._command_stack.execute(RenameViewCommand(int(view_id), name), self._model)
-        self._scenes_dock.refresh(select_id=int(view_id))
+        self._scenes_page.refresh(select_id=int(view_id))
 
     def _on_reorder_view(self, view_id: int, direction: int) -> None:
         vid = int(view_id)
@@ -1184,7 +1201,7 @@ class MainWindow(QMainWindow):
         if index < 0 or target < 0 or target >= len(self._model.views.views()):
             return
         self._command_stack.execute(ReorderViewCommand(vid, int(direction)), self._model)
-        self._scenes_dock.refresh(select_id=vid)
+        self._scenes_page.refresh(select_id=vid)
 
     def _on_recall_view(self, view_id: int) -> None:
         view = self._model.views.get(int(view_id))
@@ -1192,7 +1209,7 @@ class MainWindow(QMainWindow):
             return
         apply_tags_and_style(view, self._model.tags, self._render_style)
         self._sync_render_style_ui()
-        self._tags_dock.refresh()
+        self._tags_page.refresh()
         from_state = CameraState.from_camera(self._viewport.camera)
         self._view_animator.start(from_state, view.camera)
 
@@ -1396,9 +1413,9 @@ class MainWindow(QMainWindow):
         from dataclasses import replace
 
         self._model.load_from(model)
-        self._materials_dock.set_library(self._model.materials)
-        self._tags_dock.set_library(self._model.tags)
-        self._scenes_dock.set_library(self._model.views)
+        self._materials_page.set_library(self._model.materials)
+        self._tags_page.set_library(self._model.tags)
+        self._scenes_page.set_library(self._model.views)
         camera_state.apply_to(self._viewport.camera)
         self._view_animator.cancel()
         self._render_style = replace(style)

@@ -1,5 +1,5 @@
 from pluton.io.document_codec import CameraState
-from pluton.ui.scenes_dock import ScenesDock
+from pluton.ui.scenes_page import ScenesPage
 from pluton.views.saved_view import SavedView
 from pluton.views.view_library import ViewLibrary
 
@@ -17,7 +17,7 @@ def _lib(names=("Front", "Top")):
 
 
 def test_lists_scene_names_with_ids(qtbot):
-    dock = ScenesDock(_lib(), None)
+    dock = ScenesPage(_lib(), None)
     qtbot.addWidget(dock)
     assert dock._list.count() == 2
     from PySide6.QtCore import Qt
@@ -26,14 +26,14 @@ def test_lists_scene_names_with_ids(qtbot):
 
 
 def test_add_button_emits_create(qtbot):
-    dock = ScenesDock(_lib(), None)
+    dock = ScenesPage(_lib(), None)
     qtbot.addWidget(dock)
     with qtbot.waitSignal(dock.create_requested, timeout=500):
         dock._add_btn.click()
 
 
 def test_delete_emits_selected_id(qtbot):
-    dock = ScenesDock(_lib(), None)
+    dock = ScenesPage(_lib(), None)
     qtbot.addWidget(dock)
     dock._list.setCurrentRow(1)                 # select "Top" (id 1)
     with qtbot.waitSignal(dock.delete_requested, timeout=500) as blocker:
@@ -42,7 +42,7 @@ def test_delete_emits_selected_id(qtbot):
 
 
 def test_reorder_buttons_emit_direction(qtbot):
-    dock = ScenesDock(_lib(), None)
+    dock = ScenesPage(_lib(), None)
     qtbot.addWidget(dock)
     dock._list.setCurrentRow(0)
     with qtbot.waitSignal(dock.reorder_requested, timeout=500) as down:
@@ -54,7 +54,7 @@ def test_reorder_buttons_emit_direction(qtbot):
 
 
 def test_click_recalls(qtbot):
-    dock = ScenesDock(_lib(), None)
+    dock = ScenesPage(_lib(), None)
     qtbot.addWidget(dock)
     item = dock._list.item(1)
     with qtbot.waitSignal(dock.recall_requested, timeout=500) as blocker:
@@ -63,7 +63,7 @@ def test_click_recalls(qtbot):
 
 
 def test_double_click_rename_emits(qtbot):
-    dock = ScenesDock(_lib(), None)
+    dock = ScenesPage(_lib(), None)
     qtbot.addWidget(dock)
     item = dock._list.item(0)
     with qtbot.waitSignal(dock.rename_requested, timeout=500) as blocker:
@@ -72,7 +72,7 @@ def test_double_click_rename_emits(qtbot):
 
 
 def test_buttons_disabled_when_empty(qtbot):
-    dock = ScenesDock(ViewLibrary(), None)
+    dock = ScenesPage(ViewLibrary(), None)
     qtbot.addWidget(dock)
     assert dock._add_btn.isEnabled()
     assert not dock._delete_btn.isEnabled()
@@ -82,7 +82,7 @@ def test_buttons_disabled_when_empty(qtbot):
 
 
 def test_set_library_rebinds(qtbot):
-    dock = ScenesDock(_lib(("A",)), None)
+    dock = ScenesPage(_lib(("A",)), None)
     qtbot.addWidget(dock)
     assert dock._list.count() == 1
     dock.set_library(_lib(("X", "Y", "Z")))

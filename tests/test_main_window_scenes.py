@@ -8,11 +8,11 @@ def _make_window(qtbot):
     return win
 
 
-def test_create_scene_adds_to_library_and_dock(qtbot):
+def test_create_scene_adds_to_library_and_page(qtbot):
     win = _make_window(qtbot)
     win._on_create_view()
     assert len(win._model.views.views()) == 1
-    assert win._scenes_dock._list.count() == 1
+    assert win._scenes_page._list.count() == 1
 
 
 def test_recall_applies_style_and_starts_animation(qtbot):

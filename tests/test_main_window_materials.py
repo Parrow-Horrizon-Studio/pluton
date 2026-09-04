@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 from pluton.ui.main_window import MainWindow
-from pluton.ui.materials_dock import MaterialsDock
+from pluton.ui.materials_page import MaterialsPage
 
 
 @pytest.fixture
@@ -12,8 +12,8 @@ def win(qtbot):
     return w
 
 
-def test_main_window_has_materials_dock(win):
-    assert isinstance(win._materials_dock, MaterialsDock)
+def test_main_window_has_materials_page(win):
+    assert isinstance(win._materials_page, MaterialsPage)
 
 
 def test_paint_tool_registered_under_b(win):
@@ -29,9 +29,9 @@ def test_tool_context_exposes_material_hooks(win):
     assert ctx.active_material_provider().id == win._model.materials.DEFAULT_ID
 
 
-def test_dock_selection_updates_active_material_id(win):
+def test_page_selection_updates_active_material_id(win):
     brick = next(m for m in win._model.materials.materials() if m.name == "Brick Red")
-    win._materials_dock._on_pick(brick.id)
+    win._materials_page._on_pick(brick.id)
     assert win._active_material_id == brick.id
 
 
@@ -50,19 +50,3 @@ def test_paint_tool_status_text_refreshes_without_error(win):
     text = win._status_bar.text()
     assert isinstance(text, str)
     assert "Paint" in text
-
-
-def test_view_menu_has_materials_dock_toggle(win):
-    # The toggle action is registered in the View menu and controls the dock.
-    assert win._materials_dock_action in win._view_menu.actions()
-    assert win._materials_dock_action.isCheckable()
-    # Closing the dock (== its close button) unchecks the action.
-    # (Use isHidden()/action-checked rather than isVisible(), which is always
-    # False here because the offscreen top-level window is never shown.)
-    win._materials_dock.hide()
-    assert win._materials_dock.isHidden()
-    assert not win._materials_dock_action.isChecked()
-    # Triggering the menu action re-shows the dock.
-    win._materials_dock_action.trigger()
-    assert not win._materials_dock.isHidden()
-    assert win._materials_dock_action.isChecked()

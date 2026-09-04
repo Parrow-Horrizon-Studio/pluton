@@ -1,11 +1,11 @@
-"""The Materials dock (M5b): a swatch grid for choosing the active material."""
+"""The Materials page (M5b, a Properties tab since M7.3): a swatch grid for
+choosing the active material."""
 
 from __future__ import annotations
 
 from PySide6.QtCore import Signal
 from PySide6.QtWidgets import (
     QColorDialog,
-    QDockWidget,
     QGridLayout,
     QPushButton,
     QVBoxLayout,
@@ -25,24 +25,19 @@ def _swatch_style(color: tuple[float, float, float], active: bool) -> str:
     )
 
 
-class MaterialsDock(QDockWidget):
+class MaterialsPage(QWidget):
     """Swatch grid + custom-color button. Emits active_material_changed(Material)."""
 
     active_material_changed = Signal(object)  # emits a Material
     library_changed = Signal()
 
     def __init__(self, library: MaterialLibrary, parent=None) -> None:
-        super().__init__("Materials", parent)
-        # QMainWindow.saveState() silently drops docks without an object name
-        # (see tests/test_ui_builder_toolbars.py for the toolbar equivalent).
-        # This name is a persistence key: never rename it, or saved layouts
-        # silently lose this dock's state.
-        self.setObjectName("materials_dock")
+        super().__init__(parent)
         self._library = library
         self._active_id = MaterialLibrary.DEFAULT_ID
         self._buttons: dict[int, QPushButton] = {}
 
-        container = QWidget(self)
+        container = self
         outer = QVBoxLayout(container)
         self._grid = QGridLayout()
         outer.addLayout(self._grid)
@@ -50,7 +45,6 @@ class MaterialsDock(QDockWidget):
         custom.clicked.connect(self._on_custom)
         outer.addWidget(custom)
         outer.addStretch(1)
-        self.setWidget(container)
 
         self._rebuild_swatches()
 

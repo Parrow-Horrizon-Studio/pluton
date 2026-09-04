@@ -1,12 +1,12 @@
-# python/pluton/ui/tags_dock.py
-"""The Tags dock (M5c): a list panel for object tags + per-tag visibility."""
+# python/pluton/ui/tags_page.py
+"""The Tags page (M5c, a Properties tab since M7.3): a list panel for object
+tags + per-tag visibility."""
 
 from __future__ import annotations
 
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
     QAbstractItemView,
-    QDockWidget,
     QLabel,
     QListWidget,
     QListWidgetItem,
@@ -18,8 +18,10 @@ from PySide6.QtWidgets import (
 from pluton.model.tag import TagLibrary
 
 
-class TagsDock(QDockWidget):
-    """Tag list (checkbox = visibility, selected row = active tag) + Add/Assign buttons."""
+class TagsPage(QWidget):
+    """Tag list (checkbox = visibility, selected row = active tag) + Add/Assign
+    buttons. A Properties tab page since M7.3 -- it was a QDockWidget through
+    v0.4.0, which is why its layout was built into a child `container`."""
 
     active_tag_changed = Signal(int)
     visibility_changed = Signal()
@@ -27,17 +29,12 @@ class TagsDock(QDockWidget):
     library_changed = Signal()
 
     def __init__(self, library: TagLibrary, parent=None) -> None:
-        super().__init__("Tags", parent)
-        # QMainWindow.saveState() silently drops docks without an object name
-        # (see tests/test_ui_builder_toolbars.py for the toolbar equivalent).
-        # This name is a persistence key: never rename it, or saved layouts
-        # silently lose this dock's state.
-        self.setObjectName("tags_dock")
+        super().__init__(parent)
         self._library = library
         self._active_id = TagLibrary.UNTAGGED_ID
         self._rebuilding = False
 
-        container = QWidget(self)
+        container = self
         layout = QVBoxLayout(container)
         self._selection_label = QLabel("Selection: —", container)
         layout.addWidget(self._selection_label)
@@ -52,7 +49,6 @@ class TagsDock(QDockWidget):
         assign_btn = QPushButton("Assign to Selection", container)
         assign_btn.clicked.connect(self._on_assign)
         layout.addWidget(assign_btn)
-        self.setWidget(container)
 
         self._rebuild()
 
