@@ -44,7 +44,6 @@ class StatusBar(QWidget):
         super().__init__()
         self._tool: str = ""
         self._snap: str = ""
-        self._status: str = ""
         self._selection: str = ""
         self._breadcrumb: str = ""
         self._message: str = ""
@@ -85,8 +84,7 @@ class StatusBar(QWidget):
 
     def set_status(self, text: str) -> None:
         """The Measurements box content (typed value, or a tool's read-out)."""
-        self._status = text or ""
-        self._measurements.setText(self._status)
+        self._measurements.setText(text or "")
 
     def set_message(self, text: str) -> None:
         """A one-line notice for the prompt area -- not a measurement."""

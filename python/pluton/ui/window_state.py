@@ -31,7 +31,11 @@ STATE_KEY = "window/state"
 # Bump when the set of toolbars or docks changes. Qt's restoreState() compares
 # this against the saved value and refuses a mismatch, so an old layout is
 # discarded cleanly instead of being half-applied.
-WINDOW_STATE_VERSION = 1
+#
+# 1 -> 2 (M7.3): the Materials, Tags and Scenes docks became tabs inside one
+# Properties dock. A v1 blob names three docks that no longer exist, and
+# restoring it would leave the new panel unplaced.
+WINDOW_STATE_VERSION = 2
 
 
 def save_window_state(window: QMainWindow, settings: QSettings) -> None:

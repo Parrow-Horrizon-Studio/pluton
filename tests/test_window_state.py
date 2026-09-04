@@ -157,3 +157,18 @@ def test_dock_visibility_and_floating_state_survive_a_round_trip(qtbot, tmp_path
     assert window_state.restore_window_state(restored, settings) is True
     assert restored._properties_dock.isHidden()
     assert restored._properties_dock.isFloating()
+
+
+def test_a_version_1_layout_is_refused(qtbot, tmp_path):
+    """A blob written before the dock consolidation must be discarded whole.
+
+    Qt returns False for a version mismatch rather than partially applying,
+    which is exactly why the constant exists -- without the bump, restoreState
+    would try to place three docks that no longer exist.
+    """
+    settings = _settings(tmp_path)
+    window = _window(qtbot)
+    settings.setValue(window_state.GEOMETRY_KEY, window.saveGeometry())
+    settings.setValue(window_state.STATE_KEY, window.saveState(1))
+
+    assert window_state.restore_window_state(_window(qtbot), settings) is False

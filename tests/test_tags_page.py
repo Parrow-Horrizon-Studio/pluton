@@ -12,7 +12,7 @@ def lib():
     return TagLibrary()
 
 
-def test_dock_lists_untagged_first(qtbot, lib):
+def test_page_lists_untagged_first(qtbot, lib):
     lib.add("Walls")
     dock = TagsPage(lib)
     qtbot.addWidget(dock)

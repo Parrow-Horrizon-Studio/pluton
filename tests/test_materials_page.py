@@ -10,7 +10,7 @@ def lib():
     return MaterialLibrary()
 
 
-def test_dock_builds_a_swatch_per_material(qtbot, lib):
+def test_page_builds_a_swatch_per_material(qtbot, lib):
     dock = MaterialsPage(lib)
     qtbot.addWidget(dock)
     assert len(dock._buttons) == len(lib.materials())
