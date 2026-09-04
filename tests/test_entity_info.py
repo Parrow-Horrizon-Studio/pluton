@@ -23,6 +23,47 @@ def _square(model, size=1.0):
     return scene.add_face_from_loop(v)
 
 
+def _right_triangle(model, leg=2.0):
+    """A right triangle whose own vertex hull is NOT its local AABB.
+
+    Its local bounding box is the full `leg x leg` square, but the triangle
+    itself only occupies half of that box (there is no vertex at the
+    box's fourth corner). That makes it a discriminating fixture for
+    rotated-extent tests: an implementation that (incorrectly) transforms
+    the local AABB's corners drags the box's untouched fourth corner along
+    for the ride and reports a larger rotated extent than the triangle's
+    actual vertices produce.
+    """
+    scene = model.active_context.mesh
+    v = [
+        scene.add_vertex(np.array([0.0, 0.0, 0.0], dtype=np.float32)),
+        scene.add_vertex(np.array([leg, 0.0, 0.0], dtype=np.float32)),
+        scene.add_vertex(np.array([0.0, leg, 0.0], dtype=np.float32)),
+    ]
+    return scene.add_face_from_loop(v)
+
+
+def _tilted_square(model):
+    """A unit square lying in a plane that is not aligned to any coordinate
+    plane, built from a 3-4-5 triangle so the coordinates -- and the exact
+    area -- are exact rationals rather than trig approximations.
+
+    Starts as a unit square in the XZ-plane (y=0) and rotates it about the
+    X-axis by the 3-4-5 angle (sin=3/5, cos=4/5). Rotation is an isometry,
+    so the tilted square's true area is still exactly 1 -- but its normal
+    (0, -4/5, -3/5) has no zero component along Y or Z, so it is genuinely
+    tilted rather than flat in a coordinate plane.
+    """
+    scene = model.active_context.mesh
+    v = [
+        scene.add_vertex(np.array([0.0, 0.0, 0.0], dtype=np.float32)),
+        scene.add_vertex(np.array([1.0, 0.0, 0.0], dtype=np.float32)),
+        scene.add_vertex(np.array([1.0, -0.6, 0.8], dtype=np.float32)),
+        scene.add_vertex(np.array([0.0, -0.6, 0.8], dtype=np.float32)),
+    ]
+    return scene.add_face_from_loop(v)
+
+
 def test_nothing_selected(model_factory):
     summary = entity_summary(model_factory(), Selection())
     assert summary.kind == "Nothing"
@@ -42,6 +83,22 @@ def test_one_face_reports_its_area_and_material(model_factory):
     assert summary.area == pytest.approx(4.0)
     assert summary.material_id == model.active_context.mesh.face_material(face_id)
     assert summary.length is None
+
+
+def test_tilted_face_reports_its_true_area(model_factory):
+    # _polygon_area (Newell's method) is correct for a polygon in any plane,
+    # but the only other area test lies flat in the XY plane, so a sign/axis
+    # bug in picking which plane to project onto would slip through. This
+    # face is a unit square tilted out of every coordinate plane; rotation
+    # is an isometry, so its true area is still exactly 1 despite the tilt.
+    model = model_factory()
+    face_id = _tilted_square(model)
+    selection = Selection()
+    selection.replace(faces=[face_id])
+
+    summary = entity_summary(model, selection)
+
+    assert summary.area == pytest.approx(1.0)
 
 
 def test_one_edge_reports_its_length(model_factory):
@@ -128,10 +185,19 @@ def test_selection_bounds_is_none_without_instances(model_factory):
 
 
 def test_selection_bounds_measures_transformed_extents(model_factory, group_factory):
-    # A rotated instance is exactly where scaling a local AABB goes wrong, so
-    # the bounds must come from actual transformed vertices.
+    # A plain square is a bad fixture here: its own vertices ARE its local
+    # AABB's corners, so a spec-violating "transform the local AABB's 8
+    # corners" shortcut produces the identical result to the correct
+    # "transform every actual vertex" approach for a square. A right
+    # triangle discriminates: its local AABB is the full 2x2 square, but the
+    # triangle only occupies half of it (see _right_triangle). Rotating the
+    # box's untouched fourth corner along with the real vertices inflates
+    # the AABB-shortcut's Y-extent to 2*sqrt(2); the true vertex-derived
+    # Y-extent is only sqrt(2). (X happens to agree between the two
+    # approaches for this particular triangle -- Y is what actually catches
+    # the bug.)
     model = model_factory()
-    _square(model, size=2.0)
+    _right_triangle(model, leg=2.0)
     instance = group_factory(model)
     angle = math.radians(45.0)
     rotation = np.eye(4, dtype=np.float64)
@@ -145,9 +211,8 @@ def test_selection_bounds_measures_transformed_extents(model_factory, group_fact
 
     lo, hi = selection_bounds(model, selection)
 
-    # A 2x2 square turned 45 degrees spans 2*sqrt(2) on both X and Y.
     assert float(hi[0] - lo[0]) == pytest.approx(2.0 * math.sqrt(2.0), abs=1e-4)
-    assert float(hi[1] - lo[1]) == pytest.approx(2.0 * math.sqrt(2.0), abs=1e-4)
+    assert float(hi[1] - lo[1]) == pytest.approx(math.sqrt(2.0), abs=1e-4)
 
 
 def test_summary_size_comes_from_selection_bounds(model_factory, group_factory):
