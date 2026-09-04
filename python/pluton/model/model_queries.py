@@ -1,14 +1,17 @@
-"""Read-only queries over the model graph (M7.2).
+"""Read-only queries over the model graph (M7.2, extended M7.3).
 
-Both functions are pure: they walk the graph and return plain data, mutating
+Every function is pure: they walk the graph and return plain data, mutating
 nothing. select_all_ids backs Edit > Select All; model_bounds backs
-View > Zoom Extents.
+View > Zoom Extents; outliner_rows and instance_path back the M7.3 Outliner;
+selection_bounds backs Entity Info's dimensions read-out.
 
-Both honour the active editing context and tag visibility, so they agree with
-what the user can actually see and click.
+All honour the active editing context and visibility, so they agree with what
+the user can actually see and click.
 """
 
 from __future__ import annotations
+
+from dataclasses import dataclass
 
 import numpy as np
 
@@ -67,3 +70,82 @@ def model_bounds(model) -> tuple[np.ndarray, np.ndarray] | None:
     if lo is None:
         return None
     return lo, hi
+
+
+@dataclass(frozen=True, slots=True)
+class OutlinerRow:
+    """One Outliner line. Plain data -- no Qt, no Instance reference.
+
+    The three visibility fields are deliberately separate. `hidden` is the
+    instance's own flag and the only one the eye toggle writes;
+    `inherited_hidden` says an ancestor is hidden; `tag_hidden` says its tag
+    is switched off. A row dimmed by either of the latter two will NOT come
+    back when its eye is clicked, so a widget that rendered all three the
+    same would misrepresent what the click does.
+
+    Selection is deliberately absent: it changes many times a second during a
+    box-select drag, and the widget can apply highlight from Selection itself
+    without rebuilding every row.
+    """
+
+    instance_id: int
+    depth: int
+    label: str
+    is_component: bool
+    hidden: bool
+    inherited_hidden: bool
+    tag_hidden: bool
+    on_active_path: bool
+
+
+def outliner_rows(model) -> tuple[OutlinerRow, ...]:
+    """Every instance in the model, depth-first, parents before children.
+
+    That order is the tree's render order: a consumer rebuilds the hierarchy
+    by tracking `depth` with a running stack. The root context is NOT a row --
+    it has no Instance, so giving it one would mean an instance_id matching
+    nothing, which every consumer would then special-case.
+    """
+    active_ids = {inst.id for inst in model.active_path}
+    rows: list[OutlinerRow] = []
+
+    def walk(definition, depth: int, ancestor_hidden: bool) -> None:
+        for inst in definition.children:
+            hidden = bool(inst.hidden)
+            rows.append(
+                OutlinerRow(
+                    instance_id=inst.id,
+                    depth=depth,
+                    label=inst.name or inst.definition.name,
+                    is_component=not inst.definition.is_group,
+                    hidden=hidden,
+                    inherited_hidden=ancestor_hidden,
+                    tag_hidden=not model.tags.is_visible(inst.tag_id),
+                    on_active_path=inst.id in active_ids,
+                )
+            )
+            walk(inst.definition, depth + 1, ancestor_hidden or hidden)
+
+    walk(model.root, 0, False)
+    return tuple(rows)
+
+
+def instance_path(model, instance_id: int) -> tuple | None:
+    """Root-first ancestor chain ending at `instance_id`, or None if unreachable.
+
+    Returns real Instance objects, not ids, because Model.enter() appends one
+    instance at a time and revalidate_active_path() checks each against its
+    parent's children list.
+    """
+
+    def walk(definition, prefix: tuple):
+        for inst in definition.children:
+            chain = (*prefix, inst)
+            if inst.id == instance_id:
+                return chain
+            found = walk(inst.definition, chain)
+            if found is not None:
+                return found
+        return None
+
+    return walk(model.root, ())
