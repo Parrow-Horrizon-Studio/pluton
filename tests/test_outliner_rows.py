@@ -101,6 +101,45 @@ def test_hidden_is_own_flag_and_inherited_hidden_propagates(model_factory, group
     assert by_id[inner.id].inherited_hidden is True
 
 
+def test_inherited_hidden_reaches_a_grandchild_through_a_parent(model_factory, group_factory):
+    # Three genuine levels: outer > middle > inner. The recursive walk ORs
+    # ancestor_hidden down through each call (`ancestor_hidden or hidden`), so
+    # a bug that only propagated one level (e.g. passing `hidden` instead of
+    # the accumulated `ancestor_hidden or hidden`) would show up only here --
+    # the two-level test above can't distinguish "propagates one level" from
+    # "propagates all the way down". Depth is checked at all three levels too,
+    # since Task 5 never had a test past depth 1.
+    model = model_factory()
+    _square(model)
+    outer = group_factory(model)
+    model.enter(outer)
+    _square(model)
+    middle = group_factory(model)
+    model.enter(middle)
+    _square(model)
+    inner = group_factory(model)
+    model.exit_one()
+    model.exit_one()
+    outer.hidden = True
+
+    by_id = {r.instance_id: r for r in outliner_rows(model)}
+
+    assert by_id[outer.id].depth == 0
+    assert by_id[middle.id].depth == 1
+    assert by_id[inner.id].depth == 2
+
+    assert by_id[outer.id].hidden is True
+    assert by_id[outer.id].inherited_hidden is False
+
+    # Neither descendant's own flag moved; only inherited_hidden did, and it
+    # reaches the grandchild exactly like it reaches the immediate child.
+    assert by_id[middle.id].hidden is False
+    assert by_id[middle.id].inherited_hidden is True
+
+    assert by_id[inner.id].hidden is False
+    assert by_id[inner.id].inherited_hidden is True
+
+
 def test_tag_hidden_is_independent_of_hidden(model_factory, group_factory):
     model = model_factory()
     _square(model)

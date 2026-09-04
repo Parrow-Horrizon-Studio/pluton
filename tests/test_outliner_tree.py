@@ -72,29 +72,43 @@ def test_selecting_a_row_emits_its_instance_id(qtbot):
 
 def test_set_selected_ids_does_not_emit(qtbot):
     # Called on every selection change, including mid box-drag: it must not
-    # bounce a signal back at the caller that just set the selection.
+    # bounce a signal back at the caller that just set the selection, and it
+    # must not rebuild -- isSelected() alone can't tell a real in-place select
+    # apart from a rebuild-then-reselect, so identity is asserted too.
     tree = _tree(qtbot, [_row(5)])
+    item = tree.item_for(5)
     seen = []
     tree.instance_clicked.connect(seen.append)
 
     tree.set_selected_ids({5})
 
     assert tree.item_for(5).isSelected()
+    assert tree.item_for(5) is item
     assert seen == []
 
 
 def test_set_selected_ids_clears_a_previous_highlight(qtbot):
     tree = _tree(qtbot, [_row(1), _row(2)])
+    item1 = tree.item_for(1)
+    item2 = tree.item_for(2)
     tree.set_selected_ids({1})
 
     tree.set_selected_ids({2})
 
     assert not tree.item_for(1).isSelected()
     assert tree.item_for(2).isSelected()
+    # Same objects throughout -- a rebuild-then-reselect would swap these out
+    # for new QTreeWidgetItems and still satisfy the isSelected() checks above.
+    assert tree.item_for(1) is item1
+    assert tree.item_for(2) is item2
 
 
 def test_rebuilding_rows_does_not_emit_a_selection_signal(qtbot):
+    # A prior selection is essential here: with nothing selected, Qt emits no
+    # itemSelectionChanged during a rebuild regardless of the _applying guard,
+    # so that case can't tell a real guard from a missing one.
     tree = _tree(qtbot, [_row(1)])
+    tree.setCurrentItem(tree.item_for(1))
     seen = []
     tree.instance_clicked.connect(seen.append)
 
@@ -191,9 +205,16 @@ def test_a_component_row_gets_a_different_icon_than_a_group(qtbot):
 #
 # Task 5's row derivation shipped with a reviewer-confirmed coverage gap:
 # nothing tested depth or inherited_hidden at three or more levels
-# (grandparent -> parent -> grandchild). The running-stack reconstruction in
-# this widget has exactly the same exposure -- it is exercised here because
-# synthetic rows make it cheap, with no model required.
+# (grandparent -> parent -> grandchild). That gap lives in
+# model_queries.outliner_rows (see tests/test_outliner_rows.py) -- this widget
+# only renders whatever inherited_hidden Task 5 already computed for each row;
+# _apply_visibility is a per-row `inherited_hidden or tag_hidden` OR with no
+# reference to tree position or ancestor state, so it has nothing depth-
+# dependent to exercise. A three-level "does dimming reach a grandchild" test
+# here would combine two facts already proven independently -- structural
+# nesting (below) and the OR itself (test_an_inherited_hidden_row_is_greyed...
+# above) -- without adding coverage, so it was removed rather than kept
+# alongside a redundant assertion.
 
 
 def test_rows_nest_three_levels_deep(qtbot):
@@ -218,23 +239,3 @@ def test_rows_nest_three_levels_deep(qtbot):
     grandchild = parent.child(0)
     assert grandchild.text(0) == "Grandchild"
     assert grandchild.childCount() == 0
-
-
-def test_inherited_hidden_reaches_a_grandchild(qtbot):
-    # A depth-0 ancestor being hidden should be reflected on a row two levels
-    # down via inherited_hidden -- the same propagation depth Task 5's
-    # derivation never had a test for.
-    tree = _tree(
-        qtbot,
-        [
-            _row(1, depth=0, label="Grandparent", hidden=True),
-            _row(2, depth=1, label="Parent", inherited_hidden=True),
-            _row(3, depth=2, label="Grandchild", inherited_hidden=True),
-        ],
-    )
-    grandchild = tree.item_for(3)
-
-    # Own hidden flag is untouched by the ancestor's state...
-    assert grandchild.data(OutlinerTree.LABEL_COLUMN, Qt.ItemDataRole.UserRole + 1) is False
-    # ...but the dimming still reaches two levels down.
-    assert tree.is_dimmed(grandchild)
