@@ -59,6 +59,7 @@ from pluton.tools.wall_tool import WallTool
 from pluton.ui import selection_controller
 from pluton.ui.cursors import cursor_for
 from pluton.ui.document_controller import DocumentController
+from pluton.ui.entity_info_page import EntityInfoPage
 from pluton.ui.materials_page import MaterialsPage
 from pluton.ui.opening_options_bar import OpeningOptionsBar
 from pluton.ui.outliner_tree import OutlinerTree
@@ -192,6 +193,17 @@ class MainWindow(QMainWindow):
         self._properties_dock.set_page("material", self._materials_page)
         self._properties_dock.set_page("tags", self._tags_page)
         self._properties_dock.set_page("scenes", self._scenes_page)
+
+        # Entity Info page (M7.3, Task 13) -- reports what is selected and
+        # edits the few properties that already have commands behind them.
+        # The page emits intent only; MainWindow routes each signal through
+        # the command stack below, exactly as the pages above do.
+        self._entity_info_page = EntityInfoPage(self._properties_dock)
+        self._properties_dock.set_page("entity_info", self._entity_info_page)
+        self._entity_info_page.rename_requested.connect(self._on_entity_rename)
+        self._entity_info_page.hidden_requested.connect(self._on_entity_hidden)
+        self._entity_info_page.tag_requested.connect(self._assign_tag)
+        self._entity_info_page.material_requested.connect(self._on_entity_material)
 
         # Camera tween animator (M7e). Owns the same live camera object the
         # viewport mutates in place; a manual camera move cancels a running tween.
@@ -1012,6 +1024,7 @@ class MainWindow(QMainWindow):
     def _refresh_selection_status(self) -> None:
         self._status_bar.set_selection(selection_controller.selection_status_text(self._selection))
         self._sync_outliner_selection()
+        self._refresh_entity_info()
 
     def _refresh_breadcrumb(self) -> None:
         """Task 15: rebuild the breadcrumb from model.active_path and push to status bar.
@@ -1110,6 +1123,50 @@ class MainWindow(QMainWindow):
         if instance.name == new_name.strip():
             return
         self._command_stack.execute(RenameInstanceCommand(instance, new_name), self._model)
+
+    # --- Entity Info (M7.3, Task 13) --------------------------------------
+
+    def _refresh_entity_info(self) -> None:
+        from pluton.model.entity_info import entity_summary
+
+        self._entity_info_page.refresh(
+            entity_summary(self._model, self._selection),
+            self._doc.units,
+            self._model.tags,
+            self._model.materials,
+        )
+
+    def _on_entity_rename(self, new_name: str) -> None:
+        from pluton.commands.naming_commands import RenameInstanceCommand
+
+        instances = selection_controller.selected_instances(self._model, self._selection)
+        if len(instances) != 1 or instances[0].name == new_name.strip():
+            return
+        self._command_stack.execute(RenameInstanceCommand(instances[0], new_name), self._model)
+
+    def _on_entity_hidden(self, hidden: bool) -> None:
+        from pluton.commands.visibility_commands import HideInstancesCommand
+
+        instances = selection_controller.selected_instances(self._model, self._selection)
+        if not instances:
+            return
+        self._command_stack.execute(HideInstancesCommand(instances, hidden), self._model)
+        self._viewport.update()
+
+    def _on_entity_material(self, material_id: int) -> None:
+        from pluton.commands import CompositeCommand
+        from pluton.commands.material_commands import PaintFaceCommand
+
+        face_ids = sorted(self._selection.faces)
+        if not face_ids:
+            return
+        # PaintFaceCommand targets the SCENE, not the model, and paints one
+        # face -- so a multi-face selection composes into a single undo step.
+        composite = CompositeCommand(
+            name="Paint", children=[PaintFaceCommand(f_id, material_id) for f_id in face_ids]
+        )
+        self._command_stack.execute(composite, self._model.active_scene)
+        self._viewport.update()
 
     def _on_after_undo_redo(self) -> None:
         """Called by CommandStack listeners after every successful undo or redo."""

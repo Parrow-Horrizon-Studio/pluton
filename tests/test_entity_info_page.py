@@ -1,0 +1,241 @@
+"""The Entity Info page renders a summary and emits edit intents (M7.3 Task 13)."""
+
+from __future__ import annotations
+
+import numpy as np
+from pluton.model.entity_info import EntitySummary
+from pluton.model.material import MaterialLibrary
+from pluton.model.tag import TagLibrary
+from pluton.ui.entity_info_page import EntityInfoPage
+from pluton.units import Units
+
+
+def _page(qtbot):
+    page = EntityInfoPage()
+    qtbot.addWidget(page)
+    return page
+
+
+def _refresh(page, summary):
+    page.refresh(summary, Units(), TagLibrary(), MaterialLibrary())
+
+
+def _square(window):
+    scene = window._model.active_context.mesh
+    v = [
+        scene.add_vertex(np.array([0.0, 0.0, 0.0], dtype=np.float32)),
+        scene.add_vertex(np.array([1.0, 0.0, 0.0], dtype=np.float32)),
+        scene.add_vertex(np.array([1.0, 1.0, 0.0], dtype=np.float32)),
+        scene.add_vertex(np.array([0.0, 1.0, 0.0], dtype=np.float32)),
+    ]
+    scene.add_face_from_loop(v)
+
+
+def test_nothing_selected_reports_so(qtbot):
+    page = _page(qtbot)
+    _refresh(page, EntitySummary(kind="Nothing", count=0))
+    assert "Nothing" in page.kind_text()
+
+
+def test_every_field_is_disabled_with_no_selection(qtbot):
+    # Disabled rather than hidden: an entry that keeps its position is
+    # learnable, one that reflows between selections is not.
+    page = _page(qtbot)
+    _refresh(page, EntitySummary(kind="Nothing", count=0))
+    assert not page.name_field().isEnabled()
+    assert not page.hidden_field().isEnabled()
+    assert not page.tag_field().isEnabled()
+    assert not page.material_field().isEnabled()
+
+
+def test_a_single_group_populates_name_and_counts(qtbot):
+    page = _page(qtbot)
+    _refresh(
+        page,
+        EntitySummary(
+            kind="Group",
+            count=1,
+            name="North",
+            definition_name="Wall",
+            child_count=0,
+            edge_count=4,
+            face_count=1,
+            size=(2.0, 1.0, 3.0),
+            tag_id=0,
+            hidden=False,
+        ),
+    )
+
+    assert page.name_field().text() == "North"
+    assert page.name_field().isEnabled()
+    assert "Wall" in page.definition_text()
+    assert "4" in page.counts_text()
+
+
+def test_dimensions_are_formatted_with_the_document_units(qtbot):
+    page = _page(qtbot)
+    _refresh(page, EntitySummary(kind="Group", count=1, size=(2.0, 1.0, 3.0)))
+    text = page.size_text()
+    assert "2 m" in text and "1 m" in text and "3 m" in text
+
+
+def test_area_is_formatted_for_a_face(qtbot):
+    page = _page(qtbot)
+    _refresh(page, EntitySummary(kind="Face", count=1, area=4.0, material_id=0))
+    assert "4.00 m²" in page.measure_text()
+
+
+def test_length_is_formatted_for_an_edge(qtbot):
+    page = _page(qtbot)
+    _refresh(page, EntitySummary(kind="Edge", count=1, length=2.5))
+    assert "2.5 m" in page.measure_text()
+
+
+def test_the_name_field_is_disabled_for_a_multi_selection(qtbot):
+    page = _page(qtbot)
+    _refresh(page, EntitySummary(kind="Group", count=2, name=None, hidden=False))
+    assert not page.name_field().isEnabled()
+    assert page.hidden_field().isEnabled()
+
+
+def test_a_mixed_hidden_state_leaves_the_checkbox_partially_checked(qtbot):
+    from PySide6.QtCore import Qt
+
+    page = _page(qtbot)
+    _refresh(page, EntitySummary(kind="Group", count=2, hidden=None))
+    assert page.hidden_field().checkState() == Qt.CheckState.PartiallyChecked
+
+
+def test_committing_a_name_emits_the_intent(qtbot):
+    page = _page(qtbot)
+    _refresh(page, EntitySummary(kind="Group", count=1, name="Old", hidden=False))
+
+    page.name_field().setText("New")
+    with qtbot.waitSignal(page.rename_requested) as blocker:
+        page.name_field().editingFinished.emit()
+
+    assert blocker.args == ["New"]
+
+
+def test_refreshing_does_not_emit(qtbot):
+    # refresh() runs on every selection change; it must not look like a user
+    # edit or the panel would fire commands at itself.
+    page = _page(qtbot)
+    seen = []
+    page.rename_requested.connect(seen.append)
+    page.hidden_requested.connect(seen.append)
+    page.tag_requested.connect(seen.append)
+    page.material_requested.connect(seen.append)
+
+    _refresh(page, EntitySummary(kind="Group", count=1, name="A", tag_id=0, hidden=True))
+    _refresh(page, EntitySummary(kind="Group", count=1, name="B", tag_id=0, hidden=False))
+
+    assert seen == []
+
+
+def test_toggling_hidden_emits_the_intent(qtbot):
+    page = _page(qtbot)
+    _refresh(page, EntitySummary(kind="Group", count=1, hidden=False))
+
+    with qtbot.waitSignal(page.hidden_requested) as blocker:
+        page.hidden_field().click()
+
+    assert blocker.args == [True]
+
+
+def test_the_page_is_installed_and_renames_through_a_command(main_window):
+    _square(main_window)
+    main_window._on_select_all()
+    main_window._on_make_group()
+    instance = main_window._model.root.children[-1]
+    main_window._selection.replace(instances=[instance.id])
+    main_window._refresh_selection_status()
+
+    main_window._entity_info_page.rename_requested.emit("Renamed")
+
+    assert instance.name == "Renamed"
+    main_window._command_stack.undo()
+    assert instance.name == ""
+
+
+def test_hiding_from_the_page_goes_through_a_command(main_window):
+    _square(main_window)
+    main_window._on_select_all()
+    main_window._on_make_group()
+    instance = main_window._model.root.children[-1]
+    main_window._selection.replace(instances=[instance.id])
+    main_window._refresh_selection_status()
+
+    main_window._entity_info_page.hidden_requested.emit(True)
+
+    assert instance.hidden is True
+    main_window._command_stack.undo()
+    assert instance.hidden is False
+
+
+def test_assigning_a_tag_from_the_page_goes_through_a_command(main_window):
+    _square(main_window)
+    main_window._on_select_all()
+    main_window._on_make_group()
+    instance = main_window._model.root.children[-1]
+    main_window._selection.replace(instances=[instance.id])
+    main_window._refresh_selection_status()
+    tag = main_window._model.tags.add("Walls")
+
+    main_window._entity_info_page.tag_requested.emit(tag.id)
+
+    assert instance.tag_id == tag.id
+    main_window._command_stack.undo()
+    assert instance.tag_id == 0
+
+
+def test_a_multi_face_selections_area_renders_as_unavailable_not_zero(qtbot):
+    # Task 6: area is None (not summed) whenever more than one face is
+    # selected. The panel must show that as unavailable -- distinct from a
+    # real "0.00 m2" reading -- not silently coerce None into zero.
+    page = _page(qtbot)
+    _refresh(page, EntitySummary(kind="Face", count=2, area=None, material_id=None))
+    text = page.measure_text()
+    assert "0" not in text
+    assert text != ""
+
+
+def test_a_disagreeing_material_across_faces_shows_no_selection(qtbot):
+    # Task 6: material_id collapses to None when a multi-face selection
+    # disagrees. The combo must not fall back to showing "Default" (id 0)
+    # as if every face agreed on it -- that would misreport the selection.
+    page = _page(qtbot)
+    _refresh(page, EntitySummary(kind="Face", count=2, area=None, material_id=None))
+    assert page.material_field().currentIndex() == -1
+    assert page.material_field().isEnabled()
+
+
+def test_an_annotation_selection_disables_hidden_and_tag(qtbot):
+    # The annotation-kind branch of entity_summary (Label/Dimension) was
+    # noted as untested in Task 6. Hidden and Tag have no meaning for an
+    # annotation -- entity_summary leaves both None -- so this page must
+    # disable rather than leave them clickable with a stale value.
+    page = _page(qtbot)
+    _refresh(page, EntitySummary(kind="Label", count=1))
+    assert not page.hidden_field().isEnabled()
+    assert not page.tag_field().isEnabled()
+    assert not page.name_field().isEnabled()
+
+
+def test_painting_from_the_page_goes_through_one_undoable_command(main_window):
+    # A multi-face selection must compose into a SINGLE undo step, not one
+    # per face -- PaintFaceCommand paints exactly one face.
+    _square(main_window)
+    scene = main_window._model.active_context.mesh
+    face_ids = [f.id for f in scene.faces_iter()]
+    main_window._selection.replace(faces=face_ids)
+    main_window._refresh_selection_status()
+    material = main_window._model.materials.add_custom("Brick", (0.6, 0.3, 0.2))
+    depth = len(main_window._command_stack._undo)
+
+    main_window._entity_info_page.material_requested.emit(material.id)
+
+    assert scene.face_material(face_ids[0]) == material.id
+    assert len(main_window._command_stack._undo) == depth + 1
+    main_window._command_stack.undo()
+    assert scene.face_material(face_ids[0]) == 0
