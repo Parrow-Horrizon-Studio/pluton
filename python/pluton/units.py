@@ -11,6 +11,8 @@ from dataclasses import dataclass
 from enum import Enum
 from fractions import Fraction
 
+import numpy as np
+
 INCH_M = 0.0254
 _METRIC_FACTOR = {"mm": 0.001, "cm": 0.01, "m": 1.0}
 
@@ -178,3 +180,9 @@ def format_area(square_meters: float, units: Units) -> str:
     if units.system is UnitSystem.IMPERIAL:
         return f"{square_meters * _SQ_FT_PER_SQ_M:.2f} ft²"
     return f"{square_meters:.2f} m²"
+
+
+def format_coordinates(world_position: np.ndarray, units: Units) -> str:
+    '''"X 2 m  Y 1 m  Z 0 m" for a 3-vector, in the document's units.'''
+    x, y, z = (float(v) for v in np.asarray(world_position, dtype=np.float64).reshape(3))
+    return f"X {format_length(x, units)}  Y {format_length(y, units)}  Z {format_length(z, units)}"

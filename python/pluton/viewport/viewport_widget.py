@@ -16,8 +16,7 @@ from PySide6.QtGui import QMouseEvent, QWheelEvent
 from PySide6.QtOpenGLWidgets import QOpenGLWidget
 
 from pluton.tools.select_tool import _HOVER_EDGE_COLOR, SelectTool
-from pluton.ui.status_bar import format_coordinates
-from pluton.units import Units
+from pluton.units import Units, format_coordinates
 from pluton.viewport.camera import Camera
 from pluton.viewport.scene_renderer import SceneRenderer
 from pluton.viewport.snap_engine import SnapEngine, SnapKind

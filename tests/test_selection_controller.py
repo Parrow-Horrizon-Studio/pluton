@@ -6,7 +6,6 @@ import subprocess
 import sys
 
 import numpy as np
-import pytest
 from pluton.commands.command_stack import CommandStack
 from pluton.selection import Selection
 from pluton.ui import selection_controller as sc

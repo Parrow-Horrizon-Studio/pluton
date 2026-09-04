@@ -12,11 +12,8 @@ focus: making it focusable risks swallowing keystrokes the viewport needs.
 
 from __future__ import annotations
 
-import numpy as np
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QHBoxLayout, QLabel, QWidget
-
-from pluton.units import Units, format_length
 
 _FIELD_STYLE = (
     "QLabel { background-color: rgba(0, 0, 0, 0.5); color: #dddddd;"
@@ -29,12 +26,6 @@ _BOX_STYLE = (
 )
 
 _MEASUREMENTS_LABEL = "Measurements"
-
-
-def format_coordinates(world_position, units: Units) -> str:
-    """ "X 2 m  Y 1 m  Z 0 m" for a 3-vector, in the document's units."""
-    x, y, z = (float(v) for v in np.asarray(world_position, dtype=np.float64).reshape(3))
-    return f"X {format_length(x, units)}  Y {format_length(y, units)}  Z {format_length(z, units)}"
 
 
 class StatusBar(QWidget):

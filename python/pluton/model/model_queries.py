@@ -16,6 +16,7 @@ from dataclasses import dataclass
 import numpy as np
 
 from pluton.geometry.transforms import apply_mat
+from pluton.model.instance import Instance
 
 
 def select_all_ids(model) -> tuple[set[int], set[int], set[int]]:
@@ -173,7 +174,7 @@ def selection_bounds(model, selection) -> tuple[np.ndarray, np.ndarray] | None:
     return lo, hi
 
 
-def instance_path(model, instance_id: int) -> tuple | None:
+def instance_path(model, instance_id: int) -> tuple[Instance, ...] | None:
     """Root-first ancestor chain ending at `instance_id`, or None if unreachable.
 
     Returns real Instance objects, not ids, because Model.enter() appends one

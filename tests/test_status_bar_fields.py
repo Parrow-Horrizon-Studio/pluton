@@ -123,8 +123,7 @@ def test_disarming_blanks_the_coordinates(qtbot, main_window):
 
 
 def test_format_coordinates_is_unit_aware(qtbot):
-    from pluton.ui.status_bar import format_coordinates
-    from pluton.units import Units, UnitSystem
+    from pluton.units import Units, UnitSystem, format_coordinates
 
     text = format_coordinates(
         np.array([2.0, 1.0, 0.0]), Units(system=UnitSystem.METRIC, metric_unit="m")
