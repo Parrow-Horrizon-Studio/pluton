@@ -7,7 +7,7 @@ from pluton.model.entity_info import EntitySummary
 from pluton.model.material import MaterialLibrary
 from pluton.model.tag import TagLibrary
 from pluton.ui.entity_info_page import EntityInfoPage
-from pluton.units import Units
+from pluton.units import UnitSystem, Units
 
 
 def _page(qtbot):
@@ -31,6 +31,23 @@ def _square(window):
     scene.add_face_from_loop(v)
 
 
+def _two_squares(window):
+    # Two disjoint quads (no shared vertices/edges) so face_ids has length 2
+    # -- long enough to tell a CompositeCommand apart from N separate pushes.
+    scene = window._model.active_context.mesh
+
+    def quad(x0):
+        return [
+            scene.add_vertex(np.array([x0 + 0.0, 0.0, 0.0], dtype=np.float32)),
+            scene.add_vertex(np.array([x0 + 1.0, 0.0, 0.0], dtype=np.float32)),
+            scene.add_vertex(np.array([x0 + 1.0, 1.0, 0.0], dtype=np.float32)),
+            scene.add_vertex(np.array([x0 + 0.0, 1.0, 0.0], dtype=np.float32)),
+        ]
+
+    scene.add_face_from_loop(quad(0.0))
+    scene.add_face_from_loop(quad(2.0))
+
+
 def test_nothing_selected_reports_so(qtbot):
     page = _page(qtbot)
     _refresh(page, EntitySummary(kind="Nothing", count=0))
@@ -46,6 +63,27 @@ def test_every_field_is_disabled_with_no_selection(qtbot):
     assert not page.hidden_field().isEnabled()
     assert not page.tag_field().isEnabled()
     assert not page.material_field().isEnabled()
+
+
+def test_disabled_fields_stay_present_not_removed(qtbot):
+    # "Disabled, not hidden": every isEnabled()-is-False assertion above is
+    # satisfied just as well by removeRow()/setVisible(False), since a
+    # widget removed from the layout also reports isEnabled() == False (Qt
+    # defaults) or simply isn't there to ask. Nothing before this test
+    # actually proves the field is still IN the form. isHidden() reports the
+    # widget's own explicit hidden flag (set only by hide()/setVisible(False))
+    # independent of ancestor visibility, so it stays meaningful even though
+    # this offscreen-platform page is never shown -- unlike isVisible(),
+    # which would read False regardless just because the top-level window
+    # isn't shown. Pairing it with parentWidget() rules out removeRow(),
+    # which (without takeRow()) deletes the widget outright.
+    page = _page(qtbot)
+    _refresh(page, EntitySummary(kind="Nothing", count=0))
+
+    for field in (page.name_field(), page.hidden_field(), page.tag_field(), page.material_field()):
+        assert not field.isEnabled()
+        assert not field.isHidden()
+        assert field.parentWidget() is page
 
 
 def test_a_single_group_populates_name_and_counts(qtbot):
@@ -77,6 +115,30 @@ def test_dimensions_are_formatted_with_the_document_units(qtbot):
     _refresh(page, EntitySummary(kind="Group", count=1, size=(2.0, 1.0, 3.0)))
     text = page.size_text()
     assert "2 m" in text and "1 m" in text and "3 m" in text
+
+
+def test_switching_units_relabels_the_panel_with_no_model_involvement(qtbot):
+    # Spec line 190: entity_summary returns numbers, never formatted strings;
+    # formatting happens in the widget via format_length/format_area, so
+    # switching metric<->imperial re-labels with the SAME summary object --
+    # no re-fetch from the model needed. Prove it by refreshing twice with
+    # one summary instance and two different Units.
+    page = _page(qtbot)
+    summary = EntitySummary(kind="Group", count=1, size=(2.0, 1.0, 3.0))
+
+    page.refresh(summary, Units(), TagLibrary(), MaterialLibrary())
+    metric_text = page.size_text()
+    assert "2 m" in metric_text and "1 m" in metric_text and "3 m" in metric_text
+
+    imperial_units = Units(system=UnitSystem.IMPERIAL)
+    page.refresh(summary, imperial_units, TagLibrary(), MaterialLibrary())
+    imperial_text = page.size_text()
+
+    assert imperial_text != metric_text
+    # format_length's imperial branch renders feet/inches with ' and " marks;
+    # each of the three sizes (2m, 1m, 3m) is at least a foot, so every one
+    # of them carries a foot mark.
+    assert imperial_text.count("'") == 3
 
 
 def test_area_is_formatted_for_a_face(qtbot):
@@ -224,10 +286,18 @@ def test_an_annotation_selection_disables_hidden_and_tag(qtbot):
 
 def test_painting_from_the_page_goes_through_one_undoable_command(main_window):
     # A multi-face selection must compose into a SINGLE undo step, not one
-    # per face -- PaintFaceCommand paints exactly one face.
-    _square(main_window)
+    # per face -- PaintFaceCommand paints exactly one face. Two disjoint
+    # faces are required to discriminate: with only one face, a broken
+    # implementation that pushes one PaintFaceCommand per face (no
+    # CompositeCommand at all) grows the stack by 1 too -- identical to the
+    # correct behavior. With two faces the two decompositions diverge: a
+    # per-face pusher grows the stack by 2, and a single undo() afterward
+    # would only pop the most-recently-pushed command, reverting just the
+    # second face and leaving the first one painted.
+    _two_squares(main_window)
     scene = main_window._model.active_context.mesh
     face_ids = [f.id for f in scene.faces_iter()]
+    assert len(face_ids) == 2
     main_window._selection.replace(faces=face_ids)
     main_window._refresh_selection_status()
     material = main_window._model.materials.add_custom("Brick", (0.6, 0.3, 0.2))
@@ -236,6 +306,10 @@ def test_painting_from_the_page_goes_through_one_undoable_command(main_window):
     main_window._entity_info_page.material_requested.emit(material.id)
 
     assert scene.face_material(face_ids[0]) == material.id
+    assert scene.face_material(face_ids[1]) == material.id
     assert len(main_window._command_stack._undo) == depth + 1
+
     main_window._command_stack.undo()
+
     assert scene.face_material(face_ids[0]) == 0
+    assert scene.face_material(face_ids[1]) == 0
