@@ -56,6 +56,7 @@ from pluton.tools.paint_tool import PaintTool
 from pluton.tools.roof_tool import RoofTool
 from pluton.tools.text_tool import TextTool
 from pluton.tools.wall_tool import WallTool
+from pluton.ui import selection_controller
 from pluton.ui.cursors import cursor_for
 from pluton.ui.document_controller import DocumentController
 from pluton.ui.materials_dock import MaterialsDock
@@ -332,17 +333,9 @@ class MainWindow(QMainWindow):
         self._active_tag_id = tag_id
 
     def _update_selection_tag_indicator(self) -> None:
-        insts = [
-            i for i in self._model.active_context.children if i.id in self._selection.instances
-        ]
-        if not insts:
-            self._tags_dock.set_selection_tag(None)
-            return
-        tids = {i.tag_id for i in insts}
-        if len(tids) == 1:
-            self._tags_dock.set_selection_tag(self._model.tags.get(next(iter(tids))).name)
-        else:
-            self._tags_dock.set_selection_tag("(multiple)")
+        self._tags_dock.set_selection_tag(
+            selection_controller.selection_tag_label(self._model, self._selection)
+        )
 
     def _on_assign_tag(self) -> None:
         """TagsDock's "Assign to Selection" button -- assigns the dock's active tag."""
@@ -351,26 +344,17 @@ class MainWindow(QMainWindow):
     def _assign_tag(self, tag_id: int) -> None:
         """Assign `tag_id` to every selected instance via TagInstancesCommand.
 
-        Shared by TagsDock's "Assign to Selection" button (_on_assign_tag,
-        which assigns the dock's active tag) and the right-click menu's
-        Assign Tag submenu (M7.2 Task 14, which assigns whichever tag the
-        user picked directly) -- one command construction, not two.
+        Shared by the Tags panel's "Assign to Selection" button (_on_assign_tag)
+        and the right-click Assign Tag submenu -- one command construction, not
+        two. The controller decides; this method owns the Qt half.
         """
-        from pluton.commands.tag_commands import TagInstancesCommand
-
-        sel = self._selection
-        selected = [
-            inst for inst in self._model.active_context.children if inst.id in sel.instances
-        ]
-        if not selected:
-            self._status_bar.set_status("Select objects to assign a tag.")
-            return
-        cmd = TagInstancesCommand(selected, tag_id)
-        self._command_stack.execute(cmd, self._model)
-        name = self._model.tags.get(tag_id).name
-        self._status_bar.set_status(f"Assigned tag '{name}' to {len(selected)} object(s).")
-        self._update_selection_tag_indicator()
-        self._viewport.update()
+        did_assign, message = selection_controller.assign_tag(
+            self._model, self._selection, self._command_stack, tag_id
+        )
+        self._status_bar.set_status(message)
+        if did_assign:
+            self._update_selection_tag_indicator()
+            self._viewport.update()
 
     # --- Scene graph back-compat property --------------------------------
 
@@ -794,16 +778,13 @@ class MainWindow(QMainWindow):
 
     def _on_select_all(self) -> None:
         """Select every entity in the active editing context."""
-        from pluton.model.model_queries import select_all_ids
-
-        edges, faces, instances = select_all_ids(self._model)
-        self._selection.replace(edges=edges, faces=faces, instances=instances)
+        selection_controller.select_all(self._model, self._selection)
         self._refresh_selection_status()
         self._viewport.update()
 
     def _on_select_none(self) -> None:
         """Clear the selection."""
-        self._selection.clear()
+        selection_controller.select_none(self._selection)
         self._refresh_selection_status()
         self._viewport.update()
 
@@ -999,20 +980,7 @@ class MainWindow(QMainWindow):
             self._actions[action_id].setEnabled(was_enabled)
 
     def _refresh_selection_status(self) -> None:
-        ne, nf, ni, na = self._selection.counts()
-        if ne == 0 and nf == 0 and ni == 0 and na == 0:
-            self._status_bar.set_selection("")
-            return
-        parts = []
-        if ne:
-            parts.append(f"{ne} edge" + ("s" if ne != 1 else ""))
-        if nf:
-            parts.append(f"{nf} face" + ("s" if nf != 1 else ""))
-        if ni:
-            parts.append(f"{ni} instance" + ("s" if ni != 1 else ""))
-        if na:
-            parts.append(f"{na} annotation" + ("s" if na != 1 else ""))
-        self._status_bar.set_selection(", ".join(parts) + " selected")
+        self._status_bar.set_selection(selection_controller.selection_status_text(self._selection))
 
     def _refresh_breadcrumb(self) -> None:
         """Task 15: rebuild the breadcrumb from model.active_path and push to status bar.
@@ -1050,27 +1018,8 @@ class MainWindow(QMainWindow):
         self._scenes_dock.refresh()
 
     def _prune_selection(self) -> None:
-        """Keep only selected entities still live in the active context (#46).
-
-        An undo/redo can leave previously-selected ids dangling (e.g. undoing
-        a create, or redoing a delete) while leaving others untouched (e.g. a
-        transform). Rather than blanket-clearing the selection on every
-        undo/redo -- which drops it even when nothing selected was touched --
-        intersect each of the four selection sets with the ids still live in
-        the active context. Mirrors the defensive, walk-and-check style of
-        Model.revalidate_active_path().
-        """
-        ctx = self._model.active_context
-        live_instances = {inst.id for inst in ctx.children}
-        live_edges = {e.id for e in ctx.mesh.edges_iter()}
-        live_faces = {f.id for f in ctx.mesh.faces_iter()}
-        live_annotations = {a.id for a in ctx.annotations}
-        self._selection.replace(
-            edges=self._selection.edges & live_edges,
-            faces=self._selection.faces & live_faces,
-            instances=self._selection.instances & live_instances,
-            annotations=self._selection.annotations & live_annotations,
-        )
+        """Keep only selected entities still live in the active context (#46)."""
+        selection_controller.prune_to_live(self._model, self._selection)
 
     def _on_set_face_style(self, style: FaceStyle) -> None:
         self._render_style.face_style = style
