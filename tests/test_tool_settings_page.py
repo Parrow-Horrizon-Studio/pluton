@@ -73,6 +73,24 @@ def test_each_tool_with_settings_gets_its_own_bar(main_window):
         assert main_window._tool_settings_page.current_key == key, shortcut
 
 
+def test_arming_the_opening_tool_shows_its_bar_and_focuses_the_tab(main_window):
+    main_window._properties_dock.show_tab("entity_info")
+
+    main_window._activate("D")
+
+    assert main_window._properties_dock.current_tab_id == "tool_settings"
+    assert main_window._tool_settings_page.current_key == "opening"
+
+
+def test_arming_the_roof_tool_shows_its_bar_and_focuses_the_tab(main_window):
+    main_window._properties_dock.show_tab("entity_info")
+
+    main_window._activate("O")
+
+    assert main_window._properties_dock.current_tab_id == "tool_settings"
+    assert main_window._tool_settings_page.current_key == "roof"
+
+
 def test_the_reparented_wall_bar_still_writes_to_its_tool(main_window):
     # The reparenting risk, stated as a test: the bar moved from a QVBoxLayout
     # into a QStackedWidget, and its binding to the tool must survive.
@@ -93,6 +111,19 @@ def test_the_reparented_roof_bar_still_writes_to_its_tool(main_window):
     bar._slope_edit.editingFinished.emit()
 
     assert main_window._roof_tool.slope == 40.0
+
+
+def test_the_reparented_opening_bar_still_writes_to_its_tool(main_window):
+    # Field/attribute confirmed from python/pluton/ui/opening_options_bar.py:
+    # `_width_edit` -> `_commit(self._width_edit, "width")` -> DoorWindowTool.width
+    # (metres; parsed through parse_length, same as the Wall bar's thickness).
+    main_window._activate("D")
+    bar = main_window._opening_options_bar
+
+    bar._width_edit.setText("1200 mm")
+    bar._width_edit.editingFinished.emit()
+
+    assert main_window._opening_tool.width == 1.2
 
 
 def test_the_option_bars_left_the_central_column(main_window):
