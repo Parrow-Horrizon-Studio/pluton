@@ -140,6 +140,8 @@ def model_to_dict(model: Model) -> dict:
                         "definition_id": inst.definition.id,
                         "transform": [float(x) for x in inst.transform.flatten()],
                         "tag_id": int(inst.tag_id),
+                        "name": str(inst.name),
+                        "hidden": bool(inst.hidden),
                     }
                     for inst in d.children
                 ],
@@ -182,6 +184,10 @@ def model_from_dict(data: dict) -> Model:
                 np.asarray(transform, dtype=np.float64).reshape(4, 4),
             )
             inst.tag_id = int(crec["tag_id"])
+            # M7.3 (schema 4). Read with defaults: a schema-3 file has neither
+            # key, and must still open.
+            inst.name = str(crec.get("name", ""))
+            inst.hidden = bool(crec.get("hidden", False))
             d.children.append(inst)
             inst.definition.instances.append(inst)
 
