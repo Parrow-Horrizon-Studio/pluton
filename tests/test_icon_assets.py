@@ -92,6 +92,12 @@ def test_every_declared_icon_has_an_asset_file():
 
 
 def test_no_orphan_asset_files():
-    declared = {s.icon for s in actions.ACTIONS if s.icon is not None}
+    # M7.3: the panel's tab strip and Outliner rows reference icons that are
+    # not commands, so they cannot come from ACTIONS. They are declared in
+    # panel_icons.NON_ACTION_ICONS and unioned in here -- an SVG referenced by
+    # nothing at all still fails.
+    from pluton.ui.panel_icons import NON_ACTION_ICONS
+
+    declared = {s.icon for s in actions.ACTIONS if s.icon is not None} | NON_ACTION_ICONS
     orphans = sorted(icons.available_icon_stems() - declared)
-    assert orphans == [], f"asset files no action references: {orphans}"
+    assert orphans == [], f"asset files no action or panel references: {orphans}"
