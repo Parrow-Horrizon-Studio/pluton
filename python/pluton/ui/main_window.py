@@ -67,6 +67,7 @@ from pluton.ui.roof_options_bar import RoofOptionsBar
 from pluton.ui.scenes_page import ScenesPage
 from pluton.ui.status_bar import StatusBar
 from pluton.ui.tags_page import TagsPage
+from pluton.ui.tool_settings_page import ToolSettingsPage
 from pluton.ui.value_control_box import ValueControlBox
 from pluton.ui.wall_options_bar import WallOptionsBar
 from pluton.ui.window_state import (
@@ -215,7 +216,6 @@ class MainWindow(QMainWindow):
         self._wall_options_bar = WallOptionsBar(
             self._wall_tool, units_provider=lambda: self._doc.units
         )
-        self._wall_options_bar.hide()
 
         # Opening options bar (M7b, Task 7) — Door/Window toggle + size fields
         # for the Door/Window tool; shown only while that tool is active (see
@@ -223,7 +223,6 @@ class MainWindow(QMainWindow):
         self._opening_options_bar = OpeningOptionsBar(
             self._opening_tool, units_provider=lambda: self._doc.units
         )
-        self._opening_options_bar.hide()
 
         # Roof options bar (M7c, Task 6) — kind toggle + slope field for the
         # Roof tool (M7c is flush; no overhang field); shown only while that
@@ -231,16 +230,21 @@ class MainWindow(QMainWindow):
         self._roof_options_bar = RoofOptionsBar(
             self._roof_tool, units_provider=lambda: self._doc.units
         )
-        self._roof_options_bar.hide()
+
+        # Tool Settings tab (M7.3, Task 12) — hosts the three option bars
+        # above in a QStackedWidget; _refresh_tool_options picks which one
+        # (if any) is visible.
+        self._tool_settings_page = ToolSettingsPage(self._properties_dock)
+        self._tool_settings_page.add_bar("wall", self._wall_options_bar)
+        self._tool_settings_page.add_bar("opening", self._opening_options_bar)
+        self._tool_settings_page.add_bar("roof", self._roof_options_bar)
+        self._properties_dock.set_page("tool_settings", self._tool_settings_page)
 
         container = QWidget(self)
         layout = QVBoxLayout(container)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
         layout.addWidget(self._viewport, stretch=1)
-        layout.addWidget(self._wall_options_bar, stretch=0)
-        layout.addWidget(self._opening_options_bar, stretch=0)
-        layout.addWidget(self._roof_options_bar, stretch=0)
         layout.addWidget(self._status_bar, stretch=0)
         self.setCentralWidget(container)
 
@@ -528,23 +532,33 @@ class MainWindow(QMainWindow):
         return None
 
     def _refresh_tool_options(self) -> None:
-        """Show the Wall options bar iff the Wall tool is active (M7a, Task 5).
+        """Point the Tool Settings tab at the active tool's option bar.
 
-        Called wherever the active tool changes: after a successful
-        activate_by_shortcut and after any programmatic tool switch.
+        Arming a tool that HAS settings also focuses the tab: before M7.3 the
+        Wall tool's thickness and height simply appeared, and a panel sitting
+        on another tab would silently not show them. Tools without settings
+        never steal the tab -- otherwise every tool switch would yank the user
+        out of whatever they were inspecting.
         """
-        is_wall = isinstance(self._tool_manager.active, WallTool)
-        if is_wall:
+        active = self._tool_manager.active
+        key = None
+        if isinstance(active, WallTool):
+            key = "wall"
+        elif isinstance(active, DoorWindowTool):
+            key = "opening"
+        elif isinstance(active, RoofTool):
+            key = "roof"
+
+        if key == "wall":
             self._wall_options_bar.refresh()
-        self._wall_options_bar.setVisible(is_wall)
-        is_opening = isinstance(self._tool_manager.active, DoorWindowTool)
-        if is_opening:
+        elif key == "opening":
             self._opening_options_bar.refresh()
-        self._opening_options_bar.setVisible(is_opening)
-        is_roof = isinstance(self._tool_manager.active, RoofTool)
-        if is_roof:
+        elif key == "roof":
             self._roof_options_bar.refresh()
-        self._roof_options_bar.setVisible(is_roof)
+
+        self._tool_settings_page.show_bar(key)
+        if key is not None:
+            self._show_properties_tab("tool_settings")
 
     def _on_escape(self) -> None:
         active = self._tool_manager.active
