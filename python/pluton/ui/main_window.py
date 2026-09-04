@@ -1124,6 +1124,39 @@ class MainWindow(QMainWindow):
             return
         self._command_stack.execute(RenameInstanceCommand(instance, new_name), self._model)
 
+    # --- Hide / Unhide (M7.3, Task 14) ------------------------------------
+
+    def _set_hidden_on_selection(self, hidden: bool) -> None:
+        from pluton.commands.visibility_commands import HideInstancesCommand
+
+        instances = selection_controller.selected_instances(self._model, self._selection)
+        if not instances:
+            self._status_bar.set_status("Select objects to hide or unhide.")
+            return
+        self._command_stack.execute(HideInstancesCommand(instances, hidden), self._model)
+        self._viewport.update()
+
+    def _on_hide(self) -> None:
+        self._set_hidden_on_selection(True)
+
+    def _on_unhide(self) -> None:
+        self._set_hidden_on_selection(False)
+
+    def _on_unhide_all(self) -> None:
+        """Reveal everything hidden in the active context.
+
+        Without this there is no way back for an object you cannot
+        right-click, other than the Outliner -- which the user may have closed.
+        """
+        from pluton.commands.visibility_commands import HideInstancesCommand
+
+        hidden = [inst for inst in self._model.active_context.children if inst.hidden]
+        if not hidden:
+            self._status_bar.set_status("Nothing is hidden here.")
+            return
+        self._command_stack.execute(HideInstancesCommand(hidden, False), self._model)
+        self._viewport.update()
+
     # --- Entity Info (M7.3, Task 13) --------------------------------------
 
     def _refresh_entity_info(self) -> None:

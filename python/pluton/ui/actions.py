@@ -139,6 +139,11 @@ ACTIONS: tuple[ActionSpec, ...] = (
         shortcut="Del",
         extra_shortcuts=("Backspace",),
     ),
+    # M7.3. No icon: menu and context-menu entries only, never toolbar
+    # buttons, and test_icon_assets pins the declared-icon count at 29.
+    ActionSpec("edit_hide", "Hide", "_on_hide", shortcut="H"),
+    ActionSpec("edit_unhide", "Unhide", "_on_unhide", shortcut="Shift+H"),
+    ActionSpec("edit_unhide_all", "Unhide All", "_on_unhide_all"),
     ActionSpec("edit_make_group", "Make Group", "_on_make_group", shortcut="Ctrl+G"),
     ActionSpec(
         "edit_make_component",
@@ -349,6 +354,10 @@ MENUS: tuple[MenuSpec, ...] = (
             "edit_explode",
             "edit_make_unique",
             None,
+            "edit_hide",
+            "edit_unhide",
+            "edit_unhide_all",
+            None,
             "edit_clear_context",
         ),
     ),
@@ -425,6 +434,9 @@ CONTEXT_MENUS: dict[ContextTarget, tuple[str | None, ...]] = {
         "edit_edit_group",
         "edit_erase",
         None,
+        "edit_hide",
+        "edit_unhide",
+        None,
         "edit_explode",
         "edit_make_unique",
     ),
@@ -434,6 +446,9 @@ CONTEXT_MENUS: dict[ContextTarget, tuple[str | None, ...]] = {
         "edit_select_none",
         None,
         "edit_close_group",
+        # A hidden object cannot be right-clicked, so this is the only place
+        # the way back can live.
+        "edit_unhide_all",
         None,
         "view_zoom_extents",
     ),
