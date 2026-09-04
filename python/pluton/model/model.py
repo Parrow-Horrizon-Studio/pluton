@@ -86,16 +86,17 @@ class Model:
             yield from self._traverse(inst.definition, world @ inst.transform)
 
     def traverse_visible(self):
-        """Like traverse(), but prunes any instance on a hidden tag — and its whole
-        subtree (hiding an object hides its contents). Instances on the active
-        editing path are always kept (you're editing inside them)."""
+        """Like traverse(), but prunes any instance that is hidden or on a hidden
+        tag — and its whole subtree (hiding an object hides its contents).
+        Instances on the active editing path are always kept (you're editing
+        inside them)."""
         active_ids = {inst.id for inst in self.active_path}
         yield from self._traverse_visible(self.root, np.eye(4, dtype=np.float64), active_ids)
 
     def _traverse_visible(self, definition, world, active_ids):
         yield definition, world
         for inst in definition.children:
-            if inst.id not in active_ids and not self.tags.is_visible(inst.tag_id):
+            if inst.id not in active_ids and (inst.hidden or not self.tags.is_visible(inst.tag_id)):
                 continue
             yield from self._traverse_visible(inst.definition, world @ inst.transform, active_ids)
 
@@ -134,7 +135,10 @@ class Model:
         best, best_t = None, float("inf")
         world0 = self.active_world_transform
         for inst in self.active_context.children:
-            if not self.tags.is_visible(inst.tag_id):
+            # No active-path bypass here (unlike _traverse_visible): both loops
+            # iterate active_context.children, and a child of the active context
+            # cannot itself be entered -- entering it would make it the context.
+            if inst.hidden or not self.tags.is_visible(inst.tag_id):
                 continue
             world = world0 @ inst.transform
             inv = mat_invert(world)
@@ -181,7 +185,10 @@ class Model:
         best = None
         best_t = float("inf")
         for inst in self.active_context.children:
-            if not self.tags.is_visible(inst.tag_id):
+            # No active-path bypass here (unlike _traverse_visible): both loops
+            # iterate active_context.children, and a child of the active context
+            # cannot itself be entered -- entering it would make it the context.
+            if inst.hidden or not self.tags.is_visible(inst.tag_id):
                 continue
             t_inv = mat_invert(inst.transform)
             o_c = (t_inv @ np.append(o_a, 1.0))[:3]
