@@ -124,3 +124,139 @@ def seam_merge(scene, candidate_edges: Sequence[int]) -> list:
             cmd.do(scene)
             out.append(cmd)
     return out
+
+
+_EPS = 1e-9
+
+
+def offset_polygon(
+    points: np.ndarray, normal: np.ndarray, distance: float
+) -> tuple[np.ndarray, float]:
+    """Offset a planar polygon along each edge's inward normal by `distance`.
+
+    Positive `distance` offsets inward (may collapse the loop); negative
+    offsets outward (never collapses). Each vertex moves along the bisector
+    of its two adjacent edge normals, scaled so every offset edge stays
+    parallel to its original -- the classic "miter" polygon offset.
+
+    Returns `(offset_points, clamped_distance)`. `clamped_distance` equals
+    the requested `distance` unless offsetting further would collapse the
+    polygon (an analytic per-edge limit) or make it self-intersect (concave
+    loops, caught by a bounded binary search), in which case it is the
+    largest distance that does not.
+
+    The general concave straight-skeleton collapse problem is not solved
+    here -- only a two-stage approximation: an exact analytic limit for the
+    common case, backstopped by a 12-iteration binary search against a
+    simple-polygon check for loops where that limit is optimistic.
+    """
+    pts = np.asarray(points, dtype=np.float64)
+    n = len(pts)
+    normal_u = _unit(np.asarray(normal, dtype=np.float64))
+
+    edge_dirs = [_unit(pts[(i + 1) % n] - pts[i]) for i in range(n)]
+    edge_lengths = [float(np.linalg.norm(pts[(i + 1) % n] - pts[i])) for i in range(n)]
+
+    # Winding depends on how the source face was built, not on an assumed
+    # CCW convention, so derive which normal sign makes the loop CCW from
+    # the signed area itself rather than trusting the caller's `normal`.
+    cross_sum = np.zeros(3)
+    for i in range(n):
+        cross_sum += np.cross(pts[i], pts[(i + 1) % n])
+    n_eff = normal_u if np.dot(cross_sum, normal_u) >= 0 else -normal_u
+
+    edge_normals = [_unit(np.cross(n_eff, d)) for d in edge_dirs]
+
+    # Per-vertex bisector displacement: K = (n_prev + n_next) / (1 + n_prev.n_next).
+    # This is 1 / sin(theta / 2) in disguise (theta the interior angle at the
+    # vertex) -- it diverges as theta -> 0 (a needle-thin vertex), so the
+    # denominator is floored away from zero to keep the scale finite.
+    bisectors = []
+    for i in range(n):
+        n_prev = edge_normals[i - 1]
+        n_next = edge_normals[i]
+        denom = max(1.0 + float(np.dot(n_prev, n_next)), _EPS)
+        bisectors.append((n_prev + n_next) / denom)
+
+    def offset_at(d: float) -> np.ndarray:
+        return np.array([pts[i] + d * bisectors[i] for i in range(n)])
+
+    if distance <= 0.0:
+        return offset_at(distance), distance
+
+    # Stage 1: analytic per-edge collapse limit. Each offset edge's length
+    # is affine in d (both its endpoints move at a fixed rate), so the
+    # distance at which it hits zero solves exactly.
+    analytic_limit = float("inf")
+    for i in range(n):
+        rate = float(np.dot(bisectors[(i + 1) % n] - bisectors[i], edge_dirs[i]))
+        if rate < -_EPS:
+            analytic_limit = min(analytic_limit, -edge_lengths[i] / rate)
+
+    clamped = min(distance, analytic_limit)
+
+    # Stage 2: the analytic limit only guards against an edge collapsing
+    # onto itself. A concave loop's reflex corners can self-intersect with a
+    # *different* edge first, which the per-edge check cannot see, so
+    # validate and binary search downward if needed, bounded at 12 steps.
+    e1, e2 = _plane_basis(n_eff)
+    if not _is_simple_offset(offset_at(clamped), e1, e2):
+        lo, hi = 0.0, clamped
+        for _ in range(12):
+            mid = 0.5 * (lo + hi)
+            if _is_simple_offset(offset_at(mid), e1, e2):
+                lo = mid
+            else:
+                hi = mid
+        clamped = lo
+
+    return offset_at(clamped), clamped
+
+
+def _unit(v: np.ndarray) -> np.ndarray:
+    norm = float(np.linalg.norm(v))
+    if norm < _EPS:
+        return v
+    return v / norm
+
+
+def _plane_basis(n_eff: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    helper = np.array([1.0, 0.0, 0.0]) if abs(n_eff[0]) < 0.9 else np.array([0.0, 1.0, 0.0])
+    e1 = _unit(np.cross(helper, n_eff))
+    e2 = np.cross(n_eff, e1)
+    return e1, e2
+
+
+def _is_simple_offset(pts: np.ndarray, e1: np.ndarray, e2: np.ndarray) -> bool:
+    """No two non-adjacent edges of the closed, projected polygon cross.
+
+    Deliberately the plain sign-of-cross-product test (no collinearity
+    tolerance): that is what the milestone's own simplicity contract uses
+    to accept a clamp, so validating against anything stricter or looser
+    here would let the binary search converge on a distance the contract
+    disagrees with.
+    """
+    n = len(pts)
+    proj = np.stack([pts @ e1, pts @ e2], axis=-1)
+    for i in range(n):
+        a1, a2 = proj[i], proj[(i + 1) % n]
+        for j in range(i + 1, n):
+            if j == i or (j + 1) % n == i or j == (i + 1) % n:
+                continue
+            b1, b2 = proj[j], proj[(j + 1) % n]
+            if _segments_cross(a1, a2, b1, b2):
+                return False
+    return True
+
+
+def _segments_cross(p1: np.ndarray, p2: np.ndarray, p3: np.ndarray, p4: np.ndarray) -> bool:
+    def side(a: np.ndarray, b: np.ndarray, c: np.ndarray) -> np.floating:
+        # Scalar 2D cross product computed directly: np.cross on length-2
+        # vectors is deprecated in NumPy 2.0.
+        ab = b - a
+        ac = c - a
+        return np.sign(ab[0] * ac[1] - ab[1] * ac[0])
+
+    d1, d2 = side(p3, p4, p1), side(p3, p4, p2)
+    d3, d4 = side(p1, p2, p3), side(p1, p2, p4)
+    return bool(d1 != d2 and d3 != d4)
