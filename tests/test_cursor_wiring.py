@@ -44,6 +44,31 @@ def test_every_tool_can_be_armed_without_raising(qtbot, main_window):
             assert not main_window._viewport.cursor().pixmap().isNull(), spec.id
 
 
+def test_arming_a_shortcutless_tool_checks_its_action_and_sets_the_cursor(qtbot, main_window):
+    """M7.4 Task 5 Finding 1: the toolbar/cursor sync in _activate must not
+    depend on the tool having a keyboard shortcut. Five of M7.4's six new
+    tools ship with none (spec D9), and arming one from its toolbar button
+    or menu entry -- which reaches _activate exactly the way this test does,
+    via handler_arg -- must still check the action and set the cursor, not
+    just update ToolManager state.
+    """
+    from pluton.tools.line_tool import LineTool
+
+    class _ShortcutlessLine(LineTool):
+        """Same id as the shipped Line tool, but no shortcut to key off of."""
+
+        @property
+        def shortcut(self) -> str:
+            return ""
+
+    main_window._tool_manager.register(_ShortcutlessLine())
+    main_window._activate("line")
+
+    assert main_window._actions["tool_line"].isChecked()
+    hotspot = main_window._viewport.cursor().hotSpot()
+    assert (hotspot.x(), hotspot.y()) == cursors.CROSSHAIR_HOTSPOT
+
+
 def test_the_wired_cursor_is_composed_at_the_viewports_device_pixel_ratio(
     qtbot, main_window, monkeypatch
 ):

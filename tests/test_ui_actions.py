@@ -69,8 +69,12 @@ def test_all_eighteen_tools_are_declared():
         assert spec.handler == "_activate"
         # M7.4 Task 5: handler_arg dispatches by tool id, not by shortcut, so
         # a tool without a shortcut (M7.4's primitives, Follow Me) can still
-        # be armed from a menu or toolbar.
-        assert spec.handler_arg == spec.id.removeprefix("tool_")
+        # be armed from a menu or toolbar. (The id/handler_arg cross-check
+        # against real tool classes lives in
+        # test_tool_manager_ids.py::test_every_shipped_tool_has_a_unique_id_matching_its_action
+        # -- asserting it again here against spec.id, itself built from the
+        # same action id by the same _tool() call, would prove nothing.)
+        assert spec.id.startswith("tool_")
 
 
 def test_grouped_actions_are_checkable():

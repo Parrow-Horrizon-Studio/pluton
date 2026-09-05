@@ -516,17 +516,23 @@ class MainWindow(QMainWindow):
             # (Qt only auto-checks a QActionGroup member when the action
             # itself fires) -- otherwise the toolbar would lie about which
             # tool is active (M7.2, Task 11).
+            #
+            # This used to re-derive the action id by scanning ACTIONS for a
+            # spec whose *shortcut* matched the active tool's shortcut, which
+            # silently no-opped for any shortcut-less tool (M7.4 Task 5's own
+            # invariant -- action_id == f"tool_{tool_id}" for all 18 shipped
+            # tools -- makes that indirection unnecessary; `tool_id` is the
+            # argument this method was already called with).
             if active is not None:
-                action_id = self._tool_action_id_for_shortcut(active.shortcut)
-                if action_id is not None:
-                    self._actions[action_id].setChecked(True)
-                    # Viewport only: the tool cursor must not leak over docks,
-                    # the menu bar, or the per-tool option bars. The ratio
-                    # comes from the widget itself (not a global) since a
-                    # window can move between monitors with different
-                    # scaling (M7.2, Task 12).
-                    dpr = self._viewport.devicePixelRatioF()
-                    self._viewport.setCursor(cursor_for(action_id, dpr=dpr))
+                action_id = f"tool_{tool_id}"
+                self._actions[action_id].setChecked(True)
+                # Viewport only: the tool cursor must not leak over docks,
+                # the menu bar, or the per-tool option bars. The ratio
+                # comes from the widget itself (not a global) since a
+                # window can move between monitors with different
+                # scaling (M7.2, Task 12).
+                dpr = self._viewport.devicePixelRatioF()
+                self._viewport.setCursor(cursor_for(action_id, dpr=dpr))
 
     def _disarm_tool_ui(self) -> None:
         """Undo _activate's visible effects when no tool is armed.
@@ -545,19 +551,6 @@ class MainWindow(QMainWindow):
             group.checkedAction().setChecked(False)
             group.setExclusive(True)
         self._viewport.unsetCursor()
-
-    @staticmethod
-    def _tool_action_id_for_shortcut(shortcut: str) -> str | None:
-        from pluton.ui.actions import ACTIONS, TOOL_GROUP
-
-        for spec in ACTIONS:
-            if (
-                spec.group == TOOL_GROUP
-                and spec.shortcut
-                and spec.shortcut.upper() == shortcut.upper()
-            ):
-                return spec.id
-        return None
 
     def _refresh_tool_options(self) -> None:
         """Point the Tool Settings tab at the active tool's option bar.
