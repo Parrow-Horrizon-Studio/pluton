@@ -61,7 +61,7 @@ def test_clicking_a_toolbar_tool_arms_it_and_checks_only_that_button(qtbot, main
 def test_keyboard_activation_updates_the_toolbar_button(qtbot, main_window):
     # Arming by shortcut must check the toolbar button too, or the toolbar
     # would lie about which tool is active.
-    main_window._activate("R")
+    main_window._activate("rectangle")
     assert main_window._actions["tool_rectangle"].isChecked()
 
 

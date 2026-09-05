@@ -8,21 +8,21 @@ from pluton.ui import cursors
 
 
 def test_arming_a_crosshair_tool_sets_the_crosshair_hotspot(qtbot, main_window):
-    main_window._activate("L")
+    main_window._activate("line")
     hotspot = main_window._viewport.cursor().hotSpot()
     assert (hotspot.x(), hotspot.y()) == cursors.CROSSHAIR_HOTSPOT
 
 
 def test_arming_an_arrow_tool_sets_the_arrow_hotspot(qtbot, main_window):
-    main_window._activate("Space")
+    main_window._activate("select")
     hotspot = main_window._viewport.cursor().hotSpot()
     assert (hotspot.x(), hotspot.y()) == cursors.ARROW_HOTSPOT
 
 
 def test_switching_tools_switches_the_cursor(qtbot, main_window):
-    main_window._activate("Space")
+    main_window._activate("select")
     first = main_window._viewport.cursor().pixmap().toImage()
-    main_window._activate("C")
+    main_window._activate("circle")
     second = main_window._viewport.cursor().pixmap().toImage()
     assert first != second
 
@@ -30,7 +30,7 @@ def test_switching_tools_switches_the_cursor(qtbot, main_window):
 def test_the_cursor_is_set_on_the_viewport_not_the_window(qtbot, main_window):
     # Setting it on the window would leak the tool cursor over the docks,
     # menu bar, and option bars.
-    main_window._activate("L")
+    main_window._activate("line")
     assert main_window._viewport.testAttribute.__self__ is main_window._viewport
     assert main_window._viewport.cursor().hotSpot() != main_window.cursor().hotSpot()
 
@@ -40,7 +40,7 @@ def test_every_tool_can_be_armed_without_raising(qtbot, main_window):
 
     for spec in ACTIONS:
         if spec.group == TOOL_GROUP:
-            main_window._activate(spec.shortcut)
+            main_window._activate(spec.handler_arg)
             assert not main_window._viewport.cursor().pixmap().isNull(), spec.id
 
 
@@ -53,7 +53,7 @@ def test_the_wired_cursor_is_composed_at_the_viewports_device_pixel_ratio(
     # where cursor_for always composed at dpr=1.0).
     monkeypatch.setattr(main_window._viewport, "devicePixelRatioF", lambda: 2.0)
 
-    main_window._activate("L")
+    main_window._activate("line")
 
     pixmap = main_window._viewport.cursor().pixmap()
     assert pixmap.devicePixelRatio() == pytest.approx(2.0)
@@ -68,7 +68,7 @@ def test_escape_disarms_the_toolbar_button_and_the_cursor(qtbot, main_window):
     the toolbars were added to remove.
     """
     window = main_window
-    window._activate("L")
+    window._activate("line")
     assert window._actions["tool_line"].isChecked()
     armed = window._viewport.cursor().hotSpot()
 

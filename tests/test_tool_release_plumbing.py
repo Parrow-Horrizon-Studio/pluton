@@ -15,6 +15,8 @@ def test_tool_default_on_mouse_release_is_noop():
         @property
         def shortcut(self): return "Z"
         @property
+        def id(self): return "min"
+        @property
         def has_active_gesture(self): return False
         def activate(self, ctx): pass
         def deactivate(self): pass

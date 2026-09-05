@@ -40,6 +40,10 @@ class RectangleTool(Tool):
     def shortcut(self) -> str:
         return "R"
 
+    @property
+    def id(self) -> str:
+        return "rectangle"
+
     def __init__(self) -> None:
         self._scene = None
         self._model = None

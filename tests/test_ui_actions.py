@@ -67,7 +67,10 @@ def test_all_eighteen_tools_are_declared():
         assert spec.cursor is not None
         assert spec.icon is not None
         assert spec.handler == "_activate"
-        assert spec.handler_arg == spec.shortcut
+        # M7.4 Task 5: handler_arg dispatches by tool id, not by shortcut, so
+        # a tool without a shortcut (M7.4's primitives, Follow Me) can still
+        # be armed from a menu or toolbar.
+        assert spec.handler_arg == spec.id.removeprefix("tool_")
 
 
 def test_grouped_actions_are_checkable():

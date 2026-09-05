@@ -50,6 +50,10 @@ class LineTool(Tool):
     def shortcut(self) -> str:
         return "L"
 
+    @property
+    def id(self) -> str:
+        return "line"
+
     def __init__(self) -> None:
         self._scene = None
         self._model = None

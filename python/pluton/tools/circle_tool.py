@@ -45,6 +45,10 @@ class CircleTool(Tool):
     def shortcut(self) -> str:
         return "C"
 
+    @property
+    def id(self) -> str:
+        return "circle"
+
     def __init__(self) -> None:
         self._scene = None
         self._command_stack = None

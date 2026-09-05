@@ -60,6 +60,10 @@ class ScaleTool(Tool):
     def shortcut(self) -> str:
         return "S"
 
+    @property
+    def id(self) -> str:
+        return "scale"
+
     def __init__(self) -> None:
         self._scene = None
         self._model = None

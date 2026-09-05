@@ -31,6 +31,10 @@ class FakeTool(Tool):
     def shortcut(self) -> str:
         return self._shortcut
 
+    @property
+    def id(self) -> str:
+        return self._name.lower()
+
     def activate(self, ctx: ToolContext) -> None:
         self.activated = True
 

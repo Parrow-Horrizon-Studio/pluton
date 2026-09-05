@@ -34,6 +34,10 @@ class SelectTool(Tool):
     def shortcut(self) -> str:
         return "Space"
 
+    @property
+    def id(self) -> str:
+        return "select"
+
     def __init__(self) -> None:
         self._scene = None
         self._camera = None

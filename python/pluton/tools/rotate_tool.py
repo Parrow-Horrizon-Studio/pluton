@@ -59,6 +59,10 @@ class RotateTool(Tool):
     def shortcut(self) -> str:
         return "Q"
 
+    @property
+    def id(self) -> str:
+        return "rotate"
+
     def __init__(self) -> None:
         self._scene = None
         self._model = None

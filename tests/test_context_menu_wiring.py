@@ -211,7 +211,7 @@ def test_right_click_is_suppressed_while_a_tool_is_mid_gesture(
     # without this the emitted signal reaches the real modal QMenu.exec and
     # hangs headlessly -- the same trap _exec_context_menu exists to defuse.
     monkeypatch.setattr(window, "_exec_context_menu", lambda menu, pos: None)
-    window._activate("L")  # Line tool
+    window._activate("line")  # Line tool
     line = window._viewport.tool_manager.active
     seen: list[tuple[int, int]] = []
     window._viewport.context_menu_requested.connect(lambda x, y: seen.append((x, y)))
@@ -248,7 +248,7 @@ def test_select_tool_suppresses_only_during_a_live_box_drag(
 
     window = main_window_with_square
     monkeypatch.setattr(window, "_exec_context_menu", lambda menu, pos: None)
-    window._activate("Space")  # Select tool
+    window._activate("select")  # Select tool
     select = window._viewport.tool_manager.active
     seen: list[tuple[int, int]] = []
     window._viewport.context_menu_requested.connect(lambda x, y: seen.append((x, y)))

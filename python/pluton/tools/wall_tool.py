@@ -44,6 +44,10 @@ class WallTool(Tool):
     def shortcut(self) -> str:
         return "W"
 
+    @property
+    def id(self) -> str:
+        return "wall"
+
     def activate(self, ctx: ToolContext) -> None:
         self._scene = ctx.scene
         self._command_stack = ctx.command_stack

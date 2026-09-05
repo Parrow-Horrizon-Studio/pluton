@@ -47,6 +47,10 @@ class ArcTool(Tool):
     def shortcut(self) -> str:
         return "A"
 
+    @property
+    def id(self) -> str:
+        return "arc"
+
     def __init__(self) -> None:
         self._scene = None
         self._command_stack = None

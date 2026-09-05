@@ -67,6 +67,10 @@ class DimensionTool(Tool):
     def shortcut(self) -> str:
         return "I"
 
+    @property
+    def id(self) -> str:
+        return "dimension"
+
     def activate(self, ctx: ToolContext) -> None:
         self._command_stack = ctx.command_stack
         self._model = ctx.model

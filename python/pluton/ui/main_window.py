@@ -503,8 +503,8 @@ class MainWindow(QMainWindow):
                     return True
         return super().eventFilter(obj, event)
 
-    def _activate(self, shortcut: str) -> None:
-        if self._tool_manager.activate_by_shortcut(shortcut):
+    def _activate(self, tool_id: str) -> None:
+        if self._tool_manager.activate_by_id(tool_id):
             active = self._tool_manager.active
             self._status_bar.set_tool(active.name if active else "")
             self._status_bar.set_snap("")

@@ -47,6 +47,10 @@ class TextTool(Tool):
     def shortcut(self) -> str:
         return "N"
 
+    @property
+    def id(self) -> str:
+        return "text"
+
     def activate(self, ctx: ToolContext) -> None:
         self._command_stack = ctx.command_stack
         self._model = ctx.model

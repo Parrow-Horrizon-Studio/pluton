@@ -74,6 +74,10 @@ class PushPullTool(Tool):
         return "P"
 
     @property
+    def id(self) -> str:
+        return "push_pull"
+
+    @property
     def has_active_gesture(self) -> bool:
         return self._state == _State.DRAGGING
 

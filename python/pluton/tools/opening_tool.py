@@ -42,6 +42,10 @@ class DoorWindowTool(Tool):
     def shortcut(self) -> str:
         return "D"
 
+    @property
+    def id(self) -> str:
+        return "door_window"
+
     def activate(self, ctx: ToolContext) -> None:
         self._scene = ctx.scene
         self._command_stack = ctx.command_stack

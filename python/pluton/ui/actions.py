@@ -91,14 +91,18 @@ class MenuSpec:
     action_ids: tuple[str | None, ...]
 
 
-def _tool(action_id: str, label: str, shortcut: str, cursor: CursorStyle) -> ActionSpec:
-    """All 18 tools share the same shape: checkable, grouped, and dispatched
-    through MainWindow._activate with their own shortcut as the argument."""
+def _tool(action_id: str, label: str, shortcut: str | None, cursor: CursorStyle) -> ActionSpec:
+    """All tools share the same shape: checkable, grouped, and dispatched
+    through MainWindow._activate with their tool id as the argument.
+
+    shortcut is optional. It used to double as the dispatch key, which meant
+    a tool without one could not be armed at all (M7.4 Task 5).
+    """
     return ActionSpec(
         id=action_id,
         label=label,
         handler="_activate",
-        handler_arg=shortcut,
+        handler_arg=action_id.removeprefix("tool_"),
         icon=action_id,
         shortcut=shortcut,
         checkable=True,

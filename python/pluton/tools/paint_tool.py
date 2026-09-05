@@ -28,6 +28,10 @@ class PaintTool(Tool):
     def shortcut(self) -> str:
         return "B"
 
+    @property
+    def id(self) -> str:
+        return "paint"
+
     def __init__(self) -> None:
         self._scene = None
         self._camera = None

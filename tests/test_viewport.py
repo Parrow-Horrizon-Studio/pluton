@@ -300,7 +300,7 @@ class TestCoordinatesWithNoSnap:
         from PySide6.QtCore import QPointF
         from pluton.viewport.snap_engine import SnapKind, SnapResult
 
-        main_window._activate("L")
+        main_window._activate("line")
 
         forced = SnapResult(
             kind=SnapKind.NONE,

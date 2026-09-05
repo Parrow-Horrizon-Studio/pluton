@@ -45,7 +45,7 @@ def test_paint_tool_status_text_refreshes_without_error(win):
     from pluton.tools.paint_tool import PaintTool
 
     assert isinstance(inspect.getattr_static(PaintTool, "status_text"), property)
-    win._activate("B")  # activates Paint AND sets the status-bar tool name
+    win._activate("paint")  # activates Paint AND sets the status-bar tool name
     win._refresh_status_text()  # would raise TypeError before the fix
     text = win._status_bar.prompt_text()
     assert isinstance(text, str)

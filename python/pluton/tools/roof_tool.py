@@ -42,6 +42,10 @@ class RoofTool(Tool):
     def shortcut(self) -> str:
         return "O"
 
+    @property
+    def id(self) -> str:
+        return "roof"
+
     def activate(self, ctx: ToolContext) -> None:
         self._scene = ctx.scene
         self._command_stack = ctx.command_stack

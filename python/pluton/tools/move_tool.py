@@ -43,6 +43,10 @@ class MoveTool(Tool):
     def shortcut(self) -> str:
         return "M"
 
+    @property
+    def id(self) -> str:
+        return "move"
+
     def __init__(self) -> None:
         self._scene = None
         self._model = None

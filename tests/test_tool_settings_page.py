@@ -42,17 +42,17 @@ def test_show_bar_none_returns_to_empty(qtbot):
 def test_arming_the_wall_tool_shows_its_bar_and_focuses_the_tab(main_window):
     main_window._properties_dock.show_tab("entity_info")
 
-    main_window._activate("W")
+    main_window._activate("wall")
 
     assert main_window._properties_dock.current_tab_id == "tool_settings"
     assert main_window._tool_settings_page.current_key == "wall"
 
 
 def test_arming_a_tool_without_settings_shows_the_empty_page(main_window):
-    main_window._activate("W")
+    main_window._activate("wall")
     assert main_window._tool_settings_page.current_key == "wall"
 
-    main_window._activate("L")
+    main_window._activate("line")
 
     assert main_window._tool_settings_page.current_key is None
 
@@ -62,21 +62,21 @@ def test_arming_a_tool_without_settings_does_not_steal_the_tab(main_window):
     # switch would yank you out of whatever you were inspecting.
     main_window._properties_dock.show_tab("entity_info")
 
-    main_window._activate("L")
+    main_window._activate("line")
 
     assert main_window._properties_dock.current_tab_id == "entity_info"
 
 
 def test_each_tool_with_settings_gets_its_own_bar(main_window):
-    for shortcut, key in (("W", "wall"), ("D", "opening"), ("O", "roof")):
-        main_window._activate(shortcut)
-        assert main_window._tool_settings_page.current_key == key, shortcut
+    for tool_id, key in (("wall", "wall"), ("door_window", "opening"), ("roof", "roof")):
+        main_window._activate(tool_id)
+        assert main_window._tool_settings_page.current_key == key, tool_id
 
 
 def test_arming_the_opening_tool_shows_its_bar_and_focuses_the_tab(main_window):
     main_window._properties_dock.show_tab("entity_info")
 
-    main_window._activate("D")
+    main_window._activate("door_window")
 
     assert main_window._properties_dock.current_tab_id == "tool_settings"
     assert main_window._tool_settings_page.current_key == "opening"
@@ -85,7 +85,7 @@ def test_arming_the_opening_tool_shows_its_bar_and_focuses_the_tab(main_window):
 def test_arming_the_roof_tool_shows_its_bar_and_focuses_the_tab(main_window):
     main_window._properties_dock.show_tab("entity_info")
 
-    main_window._activate("O")
+    main_window._activate("roof")
 
     assert main_window._properties_dock.current_tab_id == "tool_settings"
     assert main_window._tool_settings_page.current_key == "roof"
@@ -94,7 +94,7 @@ def test_arming_the_roof_tool_shows_its_bar_and_focuses_the_tab(main_window):
 def test_the_reparented_wall_bar_still_writes_to_its_tool(main_window):
     # The reparenting risk, stated as a test: the bar moved from a QVBoxLayout
     # into a QStackedWidget, and its binding to the tool must survive.
-    main_window._activate("W")
+    main_window._activate("wall")
     bar = main_window._wall_options_bar
 
     bar._thickness_edit.setText("250 mm")
@@ -104,7 +104,7 @@ def test_the_reparented_wall_bar_still_writes_to_its_tool(main_window):
 
 
 def test_the_reparented_roof_bar_still_writes_to_its_tool(main_window):
-    main_window._activate("O")
+    main_window._activate("roof")
     bar = main_window._roof_options_bar
 
     bar._slope_edit.setText("40")
@@ -117,7 +117,7 @@ def test_the_reparented_opening_bar_still_writes_to_its_tool(main_window):
     # Field/attribute confirmed from python/pluton/ui/opening_options_bar.py:
     # `_width_edit` -> `_commit(self._width_edit, "width")` -> DoorWindowTool.width
     # (metres; parsed through parse_length, same as the Wall bar's thickness).
-    main_window._activate("D")
+    main_window._activate("door_window")
     bar = main_window._opening_options_bar
 
     bar._width_edit.setText("1200 mm")

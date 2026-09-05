@@ -3,7 +3,7 @@ def test_unit_change_refreshes_the_wall_options_bar(qtbot):
 
     win = MainWindow()
     qtbot.addWidget(win)
-    win._activate("W")                       # Wall tool -> its options bar is shown
+    win._activate("wall")                       # Wall tool -> its options bar is shown
 
     calls = []
     original = win._refresh_tool_options

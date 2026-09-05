@@ -42,6 +42,10 @@ class PolygonTool(Tool):
     def shortcut(self) -> str:
         return "G"
 
+    @property
+    def id(self) -> str:
+        return "polygon"
+
     def __init__(self) -> None:
         self._scene = None
         self._command_stack = None

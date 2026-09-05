@@ -35,6 +35,10 @@ class EraserTool(Tool):
     def shortcut(self) -> str:
         return "E"
 
+    @property
+    def id(self) -> str:
+        return "eraser"
+
     def __init__(self) -> None:
         self._scene = None
         self._camera = None

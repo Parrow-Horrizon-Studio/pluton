@@ -86,6 +86,16 @@ class Tool(ABC):
 
     @property
     @abstractmethod
+    def id(self) -> str:
+        """Stable identity used for dispatch (ToolManager.register/activate_by_id).
+
+        Unlike shortcut, this is never empty -- it is the tool's registry key,
+        so two tools sharing no keyboard shortcut still resolve to distinct
+        entries (M7.4 Task 5).
+        """
+
+    @property
+    @abstractmethod
     def has_active_gesture(self) -> bool:
         """True if the tool is in the middle of a multi-click gesture.
 

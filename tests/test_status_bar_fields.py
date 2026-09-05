@@ -95,7 +95,7 @@ def test_moving_the_mouse_with_a_tool_armed_fills_the_coordinates(qtbot, main_wi
     from PySide6.QtCore import QPointF, Qt
     from PySide6.QtGui import QMouseEvent
 
-    main_window._activate("L")
+    main_window._activate("line")
     event = QMouseEvent(
         QMouseEvent.Type.MouseMove,
         QPointF(40.0, 40.0),
@@ -114,7 +114,7 @@ def test_disarming_blanks_the_coordinates(qtbot, main_window):
     # _on_escape's disarm branch only runs when a tool is active (it returns
     # immediately otherwise), so arm one first -- matching how the coordinate
     # readout gets filled in the first place.
-    main_window._activate("L")
+    main_window._activate("line")
     main_window._status_bar.set_coordinates("X 1 m")
 
     main_window._on_escape()

@@ -22,6 +22,10 @@ class TapeMeasureTool(Tool):
     def shortcut(self) -> str:
         return "T"
 
+    @property
+    def id(self) -> str:
+        return "tape_measure"
+
     def __init__(self) -> None:
         self._scene = None
         self._units_provider = None
