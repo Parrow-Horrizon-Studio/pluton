@@ -6,6 +6,11 @@ on:
   pull_request:
     branches: [main]
 
+# Both jobs only read the repo: they check out, build, and run tests.
+# The github-script step below calls core.exportVariable only, never the API.
+permissions:
+  contents: read
+
 jobs:
   build:
     name: Build & Test (${{ matrix.os }})
@@ -43,7 +48,7 @@ jobs:
             libxcb-xkb1
 
       - name: Set up vcpkg
-        uses: lukka/run-vcpkg@v11
+        uses: lukka/run-vcpkg@b1a0dd252f06b9e25b3c022a9a03bd7a427fb6a2  # v11.6
         with:
           vcpkgGitCommitId: "56bb2411609227288b70117ead2c47585ba07713"
 
