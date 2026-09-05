@@ -204,6 +204,7 @@ ACTIONS: tuple[ActionSpec, ...] = (
     _tool("tool_polygon", "Polygon", "G", _CH),
     _tool("tool_arc", "Arc", "A", _CH),
     _tool("tool_push_pull", "Push/Pull", "P", _AR),
+    _tool("tool_offset", "Offset", "F", _CH),
     _tool("tool_move", "Move", "M", _CH),
     _tool("tool_rotate", "Rotate", "Q", _CH),
     _tool("tool_scale", "Scale", "S", _CH),
@@ -301,7 +302,7 @@ TOOLBARS: tuple[ToolbarSpec, ...] = (
     ToolbarSpec(
         "modification",
         "Modification",
-        ("tool_push_pull", "tool_move", "tool_rotate", "tool_scale"),
+        ("tool_push_pull", "tool_offset", "tool_move", "tool_rotate", "tool_scale"),
     ),
     ToolbarSpec(
         "construction",
@@ -383,6 +384,7 @@ MENUS: tuple[MenuSpec, ...] = (
             "tool_arc",
             None,
             "tool_push_pull",
+            "tool_offset",
             "tool_move",
             "tool_rotate",
             "tool_scale",

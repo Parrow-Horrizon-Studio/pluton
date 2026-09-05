@@ -1,6 +1,6 @@
 """The icon assets obey the M7.2 spec, mechanically (Task 3).
 
-Parsing the SVGs is what keeps 29 hand-authored files consistent: a stray
+Parsing the SVGs is what keeps 30 hand-authored files consistent: a stray
 <text>, gradient, or wrong viewBox fails here rather than rendering
 differently on someone else's Qt build.
 """
@@ -88,7 +88,7 @@ def test_every_declared_icon_has_an_asset_file():
     declared = sorted({s.icon for s in actions.ACTIONS if s.icon is not None})
     missing = [stem for stem in declared if stem not in stems]
     assert missing == [], f"declared but missing: {missing}"
-    assert len(declared) == 29, f"expected 29 declared icons, got {len(declared)}"
+    assert len(declared) == 30, f"expected 30 declared icons, got {len(declared)}"
 
 
 def test_no_orphan_asset_files():

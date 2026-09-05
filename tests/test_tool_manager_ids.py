@@ -18,6 +18,7 @@ from pluton.tools.dimension_tool import DimensionTool
 from pluton.tools.erase_tool import EraserTool
 from pluton.tools.line_tool import LineTool
 from pluton.tools.move_tool import MoveTool
+from pluton.tools.offset_tool import OffsetTool
 from pluton.tools.opening_tool import DoorWindowTool
 from pluton.tools.paint_tool import PaintTool
 from pluton.tools.polygon_tool import PolygonTool
@@ -41,6 +42,7 @@ _ALL_TOOL_CLASSES = (
     EraserTool,
     LineTool,
     MoveTool,
+    OffsetTool,
     DoorWindowTool,
     PaintTool,
     PolygonTool,
@@ -79,7 +81,7 @@ def test_every_shipped_tool_has_a_unique_id_matching_its_action():
     expected_ids = {
         spec.handler_arg for spec in ACTIONS if spec.group == TOOL_GROUP
     }
-    assert len(expected_ids) == 18
+    assert len(expected_ids) == 19
 
     mgr = ToolManager()
     for cls in _ALL_TOOL_CLASSES:

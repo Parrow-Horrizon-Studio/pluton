@@ -52,6 +52,7 @@ from pluton.tools import (
     ToolManager,
 )
 from pluton.tools.dimension_tool import DimensionTool
+from pluton.tools.offset_tool import OffsetTool
 from pluton.tools.opening_tool import DoorWindowTool
 from pluton.tools.paint_tool import PaintTool
 from pluton.tools.roof_tool import RoofTool
@@ -120,6 +121,7 @@ class MainWindow(QMainWindow):
         self._tool_manager.register(LineTool())
         self._tool_manager.register(RectangleTool())
         self._tool_manager.register(PushPullTool())
+        self._tool_manager.register(OffsetTool())
         self._tool_manager.register(CircleTool())
         self._tool_manager.register(PolygonTool())
         self._tool_manager.register(ArcTool())

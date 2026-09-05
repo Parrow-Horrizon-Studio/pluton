@@ -16,7 +16,7 @@ def test_every_declared_action_became_a_qaction(qtbot, main_window):
 def test_tools_menu_lists_all_eighteen_tools(qtbot, main_window):
     tools_menu = next(m for m in main_window.menuBar().actions() if m.text() == "Tools")
     entries = [a for a in tools_menu.menu().actions() if not a.isSeparator()]
-    assert len(entries) == 18
+    assert len(entries) == 19
 
 
 def test_labels_come_from_the_registry(qtbot, main_window):
