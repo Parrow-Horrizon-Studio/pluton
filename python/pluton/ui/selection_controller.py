@@ -48,7 +48,7 @@ def prune_to_live(model, selection) -> None:
 
 
 def selection_status_text(selection) -> str:
-    '''"4 edges, 1 face selected", or "" when nothing is selected.'''
+    """Summarize the selection, e.g. "4 edges, 1 face selected", or "" when empty."""
     counts = selection.counts()
     if not any(counts):
         return ""

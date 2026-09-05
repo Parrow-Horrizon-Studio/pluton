@@ -183,6 +183,6 @@ def format_area(square_meters: float, units: Units) -> str:
 
 
 def format_coordinates(world_position: np.ndarray, units: Units) -> str:
-    '''"X 2 m  Y 1 m  Z 0 m" for a 3-vector, in the document's units.'''
+    """Format a 3-vector as "X 2 m  Y 1 m  Z 0 m" in the document's units."""
     x, y, z = (float(v) for v in np.asarray(world_position, dtype=np.float64).reshape(3))
     return f"X {format_length(x, units)}  Y {format_length(y, units)}  Z {format_length(z, units)}"
