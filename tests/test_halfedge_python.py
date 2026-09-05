@@ -197,6 +197,40 @@ def test_split_edge_binding_smoke():
     assert m.split_edge(res.edge_a, 1.0) is None
 
 
+def test_edge_between_binding_present_and_order_independent():
+    """nanobind smoke test: M7.4 edge_between surfaces the packed edge_index_
+    lookup to Python. Both vertex orders must resolve to the same edge id."""
+    from pluton._core import HalfEdgeMesh
+
+    m = HalfEdgeMesh()
+    v0 = m.add_vertex(0.0, 0.0, 0.0)
+    v1 = m.add_vertex(1.0, 0.0, 0.0)
+    e = m.add_halfedge_pair(v0, v1)
+
+    assert m.edge_between(v0, v1) == e
+    assert m.edge_between(v1, v0) == e
+
+
+def test_edge_between_binding_returns_none_when_absent():
+    """The binding must surface absence as None. Asserting `is None` (not
+    falsiness) matters here: a broken binding that returned the kernel's
+    INVALID_ID sentinel (4294967295) or 0 (a valid live edge id elsewhere in
+    this same mesh) would both be truthy-adjacent-but-wrong and must fail
+    this assertion."""
+    from pluton._core import HalfEdgeMesh
+
+    m = HalfEdgeMesh()
+    v0 = m.add_vertex(0.0, 0.0, 0.0)
+    v1 = m.add_vertex(1.0, 0.0, 0.0)
+    v2 = m.add_vertex(0.0, 1.0, 0.0)
+    # This edge exists (and gets id 0) so a binding that mistakenly always
+    # returns 0 is caught too. v0-v2 is never created.
+    m.add_halfedge_pair(v0, v1)
+
+    assert m.edge_between(v0, v2) is None
+    assert m.edge_between(v2, v0) is None
+
+
 def test_set_vertex_position_binding():
     from pluton._core import HalfEdgeMesh
     m = HalfEdgeMesh()
