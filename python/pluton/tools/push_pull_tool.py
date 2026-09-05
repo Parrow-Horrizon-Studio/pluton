@@ -20,14 +20,9 @@ from PySide6.QtCore import Qt
 from PySide6.QtGui import QKeyEvent, QMouseEvent
 
 from pluton.commands import CompositeCommand
-from pluton.commands.scene_commands import (
-    AddEdgeCommand,
-    AddFaceCommand,
-    AddVertexCommand,
-    DissolveEdgeCommand,
-    RemoveFaceCommand,
-)
+from pluton.commands.scene_commands import RemoveFaceCommand
 from pluton.geometry.transforms import apply_mat, is_identity_transform
+from pluton.tools.sweep_support import loft_between_loops, seam_merge
 from pluton.tools.tool import Tool, ToolContext, ToolOverlay
 
 # Visual constants (RGBA).
@@ -296,25 +291,6 @@ class PushPullTool(Tool):
                 return False
         return True
 
-    def _seam_merge_pass(self, candidate_edges: list[int]) -> list[DissolveEdgeCommand]:
-        """Inspect each candidate edge; if its two incident faces are coplanar,
-        dissolve it and return the DissolveEdgeCommand. Returns the list of
-        commands to append to the composite (in order)."""
-        assert self._scene is not None
-        scene = self._scene
-        out = []
-        for e in candidate_edges:
-            if not scene.edge_is_live(e):
-                continue
-            f_a, f_b = scene.edge_faces(e)
-            if f_a is None or f_b is None:
-                continue
-            if scene.faces_are_coplanar(f_a, f_b):
-                cmd = DissolveEdgeCommand(e)
-                cmd.do(scene)
-                out.append(cmd)
-        return out
-
     def _commit_extrusion(self) -> None:
         """Build the extrusion CompositeCommand and push it to the command stack."""
         assert self._armed_face_id is not None
@@ -336,7 +312,6 @@ class PushPullTool(Tool):
         loop = self._armed_face_loop
         normal = self._armed_face_normal.astype(np.float32)
         depth = float(self._current_depth)
-        n = len(loop)
 
         composite = CompositeCommand(name="Push/Pull")
 
@@ -345,59 +320,19 @@ class PushPullTool(Tool):
         rm.do(scene)
         composite.children.append(rm)
 
-        # 2. Add top vertices.
-        top_vert_cmds: list[AddVertexCommand] = []
-        for src_vid in loop:
-            src_pos = scene.vertex(src_vid).position  # already float32 (3,) ndarray
-            top_pos = src_pos + depth * normal
-            c = AddVertexCommand(top_pos)
-            c.do(scene)
-            top_vert_cmds.append(c)
-            composite.children.append(c)
-        top_vids = [c._vertex_id for c in top_vert_cmds]  # type: ignore[attr-defined]
-
-        # 3. Vertical edges (V_i → V'_i).
-        for src_vid, top_vid in zip(loop, top_vids, strict=False):
-            c = AddEdgeCommand(src_vid, top_vid)
-            c.do(scene)
-            composite.children.append(c)
-
-        # 4. Top boundary edges (V'_i → V'_{i+1}).
-        for i in range(n):
-            c = AddEdgeCommand(top_vids[i], top_vids[(i + 1) % n])
-            c.do(scene)
-            composite.children.append(c)
-
-        # 5. Side faces — (V_i, V_{i+1}, V'_{i+1}, V'_i) — CCW from outside.
-        for i in range(n):
-            a = loop[i]
-            b = loop[(i + 1) % n]
-            b_top = top_vids[(i + 1) % n]
-            a_top = top_vids[i]
-            c = AddFaceCommand((a, b, b_top, a_top))
-            c.do(scene)
-            composite.children.append(c)
-
-        # 6. Top face — same winding as source.
-        c = AddFaceCommand(tuple(top_vids))
-        c.do(scene)
-        composite.children.append(c)
-
-        # 7. (M3c) Bottom cap — only for standalone sources (Case 1).
-        # Reversed source loop so the cap's normal points opposite the
-        # extrusion direction (down, when extruding up).
-        if is_standalone:
-            cap = AddFaceCommand(tuple(reversed(loop)))
-            cap.do(scene)
-            composite.children.append(cap)
+        # 2-7. Top vertices, vertical + top boundary edges, side faces, top
+        # face, and (Case 1 only) the reversed-source bottom cap — all in one
+        # loft. is_standalone drives cap_start; the far end is always capped.
+        dst = [scene.vertex(v).position + depth * normal for v in loop]
+        result = loft_between_loops(scene, loop, dst, cap_start=is_standalone, cap_end=True)
+        composite.children.extend(result.commands)
 
         # 8. (M3c) Seam-merge pass — dissolve OLD-source-boundary edges whose
         # two incident faces (parent's old side + new prism's side) are coplanar.
         # Single-pass over the OLD source face's boundary edges only, per design
         # doc §3.1 decision 6. (For Case 1 the candidate edges border the side +
         # bottom cap, which are NOT coplanar, so this no-ops correctly.)
-        seam_cmds = self._seam_merge_pass(candidate_seam_edges)
-        composite.children.extend(seam_cmds)
+        composite.children.extend(seam_merge(scene, candidate_seam_edges))
 
         if self._command_stack is not None:
             self._command_stack.push_executed(composite, self._scene)
