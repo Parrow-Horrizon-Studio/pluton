@@ -208,6 +208,18 @@ class MainWindow(QMainWindow):
         self._entity_info_page.hidden_requested.connect(self._on_entity_hidden)
         self._entity_info_page.tag_requested.connect(self._assign_tag)
         self._entity_info_page.material_requested.connect(self._on_entity_material)
+        # NOT wired as a blanket self._command_stack.add_change_listener the way
+        # _rebuild_outliner is (d1491bc) -- tried that first, and it crashes:
+        # MakeGroupCommand/MakeComponentCommand fire the change listener (inside
+        # execute(), via _fire_change()) BEFORE their caller reassigns
+        # self._selection to the new instance, so entity_summary() would run
+        # against a selection of edges/faces the command just consumed,
+        # chasing a face id no longer live (KeyError from Scene.face_loop).
+        # _rebuild_outliner is immune because outliner_rows() reads model
+        # structure only, never the selection. Hide/Unhide never change what a
+        # selected id refers to (only instance.hidden), so those three call
+        # sites refresh explicitly below instead. Undo/redo already refresh
+        # correctly via _on_after_undo_redo -> _refresh_selection_status().
 
         # Camera tween animator (M7e). Owns the same live camera object the
         # viewport mutates in place; a manual camera move cancels a running tween.
@@ -1116,6 +1128,11 @@ class MainWindow(QMainWindow):
         if instance is None:
             return
         self._command_stack.execute(HideInstancesCommand([instance], hidden), self._model)
+        # A hide command does not touch the selection, so
+        # _refresh_selection_status's usual selection-changed trigger never
+        # fires -- without this, Entity Info's Hidden checkbox goes stale
+        # the moment the toggled row is (or overlaps) the current selection.
+        self._refresh_entity_info()
         self._viewport.update()
 
     def _on_outliner_rename(self, instance_id: int, new_name: str) -> None:
@@ -1142,6 +1159,10 @@ class MainWindow(QMainWindow):
             self._status_bar.set_message("Select objects to hide or unhide.")
             return
         self._command_stack.execute(HideInstancesCommand(instances, hidden), self._model)
+        # Same reasoning as _on_outliner_hide_toggled: Edit > Hide/Unhide acts
+        # on the current selection without changing it, so nothing else
+        # refreshes Entity Info's Hidden checkbox.
+        self._refresh_entity_info()
         self._viewport.update()
 
     def _on_hide(self) -> None:
@@ -1163,6 +1184,10 @@ class MainWindow(QMainWindow):
             self._status_bar.set_message("Nothing is hidden here.")
             return
         self._command_stack.execute(HideInstancesCommand(hidden, False), self._model)
+        # Same reasoning as _on_outliner_hide_toggled: a currently-selected
+        # instance may be among those just revealed, and nothing else would
+        # refresh Entity Info's Hidden checkbox for it.
+        self._refresh_entity_info()
         self._viewport.update()
 
     # --- Entity Info (M7.3, Task 13) --------------------------------------

@@ -358,3 +358,78 @@ def test_painting_from_the_page_goes_through_one_undoable_command(main_window):
 
     assert scene.face_material(face_ids[0]) == 0
     assert scene.face_material(face_ids[1]) == 0
+
+
+def test_the_outliner_eye_toggle_keeps_entity_info_in_sync(main_window):
+    # A hide command does not touch the selection, so _refresh_selection_status
+    # (which only fires on selection changes) never runs -- Entity Info's
+    # checkbox went stale while the Outliner's own row updated correctly.
+    # No explicit _refresh_entity_info() call here: that is what would mask
+    # the bug this test exists to catch.
+    from PySide6.QtCore import Qt
+
+    _square(main_window)
+    main_window._on_select_all()
+    main_window._on_make_group()
+    instance = main_window._model.root.children[-1]
+    main_window._selection.replace(instances=[instance.id])
+    main_window._refresh_selection_status()
+    assert main_window._entity_info_page.hidden_field().checkState() == Qt.CheckState.Unchecked
+
+    main_window._outliner.hide_toggled.emit(instance.id, True)
+
+    assert instance.hidden is True
+    assert main_window._entity_info_page.hidden_field().checkState() == Qt.CheckState.Checked
+
+
+def test_the_edit_hide_action_keeps_entity_info_in_sync(main_window):
+    from PySide6.QtCore import Qt
+
+    _square(main_window)
+    main_window._on_select_all()
+    main_window._on_make_group()
+    instance = main_window._model.root.children[-1]
+    main_window._selection.replace(instances=[instance.id])
+    main_window._refresh_selection_status()
+    assert main_window._entity_info_page.hidden_field().checkState() == Qt.CheckState.Unchecked
+
+    main_window._on_hide()
+
+    assert instance.hidden is True
+    assert main_window._entity_info_page.hidden_field().checkState() == Qt.CheckState.Checked
+
+
+def test_the_edit_unhide_action_keeps_entity_info_in_sync(main_window):
+    from PySide6.QtCore import Qt
+
+    _square(main_window)
+    main_window._on_select_all()
+    main_window._on_make_group()
+    instance = main_window._model.root.children[-1]
+    main_window._selection.replace(instances=[instance.id])
+    main_window._refresh_selection_status()
+    main_window._on_hide()
+    assert main_window._entity_info_page.hidden_field().checkState() == Qt.CheckState.Checked
+
+    main_window._on_unhide()
+
+    assert instance.hidden is False
+    assert main_window._entity_info_page.hidden_field().checkState() == Qt.CheckState.Unchecked
+
+
+def test_undoing_a_hide_keeps_entity_info_in_sync(main_window):
+    from PySide6.QtCore import Qt
+
+    _square(main_window)
+    main_window._on_select_all()
+    main_window._on_make_group()
+    instance = main_window._model.root.children[-1]
+    main_window._selection.replace(instances=[instance.id])
+    main_window._refresh_selection_status()
+    main_window._on_hide()
+    assert main_window._entity_info_page.hidden_field().checkState() == Qt.CheckState.Checked
+
+    main_window._command_stack.undo()
+
+    assert instance.hidden is False
+    assert main_window._entity_info_page.hidden_field().checkState() == Qt.CheckState.Unchecked
