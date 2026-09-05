@@ -78,10 +78,41 @@ def _is_simple(pts) -> bool:
     return True
 
 
-def _segments_cross(p1, p2, p3, p4) -> bool:
-    def side(a, b, c):
-        return np.sign(np.cross(b - a, c - a))
+def _segments_cross(p1, p2, p3, p4, tol: float = 1e-9) -> bool:
+    """Parametric segment-segment intersection.
 
-    d1, d2 = side(p3, p4, p1), side(p3, p4, p2)
-    d3, d4 = side(p1, p2, p3), side(p1, p2, p4)
-    return bool(d1 != d2 and d3 != d4)
+    Deliberately a different algorithm from the implementation's own
+    simplicity check (`sweep_support._is_simple_offset`, a four-orientation
+    sign comparison): this solves ``p1 + t*(p2-p1) == p3 + u*(p4-p3)`` for
+    the two segment parameters ``t`` and ``u`` directly and reports a
+    crossing when both lie in ``[0, 1]`` (within `tol`). Using a genuinely
+    different method -- rather than the same sign-comparison idea reapplied
+    -- means this test can catch a bug in that shared idea, not only a bug
+    in how the implementation applies it.
+
+    Near-parallel segments (the 2x2 system's determinant is close to zero)
+    are handled explicitly rather than falling through to a division: a
+    collinear, overlapping pair counts as crossing; anything else parallel
+    does not.
+    """
+    r = p2 - p1
+    s = p4 - p3
+    denom = r[0] * s[1] - r[1] * s[0]
+    diff = p3 - p1
+
+    if abs(denom) < tol:
+        # Parallel or nearly parallel: only a collinear overlap counts.
+        cross_diff_r = diff[0] * r[1] - diff[1] * r[0]
+        if abs(cross_diff_r) > tol:
+            return False  # parallel but offset apart -- can never meet
+        len_sq = r[0] * r[0] + r[1] * r[1]
+        if len_sq < tol:
+            return False  # p1 == p2, degenerate segment
+        t3 = (diff[0] * r[0] + diff[1] * r[1]) / len_sq
+        t4 = ((p4 - p1)[0] * r[0] + (p4 - p1)[1] * r[1]) / len_sq
+        lo, hi = min(t3, t4), max(t3, t4)
+        return hi > tol and lo < 1.0 - tol
+
+    t = (diff[0] * s[1] - diff[1] * s[0]) / denom
+    u = (diff[0] * r[1] - diff[1] * r[0]) / denom
+    return -tol <= t <= 1.0 + tol and -tol <= u <= 1.0 + tol

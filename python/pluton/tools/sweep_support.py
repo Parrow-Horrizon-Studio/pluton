@@ -230,11 +230,21 @@ def _plane_basis(n_eff: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
 def _is_simple_offset(pts: np.ndarray, e1: np.ndarray, e2: np.ndarray) -> bool:
     """No two non-adjacent edges of the closed, projected polygon cross.
 
-    Deliberately the plain sign-of-cross-product test (no collinearity
-    tolerance): that is what the milestone's own simplicity contract uses
-    to accept a clamp, so validating against anything stricter or looser
-    here would let the binary search converge on a distance the contract
-    disagrees with.
+    Plain four-orientation sign-of-cross-product test, with no collinearity
+    tolerance: two segments are judged to cross only when their endpoints
+    fall on strictly opposite sides of each other (`sign() != sign()`).
+    Exact collinearity -- both signs landing on 0 -- is therefore never a
+    crossing, which is what lets the rectangle's own stage-1 analytic
+    collapse (two opposite edges retracing the same line segment) pass this
+    check without tripping the binary search.
+
+    This is an internal implementation choice, not an external contract:
+    there is nothing outside this module that defines "simple" for an
+    offset polygon, so this check exists only to drive the binary search
+    towards a distance that this same check accepts. `tests/test_offset_polygon.py`
+    verifies the *result* with its own, independently-derived parametric
+    segment-intersection algorithm rather than reusing this one, so a bug
+    shared between the two would still surface as a test failure.
     """
     n = len(pts)
     proj = np.stack([pts @ e1, pts @ e2], axis=-1)
