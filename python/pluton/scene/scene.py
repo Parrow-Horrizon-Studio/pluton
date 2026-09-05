@@ -332,6 +332,18 @@ class Scene:
         f_a, f_b = self.edge_faces(e_id)
         return f_a is None or f_b is None
 
+    def edge_between(self, v1_id: int, v2_id: int) -> int | None:
+        """The live edge joining `v1_id` and `v2_id`, or None.
+
+        Non-mutating, unlike add_halfedge_pair, which this replaces at the
+        two call sites that were using it as a lookup (#26).
+        """
+        return self._mesh.edge_between(v1_id, v2_id)
+
+    def edge_is_live(self, e_id: int) -> bool:
+        """True while `e_id` refers to a live edge slot."""
+        return self._mesh.edge_is_live(e_id)
+
     # ---- M3d additions ----
 
     def point_on_edge(self, e_id: int, t: float) -> np.ndarray:

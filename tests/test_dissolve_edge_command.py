@@ -156,3 +156,31 @@ def test_undo_inside_composite_with_sibling_addface():
     comp.undo(scene)
     assert sum(1 for _ in scene.faces_iter()) == pre_faces
     assert sum(1 for _ in scene.edges_iter()) == pre_edges
+
+
+def test_redo_with_no_live_edge_between_vertices_does_not_fabricate_one():
+    """Regression for #26: the redo branch used to re-resolve the edge id via
+    scene._mesh.add_halfedge_pair(va, vb), a MUTATING call that creates the
+    pair when absent. If the captured vertex pair is ever not joined by a
+    live edge when redo runs, that old code would silently fabricate a new
+    boundary edge (dissolve_edge would then no-op on it, but the fabricated
+    edge stays behind). The fix must instead recognize the missing pair and
+    no-op cleanly, creating nothing.
+
+    We force the redo branch directly (rather than reconstructing the full
+    do/undo/sibling-removal sequence that produces it in practice) by setting
+    the command's captured-state fields by hand, on two vertices with no edge
+    between them at all.
+    """
+    scene = Scene()
+    va = scene.add_vertex(np.array([0.0, 0.0, 0.0], dtype=np.float32))
+    vb = scene.add_vertex(np.array([1.0, 0.0, 0.0], dtype=np.float32))
+
+    cmd = DissolveEdgeCommand(0xFFFFFFFF)  # edge id irrelevant; unused by the redo branch
+    cmd._captured_f1 = ()  # any non-None value routes do() into the redo branch
+    cmd._shared_verts = (va, vb)
+
+    cmd.do(scene)  # exercises the redo branch with an unjoined vertex pair
+
+    assert cmd._was_noop is True
+    assert list(scene.edges_iter()) == []

@@ -304,7 +304,7 @@ class PushPullTool(Tool):
         scene = self._scene
         out = []
         for e in candidate_edges:
-            if not scene._mesh.edge_is_live(e):
+            if not scene.edge_is_live(e):
                 continue
             f_a, f_b = scene.edge_faces(e)
             if f_a is None or f_b is None:

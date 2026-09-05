@@ -245,13 +245,17 @@ class DissolveEdgeCommand(Command):
         else:
             # Redo — the original edge id is stale (undo recreated the edge with
             # a fresh id). Re-resolve the current live edge id from the captured
-            # endpoint pair. The endpoints are always a live pair here (undo just
-            # restored both faces), so add_halfedge_pair returns the existing
-            # edge id idempotently (and returns the edge id directly, not a
-            # half-edge id).
+            # endpoint pair via the non-mutating edge_between lookup.
             assert self._shared_verts is not None
             va, vb = self._shared_verts
-            edge_to_dissolve = scene._mesh.add_halfedge_pair(va, vb)
+            found = scene.edge_between(va, vb)
+            if found is None:
+                # The pair is no longer joined (a sibling command in the same
+                # composite removed it). Nothing to dissolve; stay a clean
+                # no-op so undo remains consistent.
+                self._was_noop = True
+                return
+            edge_to_dissolve = found
 
         result = scene.dissolve_edge(edge_to_dissolve)
         if result is None:
