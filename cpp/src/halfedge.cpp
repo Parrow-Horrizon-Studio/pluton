@@ -392,6 +392,15 @@ bool HalfEdgeMesh::edge_is_live(std::uint32_t e_id) const noexcept {
     const std::uint32_t he = e_id * 2;
     return he < halfedges_.size() && halfedges_[he].alive;
 }
+std::uint32_t HalfEdgeMesh::edge_between(std::uint32_t v1_id, std::uint32_t v2_id) const noexcept {
+    const std::uint32_t v_min = std::min(v1_id, v2_id);
+    const std::uint32_t v_max = std::max(v1_id, v2_id);
+    const auto it = edge_index_.find(pack_pair(v_min, v_max));
+    if (it == edge_index_.end() || !edge_is_live(it->second)) {
+        return INVALID_ID;
+    }
+    return it->second;
+}
 bool HalfEdgeMesh::face_is_live(std::uint32_t f_id) const noexcept {
     return f_id < faces_.size() && faces_[f_id].alive;
 }

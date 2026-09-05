@@ -122,6 +122,39 @@ TEST(HalfEdgeMeshTest, AddHalfedgePairWiresTwinsAndOrigins) {
     EXPECT_EQ(m.halfedge_face(he_b), pluton::HalfEdgeMesh::INVALID_ID);
 }
 
+TEST(HalfEdgeMeshTest, EdgeBetweenFindsAnExistingEdge) {
+    pluton::HalfEdgeMesh m;
+    const auto a = m.add_vertex(0.0f, 0.0f, 0.0f);
+    const auto b = m.add_vertex(1.0f, 0.0f, 0.0f);
+    const auto e = m.add_halfedge_pair(a, b);
+    EXPECT_EQ(m.edge_between(a, b), e);
+}
+
+TEST(HalfEdgeMeshTest, EdgeBetweenIsOrderIndependent) {
+    pluton::HalfEdgeMesh m;
+    const auto a = m.add_vertex(0.0f, 0.0f, 0.0f);
+    const auto b = m.add_vertex(1.0f, 0.0f, 0.0f);
+    const auto e = m.add_halfedge_pair(a, b);
+    EXPECT_EQ(m.edge_between(b, a), e);
+}
+
+TEST(HalfEdgeMeshTest, EdgeBetweenReportsAbsence) {
+    pluton::HalfEdgeMesh m;
+    const auto a = m.add_vertex(0.0f, 0.0f, 0.0f);
+    const auto b = m.add_vertex(1.0f, 0.0f, 0.0f);
+    // No edge added between them.
+    EXPECT_EQ(m.edge_between(a, b), pluton::HalfEdgeMesh::INVALID_ID);
+}
+
+TEST(HalfEdgeMeshTest, EdgeBetweenDoesNotMutate) {
+    pluton::HalfEdgeMesh m;
+    const auto a = m.add_vertex(0.0f, 0.0f, 0.0f);
+    const auto b = m.add_vertex(1.0f, 0.0f, 0.0f);
+    const auto slab_before = m.halfedge_slab_size();
+    (void)m.edge_between(a, b);
+    EXPECT_EQ(m.halfedge_slab_size(), slab_before);
+}
+
 TEST(HalfEdgeMeshTest, AddFaceFromLoopWiresBoundaryCycle) {
     pluton::HalfEdgeMesh m;
     auto v0 = m.add_vertex(0.0f, 0.0f, 0.0f);

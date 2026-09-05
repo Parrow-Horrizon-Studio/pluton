@@ -65,6 +65,11 @@ public:
     bool edge_is_live(std::uint32_t e_id) const noexcept;
     bool face_is_live(std::uint32_t f_id) const noexcept;
 
+    /// Look up the edge id between v1 and v2 without creating one.
+    /// Returns INVALID_ID if no live edge connects them. Unlike
+    /// add_halfedge_pair, this never mutates edge_index_ or the slabs.
+    std::uint32_t edge_between(std::uint32_t v1_id, std::uint32_t v2_id) const noexcept;
+
     std::array<float, 3> vertex_position(std::uint32_t v_id) const;
 
     /// One outgoing half-edge slab index for `v_id` (INVALID_ID if the

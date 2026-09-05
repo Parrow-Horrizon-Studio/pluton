@@ -120,6 +120,19 @@ NB_MODULE(_core, m) {
         .def("vertex_is_live", &HalfEdgeMesh::vertex_is_live)
         .def("edge_is_live", &HalfEdgeMesh::edge_is_live)
         .def("face_is_live", &HalfEdgeMesh::face_is_live)
+        .def(
+            "edge_between",
+            [](const HalfEdgeMesh& m, std::uint32_t v1_id,
+               std::uint32_t v2_id) -> std::optional<std::uint32_t> {
+                const auto e = m.edge_between(v1_id, v2_id);
+                if (e == HalfEdgeMesh::INVALID_ID) {
+                    return std::nullopt;
+                }
+                return e;
+            },
+            nb::arg("v1_id"), nb::arg("v2_id"),
+            "Look up the edge id between v1_id and v2_id without creating one. "
+            "Returns None if no live edge connects them. Never mutates the mesh.")
         .def("vertex_position", &HalfEdgeMesh::vertex_position)
         .def("edge_vertices", &HalfEdgeMesh::edge_vertices)
         .def("face_loop_vertices", &HalfEdgeMesh::face_loop_vertices)
