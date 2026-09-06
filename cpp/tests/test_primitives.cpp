@@ -1,7 +1,10 @@
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <cmath>
+#include <cstdint>
 
+#include "pluton/halfedge.h"
 #include "pluton/primitives.h"
 
 namespace {
@@ -9,6 +12,35 @@ namespace {
 ::testing::AssertionResult NearlyEqual(float a, float b, float tol = 1e-5f) {
     if (std::abs(a - b) <= tol) return ::testing::AssertionSuccess();
     return ::testing::AssertionFailure() << a << " not within " << tol << " of " << b;
+}
+
+// Number of live faces in a freshly built HalfEdgeMesh (nothing removed).
+std::size_t FaceCount(const pluton::HalfEdgeMesh& m) {
+    return m.face_slab_size();
+}
+
+// Number of live vertices in a freshly built HalfEdgeMesh (nothing removed).
+std::size_t VertexCount(const pluton::HalfEdgeMesh& m) {
+    return m.vertex_slab_size();
+}
+
+// A closed solid is watertight iff every live edge borders exactly two live
+// faces — i.e. both of its half-edges have been claimed by a face. A
+// generator that forgets to weld a seam leaves that seam's edges with an
+// INVALID_ID face on one side; one that winds a face backwards makes
+// add_face_from_loop throw (or, if it still succeeds, leaves the mismatched
+// edge unclaimed on the side the backwards face should have covered) — both
+// show up here as a missing face.
+bool IsWatertight(const pluton::HalfEdgeMesh& m) {
+    using pluton::HalfEdgeMesh;
+    for (std::uint32_t e = m.next_live_edge(0); e != HalfEdgeMesh::INVALID_ID;
+         e = m.next_live_edge(e + 1)) {
+        const std::uint32_t f0 = m.halfedge_face(2 * e);
+        const std::uint32_t f1 = m.halfedge_face(2 * e + 1);
+        if (f0 == HalfEdgeMesh::INVALID_ID || f1 == HalfEdgeMesh::INVALID_ID) return false;
+        if (!m.face_is_live(f0) || !m.face_is_live(f1)) return false;
+    }
+    return true;
 }
 
 }  // namespace
@@ -76,4 +108,156 @@ TEST(PrimitivesCube, EachFaceHasOneNormal) {
             EXPECT_TRUE(NearlyEqual(cube.normals[3 * (4 * f + v) + 2], nz0));
         }
     }
+}
+
+// --- make_box ------------------------------------------------------------
+
+TEST(PrimitivesBox, CountsAreCorrect) {
+    // Distinct width/depth/height: a generator that confuses one axis for
+    // another still produces 8 vertices and 6 faces, so this test is paired
+    // with BoxRespectsDistinctDimensions below to catch that case.
+    const auto box = pluton::make_box(1.0f, 2.0f, 3.0f);
+    EXPECT_EQ(VertexCount(box), 8u);
+    EXPECT_EQ(FaceCount(box), 6u);
+}
+
+TEST(PrimitivesBox, RespectsDistinctDimensions) {
+    // A generator that swaps width/depth/height (or ignores one of them)
+    // fails these per-axis bounds even though counts above still pass.
+    const float width = 1.0f, depth = 2.0f, height = 3.0f;
+    const auto box = pluton::make_box(width, depth, height);
+
+    float min_x = 1e9f, max_x = -1e9f, min_y = 1e9f, max_y = -1e9f, min_z = 1e9f, max_z = -1e9f;
+    for (std::uint32_t v = box.next_live_vertex(0); v != pluton::HalfEdgeMesh::INVALID_ID;
+         v = box.next_live_vertex(v + 1)) {
+        const auto p = box.vertex_position(v);
+        min_x = std::min(min_x, p[0]);
+        max_x = std::max(max_x, p[0]);
+        min_y = std::min(min_y, p[1]);
+        max_y = std::max(max_y, p[1]);
+        min_z = std::min(min_z, p[2]);
+        max_z = std::max(max_z, p[2]);
+    }
+    EXPECT_TRUE(NearlyEqual(min_x, -width / 2));
+    EXPECT_TRUE(NearlyEqual(max_x, +width / 2));
+    EXPECT_TRUE(NearlyEqual(min_y, -depth / 2));
+    EXPECT_TRUE(NearlyEqual(max_y, +depth / 2));
+    EXPECT_TRUE(NearlyEqual(min_z, 0.0f));
+    EXPECT_TRUE(NearlyEqual(max_z, height));
+}
+
+// --- make_cylinder ---------------------------------------------------------
+
+TEST(Primitives, CylinderFaceCountFollowsSegments) {
+    // Eight sides plus two caps. A generator that hardcodes segment count
+    // (e.g. always 24) fails this at segments=8.
+    const auto m = pluton::make_cylinder(1.0f, 2.0f, 8);
+    EXPECT_EQ(FaceCount(m), 10u);
+}
+
+TEST(Primitives, CylinderFaceCountFollowsDifferentSegments) {
+    const auto m = pluton::make_cylinder(1.0f, 2.0f, 6);
+    EXPECT_EQ(FaceCount(m), 8u);
+}
+
+TEST(Primitives, CylinderVerticesLieOnRadiusAndHeightRange) {
+    // Catches a generator that gets the radius or the axis wrong: every
+    // vertex on this HalfEdgeMesh sits on the rim of the top or bottom
+    // circle (no interior cap vertex), so all of them must be exactly
+    // `radius` from the z-axis and within [0, height] in z.
+    const float radius = 1.5f;
+    const float height = 2.0f;
+    const auto m = pluton::make_cylinder(radius, height, 8);
+    for (std::uint32_t v = m.next_live_vertex(0); v != pluton::HalfEdgeMesh::INVALID_ID;
+         v = m.next_live_vertex(v + 1)) {
+        const auto p = m.vertex_position(v);
+        const float r = std::sqrt(p[0] * p[0] + p[1] * p[1]);
+        EXPECT_TRUE(NearlyEqual(r, radius, 1e-4f)) << "vertex " << v;
+        EXPECT_GE(p[2], -1e-5f);
+        EXPECT_LE(p[2], height + 1e-5f);
+    }
+}
+
+// --- make_cone -------------------------------------------------------------
+
+TEST(Primitives, ConeFaceCountFollowsSegments) {
+    // Eight sides plus one base. A generator that hardcodes segment count
+    // fails this at segments=8.
+    const auto m = pluton::make_cone(1.0f, 2.0f, 8);
+    EXPECT_EQ(FaceCount(m), 9u);
+}
+
+TEST(Primitives, ConeFaceCountFollowsDifferentSegments) {
+    const auto m = pluton::make_cone(1.0f, 2.0f, 5);
+    EXPECT_EQ(FaceCount(m), 6u);
+}
+
+TEST(Primitives, ConeBaseOnRadiusApexAtHeight) {
+    const float radius = 1.5f;
+    const float height = 3.0f;
+    const auto m = pluton::make_cone(radius, height, 10);
+    bool found_apex = false;
+    for (std::uint32_t v = m.next_live_vertex(0); v != pluton::HalfEdgeMesh::INVALID_ID;
+         v = m.next_live_vertex(v + 1)) {
+        const auto p = m.vertex_position(v);
+        if (NearlyEqual(p[2], height, 1e-4f)) {
+            // The apex: on-axis.
+            found_apex = true;
+            EXPECT_TRUE(NearlyEqual(p[0], 0.0f));
+            EXPECT_TRUE(NearlyEqual(p[1], 0.0f));
+        } else {
+            // A base vertex: on the ground plane, on the radius.
+            EXPECT_TRUE(NearlyEqual(p[2], 0.0f));
+            const float r = std::sqrt(p[0] * p[0] + p[1] * p[1]);
+            EXPECT_TRUE(NearlyEqual(r, radius, 1e-4f)) << "vertex " << v;
+        }
+    }
+    EXPECT_TRUE(found_apex);
+}
+
+// --- make_sphere -----------------------------------------------------------
+
+TEST(Primitives, SphereHasNoDegenerateFaces) {
+    const auto m = pluton::make_sphere(1.0f, 6, 8);
+    EXPECT_GT(FaceCount(m), 0u);
+}
+
+TEST(Primitives, SphereFaceCountFollowsRingsAndSegments) {
+    // rings * segments faces (2 pole fans of `segments` triangles each, plus
+    // (rings - 2) interior latitude bands of `segments` quads each). A
+    // generator that ignores rings or segments fails this.
+    const auto m6x8 = pluton::make_sphere(1.0f, 6, 8);
+    EXPECT_EQ(FaceCount(m6x8), 48u);
+    const auto m4x10 = pluton::make_sphere(1.0f, 4, 10);
+    EXPECT_EQ(FaceCount(m4x10), 40u);
+}
+
+TEST(Primitives, SphereVerticesLieOnSurface) {
+    // Strongest correctness check for the sphere: every vertex must be
+    // exactly `radius` away from the sphere's centre (0, 0, radius). A
+    // generator with a wrong latitude formula (e.g. linear in z instead of
+    // cos(phi)) produces the right vertex/face counts but fails this.
+    const float radius = 2.0f;
+    const auto m = pluton::make_sphere(radius, 8, 12);
+    for (std::uint32_t v = m.next_live_vertex(0); v != pluton::HalfEdgeMesh::INVALID_ID;
+         v = m.next_live_vertex(v + 1)) {
+        const auto p = m.vertex_position(v);
+        const float dx = p[0];
+        const float dy = p[1];
+        const float dz = p[2] - radius;
+        const float dist = std::sqrt(dx * dx + dy * dy + dz * dz);
+        EXPECT_TRUE(NearlyEqual(dist, radius, 1e-4f)) << "vertex " << v;
+    }
+}
+
+// --- Watertightness ----------------------------------------------------
+
+TEST(Primitives, EveryPrimitiveIsWatertight) {
+    // Every edge borders exactly two faces on a closed solid. Distinct
+    // width/depth/height on the box rules out a coincidental pass from
+    // symmetry.
+    EXPECT_TRUE(IsWatertight(pluton::make_box(1.0f, 2.0f, 3.0f)));
+    EXPECT_TRUE(IsWatertight(pluton::make_cylinder(1.0f, 2.0f, 12)));
+    EXPECT_TRUE(IsWatertight(pluton::make_cone(1.0f, 2.0f, 12)));
+    EXPECT_TRUE(IsWatertight(pluton::make_sphere(1.0f, 8, 12)));
 }

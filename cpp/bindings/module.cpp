@@ -179,6 +179,23 @@ NB_MODULE(_core, m) {
 
         .def_ro_static("INVALID_ID", &HalfEdgeMesh::INVALID_ID);
 
+    m.def("make_box", &pluton::make_box, nb::arg("width") = 1.0f, nb::arg("depth") = 1.0f,
+          nb::arg("height") = 1.0f,
+          "Create an axis-aligned box as a HalfEdgeMesh, centred on the origin "
+          "in x and y with its base on the ground plane (z = 0).");
+    m.def("make_cylinder", &pluton::make_cylinder, nb::arg("radius") = 1.0f,
+          nb::arg("height") = 1.0f, nb::arg("segments") = 24,
+          "Create a cylinder as a HalfEdgeMesh, centred on the origin in x and "
+          "y with its base on the ground plane (z = 0).");
+    m.def("make_cone", &pluton::make_cone, nb::arg("radius") = 1.0f, nb::arg("height") = 1.0f,
+          nb::arg("segments") = 24,
+          "Create a cone as a HalfEdgeMesh, centred on the origin in x and y "
+          "with its base on the ground plane (z = 0) and apex at z = height.");
+    m.def("make_sphere", &pluton::make_sphere, nb::arg("radius") = 1.0f, nb::arg("rings") = 12,
+          nb::arg("segments") = 24,
+          "Create a UV-sphere as a HalfEdgeMesh, centred on the origin in x "
+          "and y with its bottom pole on the ground plane (z = 0).");
+
     nb::class_<SplitEdgeResult>(m, "SplitEdgeResult", "Result of HalfEdgeMesh.split_edge")
         .def_ro("vertex", &SplitEdgeResult::vertex)
         .def_ro("edge_a", &SplitEdgeResult::edge_a)
