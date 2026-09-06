@@ -56,6 +56,7 @@ from pluton.tools.follow_me_tool import FollowMeTool
 from pluton.tools.offset_tool import OffsetTool
 from pluton.tools.opening_tool import DoorWindowTool
 from pluton.tools.paint_tool import PaintTool
+from pluton.tools.primitive_tool import BoxTool, ConeTool, CylinderTool, SphereTool
 from pluton.tools.roof_tool import RoofTool
 from pluton.tools.text_tool import TextTool
 from pluton.tools.wall_tool import WallTool
@@ -66,6 +67,7 @@ from pluton.ui.entity_info_page import EntityInfoPage
 from pluton.ui.materials_page import MaterialsPage
 from pluton.ui.opening_options_bar import OpeningOptionsBar
 from pluton.ui.outliner_tree import OutlinerTree
+from pluton.ui.primitive_options_bar import PrimitiveOptionsBar
 from pluton.ui.properties_dock import PropertiesDock
 from pluton.ui.roof_options_bar import RoofOptionsBar
 from pluton.ui.scenes_page import ScenesPage
@@ -145,6 +147,14 @@ class MainWindow(QMainWindow):
         self._tool_manager.register(self._dimension_tool)
         self._text_tool = TextTool()
         self._tool_manager.register(self._text_tool)
+        self._box_tool = BoxTool()
+        self._tool_manager.register(self._box_tool)
+        self._cylinder_tool = CylinderTool()
+        self._tool_manager.register(self._cylinder_tool)
+        self._cone_tool = ConeTool()
+        self._tool_manager.register(self._cone_tool)
+        self._sphere_tool = SphereTool()
+        self._tool_manager.register(self._sphere_tool)
 
         # Viewport + status bar (created BEFORE setting ToolContext so we can
         # wire the camera + widget_size_provider into the context).
@@ -270,13 +280,34 @@ class MainWindow(QMainWindow):
             self._roof_tool, units_provider=lambda: self._doc.units
         )
 
-        # Tool Settings tab (M7.3, Task 12) — hosts the three option bars
-        # above in a QStackedWidget; _refresh_tool_options picks which one
-        # (if any) is visible.
+        # Primitive option bars (M7.4, Task 11) — segments (cylinder/cone/
+        # sphere) and rings (sphere only) fields; Box's bar has neither
+        # field (its footprint and height come from the drag gesture), but
+        # still gets a key below so arming it behaves like the other three.
+        self._box_options_bar = PrimitiveOptionsBar(
+            self._box_tool, has_segments=False, has_rings=False
+        )
+        self._cylinder_options_bar = PrimitiveOptionsBar(
+            self._cylinder_tool, has_segments=True, has_rings=False
+        )
+        self._cone_options_bar = PrimitiveOptionsBar(
+            self._cone_tool, has_segments=True, has_rings=False
+        )
+        self._sphere_options_bar = PrimitiveOptionsBar(
+            self._sphere_tool, has_segments=True, has_rings=True
+        )
+
+        # Tool Settings tab (M7.3, Task 12) — hosts the option bars above in
+        # a QStackedWidget; _refresh_tool_options picks which one (if any)
+        # is visible.
         self._tool_settings_page = ToolSettingsPage(self._properties_dock)
         self._tool_settings_page.add_bar("wall", self._wall_options_bar)
         self._tool_settings_page.add_bar("opening", self._opening_options_bar)
         self._tool_settings_page.add_bar("roof", self._roof_options_bar)
+        self._tool_settings_page.add_bar("box", self._box_options_bar)
+        self._tool_settings_page.add_bar("cylinder", self._cylinder_options_bar)
+        self._tool_settings_page.add_bar("cone", self._cone_options_bar)
+        self._tool_settings_page.add_bar("sphere", self._sphere_options_bar)
         self._properties_dock.set_page("tool_settings", self._tool_settings_page)
 
         container = QWidget(self)
@@ -595,6 +626,14 @@ class MainWindow(QMainWindow):
             key = "opening"
         elif isinstance(active, RoofTool):
             key = "roof"
+        elif isinstance(active, BoxTool):
+            key = "box"
+        elif isinstance(active, CylinderTool):
+            key = "cylinder"
+        elif isinstance(active, ConeTool):
+            key = "cone"
+        elif isinstance(active, SphereTool):
+            key = "sphere"
 
         if key == "wall":
             self._wall_options_bar.refresh()
@@ -602,6 +641,14 @@ class MainWindow(QMainWindow):
             self._opening_options_bar.refresh()
         elif key == "roof":
             self._roof_options_bar.refresh()
+        elif key == "box":
+            self._box_options_bar.refresh()
+        elif key == "cylinder":
+            self._cylinder_options_bar.refresh()
+        elif key == "cone":
+            self._cone_options_bar.refresh()
+        elif key == "sphere":
+            self._sphere_options_bar.refresh()
 
         self._tool_settings_page.show_bar(key)
         if key is not None:

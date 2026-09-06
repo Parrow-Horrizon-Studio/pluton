@@ -61,7 +61,7 @@ def test_every_toolbar_action_has_an_icon():
 
 def test_all_eighteen_tools_are_declared():
     tools = [s for s in A.ACTIONS if s.group == A.TOOL_GROUP]
-    assert len(tools) == 20
+    assert len(tools) == 24
     for spec in tools:
         assert spec.checkable is True
         assert spec.cursor is not None

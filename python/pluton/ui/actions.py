@@ -218,6 +218,14 @@ ACTIONS: tuple[ActionSpec, ...] = (
     _tool("tool_wall", "Wall", "W", _CH),
     _tool("tool_door_window", "Door/Window", "D", _CH),
     _tool("tool_roof", "Roof", "O", _CH),
+    # No shortcut (M7.4 Task 5's registry re-key, same as Follow Me above):
+    # four new tools competing for single letters against an already-full
+    # roster isn't worth the naming fights, and each is reachable from the
+    # Primitives toolbar/menu regardless.
+    _tool("tool_box", "Box", None, _CH),
+    _tool("tool_cylinder", "Cylinder", None, _CH),
+    _tool("tool_cone", "Cone", None, _CH),
+    _tool("tool_sphere", "Sphere", None, _CH),
     # --- View ---------------------------------------------------------
     ActionSpec(
         "view_style_wireframe",
@@ -326,6 +334,11 @@ TOOLBARS: tuple[ToolbarSpec, ...] = (
         ("tool_wall", "tool_door_window", "tool_roof"),
     ),
     ToolbarSpec(
+        "primitives",
+        "Primitives",
+        ("tool_box", "tool_cylinder", "tool_cone", "tool_sphere"),
+    ),
+    ToolbarSpec(
         "styles",
         "Styles",
         (
@@ -408,6 +421,11 @@ MENUS: tuple[MenuSpec, ...] = (
             "tool_wall",
             "tool_door_window",
             "tool_roof",
+            None,
+            "tool_box",
+            "tool_cylinder",
+            "tool_cone",
+            "tool_sphere",
         ),
     ),
     MenuSpec(

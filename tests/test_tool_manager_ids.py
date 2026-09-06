@@ -23,6 +23,7 @@ from pluton.tools.offset_tool import OffsetTool
 from pluton.tools.opening_tool import DoorWindowTool
 from pluton.tools.paint_tool import PaintTool
 from pluton.tools.polygon_tool import PolygonTool
+from pluton.tools.primitive_tool import BoxTool, ConeTool, CylinderTool, SphereTool
 from pluton.tools.push_pull_tool import PushPullTool
 from pluton.tools.rectangle_tool import RectangleTool
 from pluton.tools.roof_tool import RoofTool
@@ -38,7 +39,10 @@ from pluton.ui.actions import ACTIONS, TOOL_GROUP
 
 _ALL_TOOL_CLASSES = (
     ArcTool,
+    BoxTool,
     CircleTool,
+    ConeTool,
+    CylinderTool,
     DimensionTool,
     EraserTool,
     FollowMeTool,
@@ -54,6 +58,7 @@ _ALL_TOOL_CLASSES = (
     RotateTool,
     ScaleTool,
     SelectTool,
+    SphereTool,
     TapeMeasureTool,
     TextTool,
     WallTool,
@@ -83,7 +88,7 @@ def test_every_shipped_tool_has_a_unique_id_matching_its_action():
     expected_ids = {
         spec.handler_arg for spec in ACTIONS if spec.group == TOOL_GROUP
     }
-    assert len(expected_ids) == 20
+    assert len(expected_ids) == 24
 
     mgr = ToolManager()
     for cls in _ALL_TOOL_CLASSES:

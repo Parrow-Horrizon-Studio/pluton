@@ -34,7 +34,16 @@ class ToolSettingsPage(QWidget):
 
     def add_bar(self, key: str, widget: QWidget) -> None:
         """Adopt an option bar. Reparenting is what moves it out of wherever
-        it was; the widget itself is not modified."""
+        it was; the widget itself is not modified.
+
+        Raises `KeyError` if `key` is already registered. Deferred as a
+        Minor in M7.3 (#105) when there were only three call sites (wall,
+        opening, roof) and a collision was theoretical; M7.4 Task 11 brings
+        four more (box, cylinder, cone, sphere), so a copy-pasted key is no
+        longer a hypothetical mistake.
+        """
+        if key in self._keys:
+            raise KeyError(f"a bar is already registered for {key!r}")
         self._keys[key] = self._stack.addWidget(widget)
 
     def show_bar(self, key: str | None) -> None:
