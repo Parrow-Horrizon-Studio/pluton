@@ -177,11 +177,40 @@ def test_a_too_tight_corner_is_refused_via_sweep_stations_and_reported(main_wind
 
 def test_a_sharp_but_survivable_corner_still_sweeps(main_window):
     # The other direction of the refusal test: a real (not fork) corner
-    # that is NOT too tight must go through. A tool that refuses every
-    # non-trivial corner (e.g. by mishandling the miter math) would fail
-    # here even though the fork/hairpin tests above would still pass.
-    profile, path = _profile_and_path(main_window)
+    # that is NOT too tight must go through. Reusing the fixture's mild
+    # 90-degree / 1x1-profile corner would not probe this at all -- Task 7's
+    # refusal criterion (SweepRefused: a profile vertex's required
+    # slide-to-miter-plane distance exceeds the adjoining segment's own
+    # length) is nowhere near tripped by a 90-degree bend on a 5-unit
+    # segment, so a sloppy or over-conservative refusal threshold would
+    # never be exercised by it.
+    #
+    # This fixture instead bends two 5-unit segments by 168.5 degrees (i.e.
+    # only 11.5 degrees short of the path folding straight back on itself),
+    # against the same 1x1 profile square used elsewhere in this file. For
+    # this profile/segment-length pair, the required slide distance is
+    # ~99.3% of the 5-unit segment length -- independently verified by
+    # replicating _mitered_station's own slide formula outside the tool:
+    # the refusal boundary for this exact profile and segment length sits
+    # at a 168.579-degree bend (slide == 100.00% of the segment), so 168.5
+    # degrees clears it by well under a tenth of a degree, sitting at 99.3%
+    # of the way to refusal. A correct implementation accepts this; a
+    # sloppy or over-conservative threshold (e.g. a fixed angle cutoff, or
+    # one that doesn't scale with segment length) would very plausibly
+    # refuse it.
     scene = main_window._model.active_context.mesh
+    p = [
+        scene.add_vertex(np.array([0.0, 0.0, 0.0], dtype=np.float32)),
+        scene.add_vertex(np.array([1.0, 0.0, 0.0], dtype=np.float32)),
+        scene.add_vertex(np.array([1.0, 0.0, 1.0], dtype=np.float32)),
+        scene.add_vertex(np.array([0.0, 0.0, 1.0], dtype=np.float32)),
+    ]
+    profile = scene.add_face_from_loop(p)
+    a = scene.add_vertex(np.array([0.0, 0.0, 0.0], dtype=np.float32))
+    b = scene.add_vertex(np.array([0.0, 5.0, 0.0], dtype=np.float32))
+    c = scene.add_vertex(np.array([0.9968396721, 0.1003764769, 0.0], dtype=np.float32))
+    path = [scene.add_edge(a, b), scene.add_edge(b, c)]
+
     before = len(list(scene.faces_iter()))
     depth = len(main_window._command_stack._undo)
 
@@ -213,6 +242,7 @@ def test_a_closed_path_sweeps_into_a_lathe_with_no_caps(main_window):
         scene.add_edge(p3, p0),
     ]
     before = len(list(scene.faces_iter()))
+    before_vertices = len(list(scene.vertices_iter()))
     depth = len(main_window._command_stack._undo)
 
     tool = _tool(main_window)
@@ -221,8 +251,16 @@ def test_a_closed_path_sweeps_into_a_lathe_with_no_caps(main_window):
     tool._commit_sweep(profile)
 
     # 4 profile vertices x 4 path edges = 16 new side quads, no caps, minus
-    # the one removed source face.
+    # the one removed source face. Face count alone can't tell "welded onto
+    # the original loop" apart from "left a duplicate coincident ring" --
+    # both shapes have 16 quads. What pins the weld is the vertex count:
+    # only 3 of the 4 loft segments mint a fresh ring (12 new vertices);
+    # the segment that closes the seam back to the start must land on the
+    # profile's OWN original loop vertices (Scene.add_vertex is idempotent
+    # on exact float32 match) rather than minting a 4th, merely-coincident
+    # ring, which would show up here as +16 instead of +12.
     assert len(list(scene.faces_iter())) == before + 15
+    assert len(list(scene.vertices_iter())) == before_vertices + 12
     assert len(main_window._command_stack._undo) == depth + 1
 
 

@@ -24,7 +24,7 @@ import numpy as np
 from PySide6.QtGui import QMouseEvent
 
 from pluton.commands import CompositeCommand
-from pluton.commands.scene_commands import AddEdgeCommand, AddFaceCommand, RemoveFaceCommand
+from pluton.commands.scene_commands import RemoveFaceCommand
 from pluton.geometry.transforms import apply_mat, is_identity_transform
 from pluton.tools.sweep_support import SweepRefused, loft_between_loops, sweep_stations
 from pluton.tools.tool import Tool, ToolContext, ToolOverlay
@@ -318,12 +318,22 @@ class FollowMeTool(Tool):
 
         if self._path_closed:
             # Close the tube back onto the profile's OWN original boundary
-            # loop rather than minting one final coincident-but-distinct
-            # ring: that is what turns the sequence of open segments above
-            # into an actual closed lathe, and it is the only way to do so
-            # without leaving an unwelded seam (this codebase has no
-            # coincident-vertex merge utility to clean one up afterwards).
-            composite.children.extend(_stitch_existing_loops(scene, current, loop))
+            # loop. loft_between_loops mints destination vertices via
+            # AddVertexCommand, which Scene.add_vertex makes idempotent on
+            # exact float32 match (see scene.py's module docstring and
+            # test_scene.py::test_add_vertex_is_idempotent_on_exact_match).
+            # Handing it the untransformed profile_pts as the destination
+            # therefore welds this seam onto the original loop's own vertex
+            # ids instead of minting a coincident duplicate ring -- no
+            # separate stitching helper needed.
+            result = loft_between_loops(
+                scene,
+                current,
+                profile_pts,
+                cap_start=False,
+                cap_end=False,
+            )
+            composite.children.extend(result.commands)
 
         self._command_stack.push_executed(composite, scene)
 
@@ -334,36 +344,3 @@ class FollowMeTool(Tool):
     def _reset_to_idle(self) -> None:
         self._state = _State.IDLE
         self._hovered_face_id = None
-
-
-def _stitch_existing_loops(scene, ring_a: Sequence[int], ring_b: Sequence[int]) -> list:
-    """Connect two loops that BOTH already exist with a ring of quads.
-
-    `loft_between_loops` always mints fresh destination vertices, which is
-    the right shape for every other station in a sweep but wrong for the
-    seam that closes a closed path into a lathe: that seam's destination is
-    the profile's own original boundary loop, already live in the scene.
-    This mirrors the middle of `loft_between_loops` -- edges, then side
-    quads, in the same `(a_i, a_{i+1}, b_{i+1}, b_i)` winding -- just
-    without the vertex-creation step, since both rings already exist.
-
-    `ring_a` and `ring_b` must be parallel: index i of each must be the same
-    profile vertex, just at a different position along the path. Every ring
-    a sweep ever builds satisfies this by construction (each is `loop`, or a
-    `loft_between_loops` destination built from `profile_pts` in the same
-    order), so this is asserted rather than re-derived.
-    """
-    n = len(ring_a)
-    assert n == len(ring_b), "loop lengths must match to close the seam"
-    commands: list = []
-    for a, b in zip(ring_a, ring_b, strict=True):
-        cmd = AddEdgeCommand(a, b)
-        cmd.do(scene)
-        commands.append(cmd)
-    for i in range(n):
-        a0, a1 = ring_a[i], ring_a[(i + 1) % n]
-        b0, b1 = ring_b[i], ring_b[(i + 1) % n]
-        cmd = AddFaceCommand((a0, a1, b1, b0))
-        cmd.do(scene)
-        commands.append(cmd)
-    return commands
