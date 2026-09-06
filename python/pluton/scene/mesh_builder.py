@@ -77,13 +77,14 @@ def build_mesh_into_scene(mesh, scene, transform: np.ndarray | None = None) -> l
     from a degenerate, UI-supplied transform) never has to clean up a
     half-built primitive itself.
 
-    A wrinkle the rollback accounts for: `Scene.add_vertex` is "idempotent
-    on exact equality", so a welding transform can make two DIFFERENT
-    `AddVertexCommand`s allocate the SAME underlying scene vertex id. Blind
-    reverse-undo would call `remove_vertex` on that id twice and raise on
-    the second (already-removed) call. The rollback below tracks which
-    vertex ids it has already removed and skips a repeat, so the aliasing
-    is absorbed rather than turning cleanup itself into a second failure.
+    A wrinkle the rollback used to hand-guard: `Scene.add_vertex` is
+    "idempotent on exact equality", so a welding transform can make two
+    DIFFERENT `AddVertexCommand`s resolve onto the SAME underlying scene
+    vertex id. `AddVertexCommand` now records whether its own `do()` created
+    that vertex or merely resolved onto one already there, and only the
+    creator removes it on undo -- so plain reverse-order undo absorbs the
+    aliasing, and the id-tracking special case this loop used to carry is
+    gone (it would now skip the one command that DOES own the vertex).
     """
     commands: list[Command] = []
     vertex_map: dict[int, int] = {}
@@ -126,19 +127,12 @@ def build_mesh_into_scene(mesh, scene, transform: np.ndarray | None = None) -> l
         # mid-walk failure never leaves partial geometry behind. Every
         # command in `commands` has already had `do()` called successfully
         # (a command that raised inside `do()` was never appended), so each
-        # `undo()` here runs against exactly the state its own `do()` left,
-        # with no sibling failure to work around -- EXCEPT for vertex
-        # aliasing (see the docstring): a welding transform can give two
-        # `AddVertexCommand`s the same underlying `_vertex_id`, and the
-        # second `remove_vertex` on an already-removed id would raise. Track
-        # ids already removed here and skip a repeat.
-        removed_vertex_ids: set[int] = set()
+        # `undo()` here runs against exactly the state its own `do()` left.
+        # Vertex aliasing under a welding transform (see the docstring) needs
+        # no special case: each `AddVertexCommand` knows whether it created
+        # its vertex, and the ones that merely resolved onto an existing id
+        # leave it for its creator to remove.
         for cmd in reversed(commands):
-            if isinstance(cmd, AddVertexCommand):
-                vertex_id = cmd._vertex_id  # type: ignore[attr-defined]
-                if vertex_id in removed_vertex_ids:
-                    continue
-                removed_vertex_ids.add(vertex_id)
             cmd.undo(scene)
         raise
 

@@ -144,3 +144,85 @@ def test_clear_scene_command_captures_and_restores():
     assert len(edges) == 3
     assert len(faces) == 1
     assert {v.id for v in verts} == {v0, v1, v2}
+
+
+def test_add_vertex_command_undo_leaves_a_deduped_vertex_alone():
+    # Scene.add_vertex is idempotent on exact position, so a command aimed at
+    # an occupied position resolves onto the EXISTING vertex. It never created
+    # it, so undo must not delete it out from under whoever owns it.
+    from pluton.commands.scene_commands import AddVertexCommand
+
+    s, v0, _v1, _v2 = _three_vertex_scene()
+    before = {v.id for v in s.vertices_iter()}
+
+    cmd = AddVertexCommand(np.array([0.0, 0.0, 0.0], dtype=np.float32))
+    cmd.do(s)
+    assert cmd._vertex_id == v0  # deduped onto the pre-existing vertex
+    assert {v.id for v in s.vertices_iter()} == before
+
+    cmd.undo(s)
+    assert {v.id for v in s.vertices_iter()} == before, (
+        "undo deleted a pre-existing vertex the command never created"
+    )
+
+    # do -> undo -> redo -> undo: still a clean no-op in both directions.
+    cmd.do(s)
+    assert {v.id for v in s.vertices_iter()} == before
+    cmd.undo(s)
+    assert {v.id for v in s.vertices_iter()} == before
+
+
+def test_add_edge_command_undo_leaves_a_deduped_edge_alone():
+    from pluton.commands.scene_commands import AddEdgeCommand
+
+    s, v0, v1, _v2 = _three_vertex_scene()
+    e0 = s.add_edge(v0, v1)
+    before = {e.id for e in s.edges_iter()}
+
+    cmd = AddEdgeCommand(v0, v1)
+    cmd.do(s)
+    assert cmd._edge_id == e0  # deduped onto the pre-existing edge
+    assert {e.id for e in s.edges_iter()} == before
+
+    cmd.undo(s)
+    assert {e.id for e in s.edges_iter()} == before, (
+        "undo deleted a pre-existing edge the command never created"
+    )
+
+    cmd.do(s)
+    assert {e.id for e in s.edges_iter()} == before
+    cmd.undo(s)
+    assert {e.id for e in s.edges_iter()} == before
+
+
+def test_add_vertex_and_edge_commands_still_own_what_they_actually_create():
+    # The ownership guard must not turn a genuine creation into a no-op:
+    # do -> undo -> redo -> undo on freshly-minted geometry still round-trips,
+    # id-preserving, exactly as before.
+    from pluton.commands.scene_commands import AddEdgeCommand, AddVertexCommand
+
+    s, v0, _v1, _v2 = _three_vertex_scene()
+    v_cmd = AddVertexCommand(np.array([9.0, 9.0, 9.0], dtype=np.float32))
+    v_cmd.do(s)
+    new_v = v_cmd._vertex_id
+    assert new_v not in (v0,)
+    e_cmd = AddEdgeCommand(v0, new_v)
+    e_cmd.do(s)
+    new_e = e_cmd._edge_id
+
+    e_cmd.undo(s)
+    v_cmd.undo(s)
+    assert new_v not in {v.id for v in s.vertices_iter()}
+    assert new_e not in {e.id for e in s.edges_iter()}
+
+    v_cmd.do(s)  # redo restores the SAME ids
+    e_cmd.do(s)
+    assert v_cmd._vertex_id == new_v
+    assert e_cmd._edge_id == new_e
+    assert new_v in {v.id for v in s.vertices_iter()}
+    assert new_e in {e.id for e in s.edges_iter()}
+
+    e_cmd.undo(s)
+    v_cmd.undo(s)
+    assert new_v not in {v.id for v in s.vertices_iter()}
+    assert new_e not in {e.id for e in s.edges_iter()}

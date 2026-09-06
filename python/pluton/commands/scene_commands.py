@@ -10,46 +10,94 @@ from pluton.commands.command import Command
 
 
 class AddVertexCommand(Command):
+    """Add a vertex, or resolve onto the one already sitting at that position.
+
+    `Scene.add_vertex` is idempotent on exact float32 equality, so `do()` may
+    hand back a vertex this command did NOT create — one belonging to geometry
+    that was already in the scene (a profile vertex welded to the start of a
+    Follow Me path is the everyday case). Removing that vertex in `undo()`
+    would silently delete the user's pre-existing geometry, so ownership is
+    recorded at the first `do()` and every later step honours it.
+
+    Detection: `Scene.add_vertex` only ever APPENDS when it creates (ids are
+    slab indices; a dedup returns an id below the slab's current size, and a
+    removal tombstones rather than freeing the slot). So the vertex slab
+    growing across the call is an exact, O(1) test for "this call created it".
+    """
+
     name = "Add Vertex"
 
     def __init__(self, position: np.ndarray) -> None:
         self._position = np.asarray(position, dtype=np.float32).reshape(3).copy()
         self._vertex_id: int | None = None
+        self._created = False
 
     def do(self, scene) -> None:
         if self._vertex_id is None:
-            # First execution — allocate a new slot.
+            # First execution — allocate a new slot, or dedup onto an existing one.
+            slab_before = scene.vertex_slab_size()
             self._vertex_id = scene.add_vertex(self._position)
-        else:
+            self._created = scene.vertex_slab_size() != slab_before
+        elif self._created:
             # Redo — restore the previously-allocated slot to preserve the ID.
             scene.restore_vertex(self._vertex_id, self._position)
+        # else: the first do() resolved onto a vertex owned by someone else.
+        # undo() left it alone, and whatever does own it has already been redone
+        # by now, so it is still live — redo is a no-op. Calling restore_vertex
+        # on a live slot would raise; calling add_vertex again could hand back a
+        # different id than the one callers cached.
 
     def undo(self, scene) -> None:
         assert self._vertex_id is not None, "AddVertexCommand.undo before do"
-        scene.remove_vertex(self._vertex_id)
+        if self._created:
+            scene.remove_vertex(self._vertex_id)
 
 
 class AddEdgeCommand(Command):
+    """Add an edge, or resolve onto the one already joining the two vertices.
+
+    Same ownership rule as `AddVertexCommand`: `Scene.add_edge` is idempotent,
+    so `do()` may return a pre-existing edge, and removing it in `undo()` would
+    delete geometry this command never created.
+
+    Detection: `Scene.edge_between` is the non-mutating twin of the lookup
+    inside `add_edge` — same canonical vertex-pair key, same liveness check —
+    so asking it first tells us exactly what `add_edge` is about to do.
+    """
+
     name = "Add Edge"
 
     def __init__(self, v1_id: int, v2_id: int) -> None:
         self._v1, self._v2 = v1_id, v2_id
         self._edge_id: int | None = None
+        self._created = False
 
     def do(self, scene) -> None:
         if self._edge_id is None:
-            # First execution — allocate a new slot.
+            # First execution — allocate a new slot, or dedup onto an existing one.
+            existing = scene.edge_between(self._v1, self._v2)
             self._edge_id = scene.add_edge(self._v1, self._v2)
-        else:
+            self._created = existing is None
+        elif self._created:
             # Redo — restore the previously-allocated slot to preserve the ID.
             scene.restore_edge(self._edge_id, self._v1, self._v2)
+        # else: not ours — see AddVertexCommand.do for why redo is a no-op.
 
     def undo(self, scene) -> None:
         assert self._edge_id is not None, "AddEdgeCommand.undo before do"
-        scene.remove_edge(self._edge_id)
+        if self._created:
+            scene.remove_edge(self._edge_id)
 
 
 class AddFaceCommand(Command):
+    """Add a face.
+
+    Unlike `add_vertex` / `add_edge`, `Scene.add_face_from_loop` never
+    deduplicates — the C++ `add_face_from_loop` allocates `faces_.size()` as
+    the new id on every call, so a face command always owns what it made and
+    the unconditional `remove_face` in `undo()` is correct.
+    """
+
     name = "Add Face"
 
     def __init__(self, loop: Sequence[int]) -> None:

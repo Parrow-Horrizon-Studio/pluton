@@ -89,6 +89,16 @@ class Scene:
             position = np.asarray(position, dtype=np.float32).reshape(3)
         return self._mesh.add_vertex(float(position[0]), float(position[1]), float(position[2]))
 
+    def vertex_slab_size(self) -> int:
+        """Number of vertex slots ever allocated — live plus tombstoned.
+
+        `add_vertex` only ever appends a slot when it actually creates a vertex
+        (a dedup returns an existing id, and `remove_vertex` tombstones rather
+        than freeing), so comparing this across an `add_vertex` call is an
+        exact O(1) test for "did that call create, or deduplicate?".
+        """
+        return self._mesh.vertex_slab_size()
+
     def add_edge(self, v1_id: int, v2_id: int) -> int:
         """Insert an undirected edge between two existing vertices."""
         if v1_id == v2_id:

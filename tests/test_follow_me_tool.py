@@ -460,3 +460,67 @@ def test_arming_from_its_action_checks_and_sets_the_cursor(qtbot, main_window):
     assert main_window._actions["tool_follow_me"].isChecked()
     hotspot = main_window._viewport.cursor().hotSpot()
     assert (hotspot.x(), hotspot.y()) == cursors.ARROW_HOTSPOT
+
+
+def test_undoing_a_sweep_restores_the_path_it_was_swept_along(main_window):
+    # The ordinary SketchUp gesture puts a profile corner ON the path's start
+    # point, so the fixture's profile vertex (0,0,0) and the path's start
+    # vertex are literally the same scene vertex. sweep_stations maps
+    # path_points[0] -> path_points[i] exactly, so the lofted rings land on
+    # the path's own vertices and Scene.add_vertex/add_edge dedup onto them.
+    # Undo must not treat that borrowed geometry as its own and delete the
+    # user's path. Assert the full vertex and edge SETS, not just counts --
+    # a count check passes while ids silently churn.
+    scene = main_window._model.active_context.mesh
+    profile, path = _profile_and_path(main_window)
+    before_verts = {v.id for v in scene.vertices_iter()}
+    before_edges = {e.id for e in scene.edges_iter()}
+
+    tool = _tool(main_window)
+    tool.activate(main_window._tool_context())
+    main_window._selection.replace(edges=path)
+    tool._commit_sweep(profile)
+    assert len(list(scene.vertices_iter())) > len(before_verts)
+
+    assert main_window._command_stack.undo()
+    assert {v.id for v in scene.vertices_iter()} == before_verts, (
+        "undoing the sweep deleted vertices it did not create"
+    )
+    assert {e.id for e in scene.edges_iter()} == before_edges, (
+        "undoing the sweep deleted edges it did not create"
+    )
+
+
+def test_undoing_a_closed_sweep_restores_the_scene_it_started_from(main_window):
+    # The closed (lathe) path deliberately welds its seam ring back onto the
+    # profile's OWN loop, so every seam-segment vertex and edge command dedups
+    # onto geometry it did not create -- and undoing those removals used to
+    # tear the source face's own boundary out from under it, raising
+    # "remove_edge: edge N still bordered by a face" mid-unwind. Ownership
+    # tracking makes the seam commands leave the borrowed ids alone, so the
+    # whole gesture unwinds cleanly: same vertices, edges, faces AND positions.
+    scene = main_window._model.active_context.mesh
+    profile, _unused = _profile_and_path(main_window)
+    p0 = scene.add_vertex(np.array([0.0, 0.0, 0.0], dtype=np.float32))
+    p1 = scene.add_vertex(np.array([4.0, 0.0, 0.0], dtype=np.float32))
+    p2 = scene.add_vertex(np.array([4.0, 4.0, 0.0], dtype=np.float32))
+    p3 = scene.add_vertex(np.array([0.0, 4.0, 0.0], dtype=np.float32))
+    edges = [
+        scene.add_edge(p0, p1),
+        scene.add_edge(p1, p2),
+        scene.add_edge(p2, p3),
+        scene.add_edge(p3, p0),
+    ]
+    before_verts = {v.id: tuple(v.position) for v in scene.vertices_iter()}
+    before_edges = {e.id for e in scene.edges_iter()}
+    before_faces = {f.id for f in scene.faces_iter()}
+
+    tool = _tool(main_window)
+    tool.activate(main_window._tool_context())
+    main_window._selection.replace(edges=edges)
+    tool._commit_sweep(profile)
+
+    assert main_window._command_stack.undo()
+    assert {v.id: tuple(v.position) for v in scene.vertices_iter()} == before_verts
+    assert {e.id for e in scene.edges_iter()} == before_edges
+    assert {f.id for f in scene.faces_iter()} == before_faces
