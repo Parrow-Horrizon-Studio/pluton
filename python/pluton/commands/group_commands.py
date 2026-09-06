@@ -103,6 +103,17 @@ class MakeGroupCommand(Command):
             except Exception:
                 pass
         inst = self.created_instance
+        # Both membership guards below are UNREACHABLE as the command stack
+        # drives this today: `_redo` is only entered from `do` after an
+        # `undo`, which removed `inst` from both lists, so neither `in` test
+        # can be true. A second `_redo` without an intervening `undo` never
+        # gets this far either -- `remove_face` at the top of this method
+        # raises KeyError on geometry it already removed. They are kept
+        # deliberately (the plan commissioned a defensive sweep across three
+        # append sites): the cost is two list scans on an operation the user
+        # triggers by hand, and the failure they prevent -- an instance
+        # listed twice in its parent, so drawn twice and deleted once -- is
+        # silent corruption rather than an exception.
         if inst not in inst.definition.instances:
             inst.definition.instances.append(inst)
         if inst not in self._parent.children:
