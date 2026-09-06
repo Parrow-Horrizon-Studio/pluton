@@ -238,3 +238,38 @@ def test_other_generators_also_walk_cleanly(mesh_factory, expected_vertices, exp
         c.undo(scene)
     assert list(scene.faces_iter()) == []
     assert list(scene.vertices_iter()) == []
+
+
+# --- atomicity on a mid-walk failure ---------------------------------------
+
+
+def test_a_degenerate_transform_leaves_the_scene_exactly_as_found():
+    # A transform with a zero-scaled Z axis collapses a box's top loop onto
+    # its bottom loop (matching x/y, now matching z too), welding each top
+    # vertex onto its corresponding bottom vertex via Scene.add_vertex's
+    # exact-match dedup. A side face's loop then has two adjacent entries
+    # that resolve to the SAME scene vertex id, so Scene.add_edge is asked
+    # for a self-loop and raises -- mid-walk, after some vertices (and
+    # possibly some faces) have already been committed to `scene`.
+    #
+    # This is exactly the shape of input Task 11 will produce: a UI-supplied
+    # dimension of 0, or a scale derived from two coincident picked points,
+    # both reach this same zero-scaled-axis transform.
+    scene = Scene()
+    _add_seed_triangle(scene)
+    before_v = len(list(scene.vertices_iter()))
+    before_e = len(list(scene.edges_iter()))
+    before_f = len(list(scene.faces_iter()))
+
+    transform = np.eye(4, dtype=np.float64)
+    transform[2, 2] = 0.0
+
+    with pytest.raises(ValueError):
+        build_mesh_into_scene(_make_box(), scene, transform=transform)
+
+    # The failed call must leave the scene exactly as it found it -- not
+    # merely "smaller than a full box" -- so a caller that catches
+    # ValueError can trust nothing was left behind.
+    assert len(list(scene.vertices_iter())) == before_v
+    assert len(list(scene.edges_iter())) == before_e
+    assert len(list(scene.faces_iter())) == before_f
