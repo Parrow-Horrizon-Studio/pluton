@@ -171,10 +171,10 @@ class Model:
         in the active-context-local frame. `normal` faces the ray origin
         (viewer-facing). None if nothing is hit.
 
-        The normal uses the instance transform's linear block, so it is exact
-        for rigid or uniform-scale hierarchies (all M7b walls and openings); it
-        is only approximate under a non-uniformly scaled ancestor, where a true
-        fix would use the inverse-transpose of that block."""
+        The normal is transformed by the inverse-transpose of the instance
+        transform's linear block (#92), which is exact under any invertible
+        linear map -- including a non-uniform scale, where the linear block
+        itself would tilt the normal off-perpendicular."""
         from pluton.geometry.transforms import mat_invert
 
         w = self.active_world_transform
@@ -199,7 +199,14 @@ class Model:
             n_c = np.asarray(inst.definition.mesh.face_normal(hit.face_id), np.float64)
             p_c = np.asarray(hit.point, np.float64)
             p_a = (inst.transform @ np.append(p_c, 1.0))[:3]
-            n_a = inst.transform[:3, :3] @ n_c
+            # t_inv[:3, :3] is the inverse of the transform's linear block
+            # (t_inv is the inverse of the whole affine 4x4); its transpose
+            # maps normals correctly under any invertible linear map,
+            # including a non-uniform scale (#92).
+            n_a = t_inv[:3, :3].T @ n_c
+            n_a_norm = float(np.linalg.norm(n_a))
+            if n_a_norm > 1e-12:
+                n_a = n_a / n_a_norm
             if np.dot(n_a, d_a) > 0.0:  # orient toward the viewer (against the ray)
                 n_a = -n_a
             best = (p_a, n_a)
