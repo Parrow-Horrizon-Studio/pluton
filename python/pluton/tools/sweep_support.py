@@ -340,6 +340,15 @@ def sweep_stations(
     Raises `SweepRefused` if the corner is too tight for the profile: see
     `_mitered_station` for the exact criterion and why it is geometric
     rather than a tuned constant.
+
+    Known limitation (Task 7 review): each station's frame is built FRESH
+    from the source profile's own normal, not transported sequentially from
+    the previous station, so there is no torsion-minimising frame across a
+    path with several non-coplanar corners in a row -- the swept profile can
+    accumulate more visual twist along such a path than a transported frame
+    would. This is out of scope for what Follow Me (Task 8) is specified to
+    do; a future caller chasing minimal-twist sweeps needs to know it isn't
+    here.
     """
     profile = np.asarray(profile_loop, dtype=np.float64)
     path = np.asarray(path_points, dtype=np.float64)

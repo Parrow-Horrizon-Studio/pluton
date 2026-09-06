@@ -1,0 +1,310 @@
+"""The Follow Me tool (M7.4 Task 8)."""
+
+from __future__ import annotations
+
+import numpy as np
+
+from pluton.geometry.transforms import apply_mat
+from pluton.tools.sweep_support import sweep_stations
+
+
+def _profile_and_path(window):
+    """A 1x1 profile at the origin, and an L-shaped 3-point path."""
+    scene = window._model.active_context.mesh
+    p = [
+        scene.add_vertex(np.array([0.0, 0.0, 0.0], dtype=np.float32)),
+        scene.add_vertex(np.array([1.0, 0.0, 0.0], dtype=np.float32)),
+        scene.add_vertex(np.array([1.0, 0.0, 1.0], dtype=np.float32)),
+        scene.add_vertex(np.array([0.0, 0.0, 1.0], dtype=np.float32)),
+    ]
+    profile = scene.add_face_from_loop(p)
+    a = scene.add_vertex(np.array([0.0, 0.0, 0.0], dtype=np.float32))
+    b = scene.add_vertex(np.array([0.0, 5.0, 0.0], dtype=np.float32))
+    c = scene.add_vertex(np.array([5.0, 5.0, 0.0], dtype=np.float32))
+    e1 = scene.add_edge(a, b)
+    e2 = scene.add_edge(b, c)
+    return profile, [e1, e2]
+
+
+def _tool(window):
+    return window._tool_manager._tools_by_id["follow_me"]
+
+
+def test_sweeping_a_profile_along_a_path_adds_geometry(main_window):
+    profile, path = _profile_and_path(main_window)
+    before = len(list(main_window._model.active_context.mesh.faces_iter()))
+    tool = _tool(main_window)
+    tool.activate(main_window._tool_context())
+    main_window._selection.replace(edges=path)
+    tool._commit_sweep(profile)
+    after = len(list(main_window._model.active_context.mesh.faces_iter()))
+    assert after > before
+
+
+def test_a_sweep_is_one_undo_step(main_window):
+    profile, path = _profile_and_path(main_window)
+    depth = len(main_window._command_stack._undo)
+    tool = _tool(main_window)
+    tool.activate(main_window._tool_context())
+    main_window._selection.replace(edges=path)
+    tool._commit_sweep(profile)
+    assert len(main_window._command_stack._undo) == depth + 1
+
+
+def test_an_unordered_edge_selection_is_still_walked_into_a_chain(main_window):
+    # The selection is a set. Reversing it must not change the result.
+    profile, path = _profile_and_path(main_window)
+    tool = _tool(main_window)
+    tool.activate(main_window._tool_context())
+    ordered = tool._order_path(list(reversed(path)))
+    assert ordered is not None
+    assert len(ordered) == 3  # three vertices for two edges, open
+    assert tool._path_closed is False
+
+
+def test_a_forked_edge_selection_is_refused(main_window):
+    scene = main_window._model.active_context.mesh
+    hub = scene.add_vertex(np.array([0.0, 0.0, 0.0], dtype=np.float32))
+    arms = [
+        scene.add_vertex(np.array([1.0, 0.0, 0.0], dtype=np.float32)),
+        scene.add_vertex(np.array([0.0, 1.0, 0.0], dtype=np.float32)),
+        scene.add_vertex(np.array([0.0, 0.0, 1.0], dtype=np.float32)),
+    ]
+    forked = [scene.add_edge(hub, a) for a in arms]
+    tool = _tool(main_window)
+    tool.activate(main_window._tool_context())
+    assert tool._order_path(forked) is None
+
+
+def test_two_disjoint_runs_are_refused_even_though_neither_forks(main_window):
+    # Two disjoint closed triangles: every vertex has degree 2 and there are
+    # zero degree-one vertices overall, EXACTLY the signature _order_path
+    # otherwise takes as "a single closed loop". A broken implementation
+    # that classifies open/closed by degree counts alone, without first
+    # checking that everything selected is one connected run, would
+    # misread this as a valid (if strange) closed path and walk only one
+    # triangle -- silently dropping the other -- instead of refusing the
+    # whole ambiguous selection.
+    scene = main_window._model.active_context.mesh
+    a0 = scene.add_vertex(np.array([0.0, 0.0, 0.0], dtype=np.float32))
+    a1 = scene.add_vertex(np.array([1.0, 0.0, 0.0], dtype=np.float32))
+    a2 = scene.add_vertex(np.array([0.0, 1.0, 0.0], dtype=np.float32))
+    b0 = scene.add_vertex(np.array([9.0, 0.0, 0.0], dtype=np.float32))
+    b1 = scene.add_vertex(np.array([10.0, 0.0, 0.0], dtype=np.float32))
+    b2 = scene.add_vertex(np.array([9.0, 1.0, 0.0], dtype=np.float32))
+    edges = [
+        scene.add_edge(a0, a1),
+        scene.add_edge(a1, a2),
+        scene.add_edge(a2, a0),
+        scene.add_edge(b0, b1),
+        scene.add_edge(b1, b2),
+        scene.add_edge(b2, b0),
+    ]
+    tool = _tool(main_window)
+    tool.activate(main_window._tool_context())
+    assert tool._order_path(edges) is None
+
+
+def test_a_refused_sweep_reports_and_emits_nothing(main_window):
+    scene = main_window._model.active_context.mesh
+    profile, path = _profile_and_path(main_window)
+    before = len(list(scene.faces_iter()))
+    tool = _tool(main_window)
+    tool.activate(main_window._tool_context())
+    main_window._selection.replace(edges=[path[0]])  # single edge, no corner
+    # Force refusal by handing the tool a fork.
+    hub = scene.add_vertex(np.array([9.0, 9.0, 9.0], dtype=np.float32))
+    arms = [
+        scene.add_vertex(np.array([10.0, 9.0, 9.0], dtype=np.float32)),
+        scene.add_vertex(np.array([9.0, 10.0, 9.0], dtype=np.float32)),
+        scene.add_vertex(np.array([9.0, 9.0, 10.0], dtype=np.float32)),
+    ]
+    main_window._selection.replace(edges=[scene.add_edge(hub, a) for a in arms])
+    tool._commit_sweep(profile)
+    # Refused: no new faces beyond the vertices/edges the fixture added.
+    assert len(list(scene.faces_iter())) == before
+
+
+def test_a_fork_refusal_reports_a_message_in_the_status_bar(main_window):
+    profile, path = _profile_and_path(main_window)
+    scene = main_window._model.active_context.mesh
+    hub = scene.add_vertex(np.array([9.0, 9.0, 9.0], dtype=np.float32))
+    arms = [
+        scene.add_vertex(np.array([10.0, 9.0, 9.0], dtype=np.float32)),
+        scene.add_vertex(np.array([9.0, 10.0, 9.0], dtype=np.float32)),
+        scene.add_vertex(np.array([9.0, 9.0, 10.0], dtype=np.float32)),
+    ]
+    tool = _tool(main_window)
+    tool.activate(main_window._tool_context())
+    main_window._selection.replace(edges=[scene.add_edge(hub, a) for a in arms])
+    main_window._status_bar.set_message("")
+    tool._commit_sweep(profile)
+    assert main_window._status_bar._message != ""
+
+
+def test_a_too_tight_corner_is_refused_via_sweep_stations_and_reported(main_window):
+    # Same proportions test_sweep_stations.py proves raise SweepRefused: a
+    # 10-unit-wide profile cannot survive a hairpin after a 1-unit segment.
+    # This exercises the OTHER refusal path (a real corner, not a fork) --
+    # a tool that only ever catches forks and never SweepRefused would pass
+    # every test above but fail this one.
+    scene = main_window._model.active_context.mesh
+    p = [
+        scene.add_vertex(np.array([-5.0, -5.0, 0.0], dtype=np.float32)),
+        scene.add_vertex(np.array([5.0, -5.0, 0.0], dtype=np.float32)),
+        scene.add_vertex(np.array([5.0, 5.0, 0.0], dtype=np.float32)),
+        scene.add_vertex(np.array([-5.0, 5.0, 0.0], dtype=np.float32)),
+    ]
+    profile = scene.add_face_from_loop(p)
+    a = scene.add_vertex(np.array([0.0, 0.0, 0.0], dtype=np.float32))
+    b = scene.add_vertex(np.array([1.0, 0.0, 0.0], dtype=np.float32))
+    c = scene.add_vertex(np.array([0.02, 0.01, 0.0], dtype=np.float32))
+    edges = [scene.add_edge(a, b), scene.add_edge(b, c)]
+
+    before_faces = len(list(scene.faces_iter()))
+    depth = len(main_window._command_stack._undo)
+
+    tool = _tool(main_window)
+    tool.activate(main_window._tool_context())
+    main_window._selection.replace(edges=edges)
+    main_window._status_bar.set_message("")
+    tool._commit_sweep(profile)
+
+    assert len(list(scene.faces_iter())) == before_faces
+    assert len(main_window._command_stack._undo) == depth
+    assert "corner" in main_window._status_bar._message.lower()
+
+
+def test_a_sharp_but_survivable_corner_still_sweeps(main_window):
+    # The other direction of the refusal test: a real (not fork) corner
+    # that is NOT too tight must go through. A tool that refuses every
+    # non-trivial corner (e.g. by mishandling the miter math) would fail
+    # here even though the fork/hairpin tests above would still pass.
+    profile, path = _profile_and_path(main_window)
+    scene = main_window._model.active_context.mesh
+    before = len(list(scene.faces_iter()))
+    depth = len(main_window._command_stack._undo)
+
+    tool = _tool(main_window)
+    tool.activate(main_window._tool_context())
+    main_window._selection.replace(edges=path)
+    tool._commit_sweep(profile)
+
+    assert len(list(scene.faces_iter())) > before
+    assert len(main_window._command_stack._undo) == depth + 1
+
+
+def test_a_closed_path_sweeps_into_a_lathe_with_no_caps(main_window):
+    # Closed paths differ from open ones in station count (Task 7) and in
+    # needing a seam back to the start instead of end caps. A broken
+    # implementation that always caps (or that forgets to close the seam,
+    # leaving a gap) would produce the wrong face count here even though
+    # every open-path test above still passes.
+    scene = main_window._model.active_context.mesh
+    profile, _unused_path = _profile_and_path(main_window)
+    p0 = scene.add_vertex(np.array([0.0, 0.0, 0.0], dtype=np.float32))
+    p1 = scene.add_vertex(np.array([4.0, 0.0, 0.0], dtype=np.float32))
+    p2 = scene.add_vertex(np.array([4.0, 4.0, 0.0], dtype=np.float32))
+    p3 = scene.add_vertex(np.array([0.0, 4.0, 0.0], dtype=np.float32))
+    edges = [
+        scene.add_edge(p0, p1),
+        scene.add_edge(p1, p2),
+        scene.add_edge(p2, p3),
+        scene.add_edge(p3, p0),
+    ]
+    before = len(list(scene.faces_iter()))
+    depth = len(main_window._command_stack._undo)
+
+    tool = _tool(main_window)
+    tool.activate(main_window._tool_context())
+    main_window._selection.replace(edges=edges)
+    tool._commit_sweep(profile)
+
+    # 4 profile vertices x 4 path edges = 16 new side quads, no caps, minus
+    # the one removed source face.
+    assert len(list(scene.faces_iter())) == before + 15
+    assert len(main_window._command_stack._undo) == depth + 1
+
+
+def test_reversing_a_closed_selection_still_finds_the_cycle(main_window):
+    scene = main_window._model.active_context.mesh
+    p0 = scene.add_vertex(np.array([0.0, 0.0, 0.0], dtype=np.float32))
+    p1 = scene.add_vertex(np.array([4.0, 0.0, 0.0], dtype=np.float32))
+    p2 = scene.add_vertex(np.array([4.0, 4.0, 0.0], dtype=np.float32))
+    edges = [
+        scene.add_edge(p0, p1),
+        scene.add_edge(p1, p2),
+        scene.add_edge(p2, p0),
+    ]
+    tool = _tool(main_window)
+    tool.activate(main_window._tool_context())
+    ordered = tool._order_path(list(reversed(edges)))
+    assert ordered is not None
+    assert len(ordered) == 3
+    assert tool._path_closed is True
+
+
+def test_an_asymmetric_profile_lands_correctly_after_a_right_angle_turn(main_window):
+    # A square profile or a straight path hides a wrong rotation through
+    # symmetry -- and the fixtures above use exactly that shape. A scalene
+    # right triangle swept around a real 90-degree corner has no such
+    # symmetry: a bug that never rotates the profile, mirrors it, or applies
+    # the station transform with the wrong (row- vs column-vector)
+    # convention lands its vertices somewhere a correct implementation
+    # never does. The expected position is derived independently, from the
+    # same public functions the tool is supposed to be wiring together
+    # (sweep_stations + apply_mat), so this exercises the WIRING between
+    # _order_path/_commit_sweep and those functions, not the maths itself
+    # (already covered by test_sweep_stations.py).
+    scene = main_window._model.active_context.mesh
+    p = [
+        scene.add_vertex(np.array([0.0, 0.0, 0.0], dtype=np.float32)),
+        scene.add_vertex(np.array([3.0, 0.0, 0.0], dtype=np.float32)),
+        scene.add_vertex(np.array([0.0, 0.0, 1.0], dtype=np.float32)),
+    ]
+    profile_pts = np.array(
+        [[0.0, 0.0, 0.0], [3.0, 0.0, 0.0], [0.0, 0.0, 1.0]], dtype=np.float64
+    )
+    profile = scene.add_face_from_loop(p)
+
+    a = scene.add_vertex(np.array([0.0, 0.0, 0.0], dtype=np.float32))
+    b = scene.add_vertex(np.array([0.0, 5.0, 0.0], dtype=np.float32))
+    c = scene.add_vertex(np.array([5.0, 5.0, 0.0], dtype=np.float32))
+    edges = [scene.add_edge(a, b), scene.add_edge(b, c)]
+    path_points = np.array(
+        [[0.0, 0.0, 0.0], [0.0, 5.0, 0.0], [5.0, 5.0, 0.0]], dtype=np.float64
+    )
+
+    expected_final = apply_mat(
+        profile_pts, sweep_stations(profile_pts, path_points, closed=False)[-1]
+    )
+
+    tool = _tool(main_window)
+    tool.activate(main_window._tool_context())
+    main_window._selection.replace(edges=edges)
+    tool._commit_sweep(profile)
+
+    live_positions = [v.position for v in scene.vertices_iter()]
+    for expected_pt in expected_final:
+        assert any(
+            np.allclose(pos, expected_pt, atol=1e-3) for pos in live_positions
+        ), f"expected a swept vertex near {expected_pt}, found none"
+
+
+def test_tool_identity(main_window):
+    tool = _tool(main_window)
+    assert tool.id == "follow_me"
+    assert tool.shortcut == ""
+
+
+def test_arming_from_its_action_checks_and_sets_the_cursor(qtbot, main_window):
+    # Follow Me is the first tool to ship with no shortcut at all (M7.4
+    # Task 5's registry re-key is what makes that legal) -- confirm the
+    # toolbar/menu checked state and viewport cursor sync for it, end to
+    # end, exactly as they would for a shortcut-carrying tool.
+    from pluton.ui import cursors
+
+    main_window._activate("follow_me")
+    assert main_window._actions["tool_follow_me"].isChecked()
+    hotspot = main_window._viewport.cursor().hotSpot()
+    assert (hotspot.x(), hotspot.y()) == cursors.ARROW_HOTSPOT

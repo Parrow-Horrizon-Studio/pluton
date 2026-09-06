@@ -16,6 +16,7 @@ from pluton.tools.arc_tool import ArcTool
 from pluton.tools.circle_tool import CircleTool
 from pluton.tools.dimension_tool import DimensionTool
 from pluton.tools.erase_tool import EraserTool
+from pluton.tools.follow_me_tool import FollowMeTool
 from pluton.tools.line_tool import LineTool
 from pluton.tools.move_tool import MoveTool
 from pluton.tools.offset_tool import OffsetTool
@@ -40,6 +41,7 @@ _ALL_TOOL_CLASSES = (
     CircleTool,
     DimensionTool,
     EraserTool,
+    FollowMeTool,
     LineTool,
     MoveTool,
     OffsetTool,
@@ -81,7 +83,7 @@ def test_every_shipped_tool_has_a_unique_id_matching_its_action():
     expected_ids = {
         spec.handler_arg for spec in ACTIONS if spec.group == TOOL_GROUP
     }
-    assert len(expected_ids) == 19
+    assert len(expected_ids) == 20
 
     mgr = ToolManager()
     for cls in _ALL_TOOL_CLASSES:

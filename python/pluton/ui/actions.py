@@ -205,6 +205,10 @@ ACTIONS: tuple[ActionSpec, ...] = (
     _tool("tool_arc", "Arc", "A", _CH),
     _tool("tool_push_pull", "Push/Pull", "P", _AR),
     _tool("tool_offset", "Offset", "F", _CH),
+    # No shortcut (M7.4 Task 5's registry re-key is what makes this legal):
+    # the path is preselected with Select before this tool is ever armed, so
+    # there is no natural single letter left free that reads as "sweep".
+    _tool("tool_follow_me", "Follow Me", None, _AR),
     _tool("tool_move", "Move", "M", _CH),
     _tool("tool_rotate", "Rotate", "Q", _CH),
     _tool("tool_scale", "Scale", "S", _CH),
@@ -302,7 +306,14 @@ TOOLBARS: tuple[ToolbarSpec, ...] = (
     ToolbarSpec(
         "modification",
         "Modification",
-        ("tool_push_pull", "tool_offset", "tool_move", "tool_rotate", "tool_scale"),
+        (
+            "tool_push_pull",
+            "tool_offset",
+            "tool_follow_me",
+            "tool_move",
+            "tool_rotate",
+            "tool_scale",
+        ),
     ),
     ToolbarSpec(
         "construction",
@@ -385,6 +396,7 @@ MENUS: tuple[MenuSpec, ...] = (
             None,
             "tool_push_pull",
             "tool_offset",
+            "tool_follow_me",
             "tool_move",
             "tool_rotate",
             "tool_scale",

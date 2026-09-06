@@ -52,6 +52,7 @@ from pluton.tools import (
     ToolManager,
 )
 from pluton.tools.dimension_tool import DimensionTool
+from pluton.tools.follow_me_tool import FollowMeTool
 from pluton.tools.offset_tool import OffsetTool
 from pluton.tools.opening_tool import DoorWindowTool
 from pluton.tools.paint_tool import PaintTool
@@ -122,6 +123,8 @@ class MainWindow(QMainWindow):
         self._tool_manager.register(RectangleTool())
         self._tool_manager.register(PushPullTool())
         self._tool_manager.register(OffsetTool())
+        self._follow_me_tool = FollowMeTool()
+        self._tool_manager.register(self._follow_me_tool)
         self._tool_manager.register(CircleTool())
         self._tool_manager.register(PolygonTool())
         self._tool_manager.register(ArcTool())
@@ -152,6 +155,12 @@ class MainWindow(QMainWindow):
         # to a default Units() regardless of the document's unit setting.
         self._viewport.set_units_provider(lambda: self._doc.units)
         self._status_bar = StatusBar()
+        # Follow Me is the first tool that must report a refusal (a forked
+        # preselection, or a corner too tight for the profile) from inside
+        # its own commit path rather than through a MainWindow handler, so
+        # it needs a standing status-bar reference of its own -- wired here,
+        # outside ToolContext, once.
+        self._follow_me_tool.set_status_bar(self._status_bar)
 
         # Materials page — must exist BEFORE _rebuild_tool_context() so the
         # lambda `set_active_material=self._materials_page.set_active` captures
@@ -415,14 +424,16 @@ class MainWindow(QMainWindow):
 
     # --- Tool context -----------------------------------------------------
 
-    def _rebuild_tool_context(self) -> None:
-        """Build a fresh ToolContext pointing at the active scene and install it.
+    def _tool_context(self) -> ToolContext:
+        """Build a fresh ToolContext pointing at the active scene.
 
-        Called from __init__ and after any active-context change (undo/redo,
-        enter/exit group).  If a tool is already active it is re-activated so
-        it picks up the new scene reference.
+        Split out of `_rebuild_tool_context` (M7.4 Task 8) so a test can
+        activate a tool directly -- the same way ToolManager does internally
+        when arming one -- without duplicating this construction. Building
+        one does not install it anywhere or touch the currently-active tool;
+        see `_rebuild_tool_context` for that.
         """
-        ctx = ToolContext(
+        return ToolContext(
             scene=self._model.active_scene,
             command_stack=self._command_stack,
             camera=self._viewport.camera,
@@ -434,6 +445,15 @@ class MainWindow(QMainWindow):
             active_material_provider=lambda: self._model.materials.get(self._active_material_id),
             set_active_material=self._materials_page.set_active,
         )
+
+    def _rebuild_tool_context(self) -> None:
+        """Build a fresh ToolContext pointing at the active scene and install it.
+
+        Called from __init__ and after any active-context change (undo/redo,
+        enter/exit group).  If a tool is already active it is re-activated so
+        it picks up the new scene reference.
+        """
+        ctx = self._tool_context()
         self._tool_manager.set_context(ctx)
         # Re-activate the current tool so it picks up the new context/scene.
         active = self._tool_manager.active
