@@ -7,7 +7,7 @@ import sys
 
 import numpy as np
 from pluton.scene.scene import Scene
-from pluton.tools.sweep_support import loft_between_loops, seam_merge
+from pluton.tools.sweep_support import loft_between_loops, offset_polygon, seam_merge
 
 
 def _square(scene, z=0.0):
@@ -156,3 +156,31 @@ def test_end_cap_winds_in_source_winding_not_reversed():
 
     normal = scene.face_normal(end_cap.id)
     assert normal[2] > 0, f"end cap normal should point along sweep, got {normal}"
+
+
+def test_offset_polygon_never_returns_a_degenerate_polygon_past_the_limit():
+    # Fix round (post Task-6 review, Finding 1): offset_polygon's clamp must
+    # land STRICTLY short of collapse, not exactly at it. A 4x4 square
+    # collapses at distance 2.0; asking for something far beyond that (not a
+    # knife-edge request) must still produce a polygon with every edge of
+    # strictly positive length and no two coincident vertices -- otherwise
+    # Scene.add_vertex welds the coincident points and the caller's loft
+    # request becomes an illegal self-loop edge.
+    square = np.array(
+        [[0.0, 0.0, 0.0], [4.0, 0.0, 0.0], [4.0, 4.0, 0.0], [0.0, 4.0, 0.0]],
+        dtype=np.float64,
+    )
+    z = np.array([0.0, 0.0, 1.0], dtype=np.float64)
+
+    pts, clamped = offset_polygon(square, z, 1000.0)
+
+    assert 0.0 < clamped < 2.0
+    n = len(pts)
+    for i in range(n):
+        edge_len = float(np.linalg.norm(pts[(i + 1) % n] - pts[i]))
+        assert edge_len > 0.0, f"edge {i} has zero length at clamped={clamped}"
+    for i in range(n):
+        for j in range(i + 1, n):
+            assert float(np.linalg.norm(pts[i] - pts[j])) > 0.0, (
+                f"vertices {i} and {j} coincide at clamped={clamped}"
+            )

@@ -94,32 +94,41 @@ def test_an_offset_is_one_undo_step(main_window):
 
 
 def test_the_drag_clamps_rather_than_collapsing_the_face(main_window):
-    # A 4x4 face collapses at 2.0. Asking for 10 must stop at 2.0, not
-    # produce inverted geometry.
+    # A 4x4 face collapses at 2.0. Asking for 10 must stop strictly short of
+    # 2.0 (fix round, Task 6 review Finding 1: offset_polygon's clamp now
+    # backs off from the exact collapse point, since a distance exactly at
+    # it produces a degenerate, coincident-vertex loop), not produce
+    # inverted geometry.
     fid = _square_face(main_window, size=4.0)
     tool = _arm(main_window, fid)
     applied = tool._commit_offset(10.0)
-    assert applied == pytest.approx(2.0)
+    assert applied < 2.0
+    assert applied == pytest.approx(2.0, rel=1e-2)
 
 
 def test_full_collapse_at_the_clamp_limit_does_not_crash(main_window):
-    # offset_polygon's analytic clamp is the distance at which an offset
-    # edge reaches exactly zero length. For a square that means ALL FOUR
-    # corners land on the same point -- reachable by any sufficiently large
-    # drag, not a rare edge case. Scene.add_vertex welds coincident
-    # positions to one vertex id, so a naive re-use of loft_between_loops's
-    # ring-closing edge would ask for a self-loop and raise. This must
-    # instead still commit cleanly as one undo step.
+    # offset_polygon's clamp used to be the distance at which an offset edge
+    # reaches EXACTLY zero length -- for a square that meant all four
+    # corners landed on the same point, and Scene.add_vertex welds
+    # coincident positions to one vertex id, so a naive re-use of
+    # loft_between_loops's ring-closing edge asked for a self-loop and
+    # raised. The fix (Task 6 review Finding 1) moved the non-degeneracy
+    # guarantee into offset_polygon itself: it now always backs off short of
+    # that point, so this exercises the same "very large offset request"
+    # scenario as a plain regression check -- it must still commit cleanly
+    # as one undo step through the ordinary loft_between_loops path, with no
+    # special-casing needed at this layer.
     fid = _square_face(main_window, size=4.0)
     depth = len(main_window._command_stack._undo)
     tool = _arm(main_window, fid)
     applied = tool._commit_offset(10.0)
-    assert applied == pytest.approx(2.0)
+    assert applied < 2.0
+    assert applied == pytest.approx(2.0, rel=1e-2)
     assert len(main_window._command_stack._undo) == depth + 1
 
     scene = main_window._model.active_context.mesh
-    # The source face is gone, replaced by a fan of triangles converging on
-    # the collapse point -- not zero faces, and no exception.
+    # Source face gone, four ring quads plus one (now non-degenerate) inner
+    # face -- not zero faces, and no exception.
     assert len(list(scene.faces_iter())) >= 1
 
 
@@ -152,3 +161,29 @@ def test_offset_tool_id_and_shortcut():
     tool = OffsetTool()
     assert tool.id == "offset"
     assert tool.shortcut == "F"
+
+
+def test_status_text_reports_the_applied_distance_not_the_requested_one(main_window):
+    # Fix round (Task 6 review, Finding 2): the ghost overlay already stops
+    # growing at the collapse limit, but the status bar used to keep showing
+    # the raw drag distance -- a number that no longer matched the geometry.
+    # Past a 4x4 square's ~2.0 limit, the text must reflect what committing
+    # NOW would actually apply.
+    from pluton.tools.sweep_support import offset_polygon
+    from pluton.units import format_length
+
+    fid = _square_face(main_window, size=4.0)
+    tool = _arm(main_window, fid)
+    tool._current_distance = 10.0
+
+    _, expected_applied = offset_polygon(
+        tool._armed_face_points, tool._armed_face_normal, tool._current_distance
+    )
+    assert expected_applied < 10.0  # sanity: this scenario really does clamp
+
+    expected_text = f"offset: {format_length(expected_applied, main_window._doc.units)}"
+    assert tool.status_text == expected_text
+    # A test that would fail if the tool reported the requested distance
+    # instead: the raw 10.0 must not appear anywhere in the status text.
+    raw_text = f"offset: {format_length(10.0, main_window._doc.units)}"
+    assert tool.status_text != raw_text

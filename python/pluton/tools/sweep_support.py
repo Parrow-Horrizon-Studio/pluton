@@ -128,6 +128,19 @@ def seam_merge(scene, candidate_edges: Sequence[int]) -> list:
 
 _EPS = 1e-9
 
+# Relative back-off applied when a requested distance is clamped (Finding 1,
+# Task 6 review): the analytic/binary-search limit is the distance AT WHICH
+# an edge reaches exactly zero length or the loop starts to self-intersect,
+# not a safe distance short of it. Pulling back by a fixed fraction of that
+# limit -- rather than a fixed absolute amount -- keeps the back-off
+# proportional to the polygon's own scale: a millimetre-scale polygon and a
+# kilometre-scale one both end up with an offset edge shorter by the same
+# *fraction* of the limit, so neither a tiny polygon gets over-corrected nor
+# a huge one gets a back-off too small to matter at its own scale. 1e-4 is
+# comfortably above float64 rounding noise (~1e-16 relative) yet visually
+# imperceptible on any drag.
+_COLLAPSE_BACKOFF = 1e-4
+
 
 def offset_polygon(
     points: np.ndarray, normal: np.ndarray, distance: float
@@ -143,7 +156,11 @@ def offset_polygon(
     the requested `distance` unless offsetting further would collapse the
     polygon (an analytic per-edge limit) or make it self-intersect (concave
     loops, caught by a bounded binary search), in which case it is the
-    largest distance that does not.
+    largest distance, short of that limit by a small relative margin, that
+    still yields a non-degenerate polygon: every edge has strictly positive
+    length and no two vertices coincide. The margin exists because the limit
+    itself is defined by exact collapse/self-intersection, and a distance
+    exactly at it is unusable (some callers weld coincident vertices).
 
     The general concave straight-skeleton collapse problem is not solved
     here -- only a two-stage approximation: an exact analytic limit for the
@@ -194,6 +211,7 @@ def offset_polygon(
             analytic_limit = min(analytic_limit, -edge_lengths[i] / rate)
 
     clamped = min(distance, analytic_limit)
+    was_clamped = clamped < distance
 
     # Stage 2: the analytic limit only guards against an edge collapsing
     # onto itself. A concave loop's reflex corners can self-intersect with a
@@ -201,6 +219,7 @@ def offset_polygon(
     # validate and binary search downward if needed, bounded at 12 steps.
     e1, e2 = _plane_basis(n_eff)
     if not _is_simple_offset(offset_at(clamped), e1, e2):
+        was_clamped = True
         lo, hi = 0.0, clamped
         for _ in range(12):
             mid = 0.5 * (lo + hi)
@@ -209,6 +228,15 @@ def offset_polygon(
             else:
                 hi = mid
         clamped = lo
+
+    if was_clamped:
+        # `clamped` above is the distance AT WHICH degeneracy first occurs
+        # (an exact analytic root, or a binary-search value pinned
+        # arbitrarily close to the self-intersection boundary) -- not a
+        # safe distance short of it. Pull back by a fraction of `clamped`
+        # itself so every offset edge keeps strictly positive length. See
+        # `_COLLAPSE_BACKOFF` for why this is relative, not absolute.
+        clamped *= 1.0 - _COLLAPSE_BACKOFF
 
     return offset_at(clamped), clamped
 

@@ -21,9 +21,7 @@ from PySide6.QtGui import QKeyEvent, QMouseEvent
 
 from pluton.commands import CompositeCommand
 from pluton.commands.scene_commands import (
-    AddEdgeCommand,
     AddFaceCommand,
-    AddVertexCommand,
     RemoveFaceCommand,
 )
 from pluton.geometry.transforms import apply_mat, is_identity_transform
@@ -35,7 +33,6 @@ _HOVER_FILL_COLOR = (0.40, 0.70, 1.00, 0.20)  # light blue
 _GHOST_FILL_COLOR = (0.40, 0.70, 1.00, 0.15)  # light blue, fainter
 
 _MIN_COMMIT_DISTANCE = 1e-3  # world units; |distance| below this is a cancel
-_COLLAPSE_EPS = 1e-9  # world units; adjacent offset points closer than this weld
 
 
 class _State(Enum):
@@ -92,11 +89,21 @@ class OffsetTool(Tool):
     @property
     def status_text(self) -> str | None:
         if self._state == _State.DRAGGING:
+            applied = self._current_distance
+            if self._armed_face_points is not None and self._armed_face_normal is not None:
+                # offset_polygon clamps a distance that would collapse the
+                # face; show what committing NOW would actually apply, not
+                # the raw (possibly past-the-limit) drag distance -- the
+                # ghost overlay already stops growing at the limit, so the
+                # number here must agree with what the user sees.
+                _, applied = offset_polygon(
+                    self._armed_face_points, self._armed_face_normal, self._current_distance
+                )
             if self._units_provider is not None:
                 from pluton.units import format_length
 
-                return f"offset: {format_length(self._current_distance, self._units_provider())}"
-            return f"offset: {self._current_distance:.3f}"
+                return f"offset: {format_length(applied, self._units_provider())}"
+            return f"offset: {applied:.3f}"
         return None
 
     def activate(self, ctx: ToolContext) -> None:
@@ -284,17 +291,12 @@ class OffsetTool(Tool):
         distance actually applied, which is clamped when the requested one
         would collapse the face.
 
-        offset_polygon's analytic clamp is defined as the distance at which
-        an offset edge reaches exactly zero length -- for a symmetric
-        polygon (a square, or a rectangle's two equal short sides) that
-        point is reachable by ANY sufficiently large request, not just a
-        knife-edge one, since every distance at or beyond the limit clamps
-        to the same value. Scene.add_vertex welds bit-identical positions to
-        one vertex id, so at that exact clamp two or more of the offset loop's
-        vertices collapse onto each other -- which would turn
-        loft_between_loops's ring-closing edge into an illegal self-loop.
-        The common (non-degenerate) case still goes through the shared sweep
-        layer unchanged; only the collapsed case takes the local fallback.
+        offset_polygon's clamp (fix round, Task 6 review Finding 1) always
+        lands strictly short of collapse: every returned edge has positive
+        length and no two vertices coincide. That guarantee lives entirely
+        in offset_polygon itself, so this method needs no special-casing --
+        the offset loop always goes through the shared sweep layer exactly
+        like Push/Pull's destination loop does.
         """
         scene = self._scene
         loop = list(scene.face_loop(self._armed_face_id))
@@ -310,15 +312,12 @@ class OffsetTool(Tool):
         rm.do(scene)
         composite.children.append(rm)
 
-        if _has_collapsed_edge(offset_pts):
-            composite.children.extend(_collapse_safe_loft(scene, loop, offset_pts))
-        else:
-            result = loft_between_loops(scene, loop, offset_pts, cap_start=False, cap_end=False)
-            composite.children.extend(result.commands)
+        result = loft_between_loops(scene, loop, offset_pts, cap_start=False, cap_end=False)
+        composite.children.extend(result.commands)
 
-            inner = AddFaceCommand(tuple(result.dst_vertex_ids))
-            inner.do(scene)
-            composite.children.append(inner)
+        inner = AddFaceCommand(tuple(result.dst_vertex_ids))
+        inner.do(scene)
+        composite.children.append(inner)
 
         composite.children.extend(seam_merge(scene, candidate_seam_edges))
         self._command_stack.push_executed(composite, scene)
@@ -344,87 +343,6 @@ class OffsetTool(Tool):
         self._armed_face_normal = None
         self._armed_face_points = None
         self._current_distance = 0.0
-
-
-def _has_collapsed_edge(points: np.ndarray) -> bool:
-    """True if any two cyclically-adjacent offset points coincide.
-
-    This is the signature of offset_polygon's analytic clamp: at that exact
-    distance, one or more offset edges have zero length by construction.
-    """
-    n = len(points)
-    return any(
-        float(np.linalg.norm(points[i] - points[(i + 1) % n])) < _COLLAPSE_EPS for i in range(n)
-    )
-
-
-def _collapse_safe_loft(scene, src_loop_vids: list[int], dst_positions: np.ndarray) -> list:
-    """Stitch source loop to a (partially or fully collapsed) offset loop.
-
-    Mirrors sweep_support.loft_between_loops's spokes/ring/quads/cap shape,
-    but tolerates cyclically-adjacent destination positions landing on the
-    exact same point: Scene.add_vertex welds those to a single vertex id, so
-    the plain version's ring-closing edge would be an illegal self-loop.
-    A degenerate ring segment (both destination corners the same vertex)
-    contributes a triangle instead of a quad and no ring edge; a duplicate
-    (a, b) pair -- possible when two separate segments collapse onto the same
-    two vertices, e.g. a rectangle's two equal short edges -- is added once.
-    The inner cap uses only the distinct destination vertices, in order, and
-    is omitted entirely below 3 of them (a full collapse: the face is
-    consumed with nothing but the triangle fan left in its place).
-    """
-    n = len(src_loop_vids)
-    commands: list = []
-
-    dst_vert_cmds: list[AddVertexCommand] = []
-    for pos in dst_positions:
-        c = AddVertexCommand(np.asarray(pos, dtype=np.float32))
-        c.do(scene)
-        dst_vert_cmds.append(c)
-        commands.append(c)
-    dst_vids = [c._vertex_id for c in dst_vert_cmds]  # type: ignore[attr-defined]
-
-    added_edges: set[frozenset[int]] = set()
-
-    def add_edge_once(a: int, b: int) -> None:
-        if a == b:
-            return
-        key = frozenset((a, b))
-        if key in added_edges:
-            return
-        added_edges.add(key)
-        c = AddEdgeCommand(a, b)
-        c.do(scene)
-        commands.append(c)
-
-    for src_vid, dst_vid in zip(src_loop_vids, dst_vids, strict=True):
-        add_edge_once(src_vid, dst_vid)
-
-    for i in range(n):
-        add_edge_once(dst_vids[i], dst_vids[(i + 1) % n])
-
-    for i in range(n):
-        a = src_loop_vids[i]
-        b = src_loop_vids[(i + 1) % n]
-        d_a, d_b = dst_vids[i], dst_vids[(i + 1) % n]
-        face_verts = (a, b, d_b, d_a) if d_a != d_b else (a, b, d_a)
-        c = AddFaceCommand(face_verts)
-        c.do(scene)
-        commands.append(c)
-
-    distinct_dst: list[int] = []
-    for vid in dst_vids:
-        if not distinct_dst or distinct_dst[-1] != vid:
-            distinct_dst.append(vid)
-    if len(distinct_dst) > 1 and distinct_dst[0] == distinct_dst[-1]:
-        distinct_dst.pop()
-
-    if len(distinct_dst) >= 3:
-        c = AddFaceCommand(tuple(distinct_dst))
-        c.do(scene)
-        commands.append(c)
-
-    return commands
 
 
 def _plane_basis(normal: np.ndarray) -> tuple[np.ndarray, np.ndarray]:

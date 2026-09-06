@@ -33,10 +33,16 @@ def test_inward_offset_shrinks_by_the_distance_on_every_side():
 
 
 def test_the_clamp_is_half_the_short_side_on_a_rectangle():
-    # A 4x2 rectangle collapses to a line at 1.0, so the clamp is exactly 1.0
-    # and asking for more returns the clamped value, not the requested one.
+    # A 4x2 rectangle collapses to a line at 1.0, so asking for more returns
+    # the clamped value, not the requested one -- and (fix round, Finding 1)
+    # the clamp must land STRICTLY short of 1.0, not exactly at it: a
+    # distance of exactly 1.0 collapses the two short edges to zero length,
+    # which is the degenerate case this fix exists to avoid. The back-off is
+    # a small fraction of the limit, so it stays close to 1.0 without ever
+    # reaching it.
     _pts, clamped = offset_polygon(_rect(4.0, 2.0), Z, 5.0)
-    assert clamped == pytest.approx(1.0)
+    assert clamped < 1.0
+    assert clamped == pytest.approx(1.0, rel=1e-2)
 
 
 def test_clamping_is_reported_so_the_caller_need_not_recompute_it():
