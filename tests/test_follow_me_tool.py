@@ -329,6 +329,120 @@ def test_an_asymmetric_profile_lands_correctly_after_a_right_angle_turn(main_win
         ), f"expected a swept vertex near {expected_pt}, found none"
 
 
+# ---------------------------------------------------------------------------
+# The lathe: a profile held OFF the path axis (spec 1.6). Everything above
+# uses a profile sitting on the path start, where a station that recentres
+# the profile onto the path is indistinguishable from one that carries its
+# offset along. These two fixtures put the profile 3 units to one side, which
+# is the whole point of the feature and the only configuration that can see
+# the difference.
+# ---------------------------------------------------------------------------
+
+# Asymmetric trapezoid in the x = 0 plane, 3 units off the path in +Y. No
+# mirror symmetry in either in-plane axis, so a wrong orientation shows up as
+# a wrong position rather than cancelling out.
+_LATHE_PROFILE = [
+    (0.0, 3.0, 0.0),
+    (0.0, 4.0, 0.0),
+    (0.0, 4.0, 1.0),
+    (0.0, 3.0, 2.0),
+]
+
+
+def _lathe_profile_face(scene):
+    ids = [scene.add_vertex(np.array(p, dtype=np.float32)) for p in _LATHE_PROFILE]
+    return scene.add_face_from_loop(ids), np.array(_LATHE_PROFILE, dtype=np.float64)
+
+
+def _has_vertex_at(scene, point, atol=1e-4):
+    return any(np.allclose(v.position, point, atol=atol) for v in scene.vertices_iter())
+
+
+def test_an_offset_profile_sweeps_into_a_lathe_not_onto_the_path_centreline(main_window):
+    # The first tube segment is the one Follow Me builds from the SOURCE
+    # loop as drawn, so it is the segment where a station that recentres
+    # the profile onto the path does its worst damage: the source loop
+    # stays 3 units off-axis while the ring it lofts to lands on the
+    # centreline, and the segment is a gross lateral skew.
+    #
+    # Expected ring positions are derived from the corner geometry, not
+    # observed: the miter plane at (5, 0, 0) bisecting +X and +Y is
+    # x + y == 5, and a 90-degree corner slides each profile vertex along
+    # the segments without changing its distance from the path axis, so
+    # the ring keeps the profile's own y = 3..4 and z = 0..2 and takes
+    # x = 5 - y.
+    scene = main_window._model.active_context.mesh
+    profile, _pts = _lathe_profile_face(scene)
+    a = scene.add_vertex(np.array([0.0, 0.0, 0.0], dtype=np.float32))
+    b = scene.add_vertex(np.array([5.0, 0.0, 0.0], dtype=np.float32))
+    c = scene.add_vertex(np.array([5.0, 5.0, 0.0], dtype=np.float32))
+    edges = [scene.add_edge(a, b), scene.add_edge(b, c)]
+
+    tool = _tool(main_window)
+    tool.activate(main_window._tool_context())
+    main_window._selection.replace(edges=edges)
+    tool._commit_sweep(profile)
+
+    for expected in [(2.0, 3.0, 0.0), (1.0, 4.0, 0.0), (1.0, 4.0, 1.0), (2.0, 3.0, 2.0)]:
+        assert _has_vertex_at(scene, expected), (
+            f"first-segment ring vertex missing at {expected}: the profile's own "
+            "offset from the path was not carried into the sweep"
+        )
+    # The source loop is untouched for an open path (station 0 is the
+    # identity), so it must still be exactly where the user drew it.
+    for original in _LATHE_PROFILE:
+        assert _has_vertex_at(scene, original)
+
+
+def test_a_closed_path_materialises_the_mitered_seam_cross_section(main_window):
+    # Finding 3: for a closed path, station 0 IS the seam miter and must be
+    # applied. Skipping it terminates the closing segment on the profile as
+    # drawn -- a cross-section whose plane is perpendicular to its own
+    # direction of travel at the seam, so the last segment's quads cross
+    # each other. Face and vertex counts are identical either way, which is
+    # exactly why the shipped closed-path test could not see it.
+    #
+    # The seam plane bisects the closing segment (0, -1, 0) and the first
+    # (1, 0, 0) through the path's start, i.e. x == y; the profile drawn in
+    # the x = 0 plane at y = 3..4 is sheared onto it at (3, 3) and (4, 4).
+    scene = main_window._model.active_context.mesh
+    profile, _pts = _lathe_profile_face(scene)
+    p = [
+        scene.add_vertex(np.array([0.0, 0.0, 0.0], dtype=np.float32)),
+        scene.add_vertex(np.array([12.0, 0.0, 0.0], dtype=np.float32)),
+        scene.add_vertex(np.array([12.0, 12.0, 0.0], dtype=np.float32)),
+        scene.add_vertex(np.array([0.0, 12.0, 0.0], dtype=np.float32)),
+    ]
+    edges = [scene.add_edge(p[i], p[(i + 1) % 4]) for i in range(4)]
+
+    before_faces = len(list(scene.faces_iter()))
+    before_vertices = len(list(scene.vertices_iter()))
+
+    tool = _tool(main_window)
+    tool.activate(main_window._tool_context())
+    main_window._selection.replace(edges=edges)
+    tool._commit_sweep(profile)
+
+    seam = [(3.0, 3.0, 0.0), (4.0, 4.0, 0.0), (4.0, 4.0, 1.0), (3.0, 3.0, 2.0)]
+    for expected in seam:
+        assert _has_vertex_at(scene, expected), (
+            f"seam ring vertex missing at {expected}: the closing segment is "
+            "terminating on the un-mitered profile"
+        )
+    # The seam ring is the source loop MOVED onto the miter plane, not a
+    # fifth ring minted beside it, so nothing is left behind at the raw
+    # profile positions and the tube gains no duplicate ring.
+    for original in _LATHE_PROFILE:
+        assert not _has_vertex_at(scene, original), (
+            f"un-mitered profile vertex {original} survives the closed sweep"
+        )
+    # Same counts as the shipped closed-path test: 4 rings x 4 vertices,
+    # three of them minted (+12) and the fourth being the moved source
+    # loop, and 16 side quads less the removed source face.
+    assert len(list(scene.faces_iter())) == before_faces + 15
+    assert len(list(scene.vertices_iter())) == before_vertices + 12
+
+
 def test_tool_identity(main_window):
     tool = _tool(main_window)
     assert tool.id == "follow_me"

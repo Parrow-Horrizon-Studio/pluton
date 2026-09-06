@@ -320,6 +320,38 @@ def sweep_stations(
     no separate "local space" to move into first; each returned matrix maps
     the profile's own points directly to their position at that station.
 
+    RELATIVE-FRAME CONTRACT. Station `i` is
+    `Station_i @ Station_0_unmitered^-1`, where `Station_i` is the absolute
+    frame built at `path_points[i]` below and `Station_0_unmitered` is the
+    frame at `path_points[0]` oriented by segment 0 alone (never mitered,
+    even when the path closes). Every returned matrix therefore maps
+    `path_points[0]` -> `path_points[i]`: the frame's origin is the path's
+    OWN start, not the profile's centroid. A profile drawn off to one side
+    of the path keeps that offset all the way along, which is exactly what
+    makes a lathe rather than a tube (spec 1.6). An earlier revision mapped
+    the profile centroid onto every path point, which silently recentred
+    every offset profile onto the path axis and made a lathe unreachable.
+
+    Two consequences a caller must handle:
+
+    * Open path: station 0 IS `Station_0_unmitered`, so `stations[0]` is
+      the identity. The profile as drawn is already the first
+      cross-section, and a caller may skip station 0 and loft the source
+      loop straight to station 1.
+    * Closed path: station 0 is the seam miter and is NOT the identity. It
+      must be applied. The ring sequence is
+      `M_0(profile) -> M_1 -> ... -> M_{n-1} -> back to M_0(profile)`;
+      terminating the closing segment on the raw profile instead lands it
+      on a cross-section that does not lie on the seam's miter plane.
+
+    The relative composition is exact for the canonical Follow Me setup --
+    a profile whose plane is perpendicular to segment 0 and contains
+    `path_points[0]`. A profile plane tilted relative to segment 0, or one
+    that `path_points[0]` does not lie in, additionally shifts every
+    cross-section a constant distance along its own station normal; that is
+    inherent to expressing placements relative to a single starting frame
+    and is not corrected here.
+
     At an interior vertex (or every vertex of a closed path) the plane
     normal is the unit bisector of the incoming and outgoing directions --
     the classic miter plane, tilted equally into both segments (Task 8
@@ -397,7 +429,14 @@ def sweep_stations(
             d = d_out if has_out else d_in
             stations.append(_straight_station(centroid, normal, u_axis, v_axis, path[i], d))
 
-    return stations
+    # Re-express every absolute station relative to the profile's own
+    # starting frame (see the RELATIVE-FRAME CONTRACT above). `base` is
+    # deliberately the UNMITERED frame at path[0]: for an open path it is
+    # station 0 itself, so stations[0] comes back as the identity; for a
+    # closed path station 0 is the seam miter and stays distinct from it.
+    base = _straight_station(centroid, normal, u_axis, v_axis, path[0], seg_dirs[0])
+    base_inv = _invert_rigid(base)
+    return [s @ base_inv for s in stations]
 
 
 def _cross_sum_normal(pts: np.ndarray) -> np.ndarray:
@@ -434,6 +473,22 @@ def _rotation_between(a: np.ndarray, b: np.ndarray) -> np.ndarray:
         return np.eye(3) + 2.0 * (k @ k)
     k = _skew(v)
     return np.eye(3) + k + k @ k * ((1.0 - c) / (s * s))
+
+
+def _invert_rigid(m: np.ndarray) -> np.ndarray:
+    """Inverse of a 4x4 whose linear part is a rotation.
+
+    Only ever called on a `_straight_station` result, whose linear part is
+    an orthonormal-triad-to-orthonormal-triad map, i.e. a rotation. Its
+    transpose IS its inverse, so this needs no general solve and carries no
+    conditioning worry -- unlike a mitered station's linear part, which
+    slides profile vertices along the segments and is not orthonormal.
+    """
+    r = m[:3, :3]
+    inv = np.eye(4, dtype=np.float64)
+    inv[:3, :3] = r.T
+    inv[:3, 3] = -(r.T @ m[:3, 3])
+    return inv
 
 
 def _skew(v: np.ndarray) -> np.ndarray:

@@ -24,7 +24,7 @@ import numpy as np
 from PySide6.QtGui import QMouseEvent
 
 from pluton.commands import CompositeCommand
-from pluton.commands.scene_commands import RemoveFaceCommand
+from pluton.commands.scene_commands import RemoveFaceCommand, TransformVerticesCommand
 from pluton.geometry.transforms import apply_mat, is_identity_transform
 from pluton.tools.sweep_support import SweepRefused, loft_between_loops, sweep_stations
 from pluton.tools.tool import Tool, ToolContext, ToolOverlay
@@ -299,9 +299,34 @@ class FollowMeTool(Tool):
         rm.do(scene)
         composite.children.append(rm)
 
-        # Station 0 is deliberately never applied to the source loop: it is
-        # kept exactly as drawn for the first segment (matching SketchUp),
-        # and only stations 1..N-1 become new cross-sections along the path.
+        # Station 0 differs by path kind, and sweep_stations' relative-frame
+        # contract is what makes the difference expressible at all.
+        #
+        # Open path: station 0 is the identity, so the profile as drawn IS
+        # the first cross-section. It is left exactly where the user put it
+        # (matching SketchUp), and only stations 1..N-1 mint new rings.
+        #
+        # Closed path: station 0 is the seam miter and must be applied, or
+        # the closing segment terminates on a cross-section that does not
+        # lie on the seam's own miter plane (its quads then cross each
+        # other). The seam ring is materialised by MOVING the source loop's
+        # own vertices onto it rather than minting a fresh ring: the source
+        # face is being consumed either way, and reusing its vertices is
+        # what keeps the tube free of both a stranded un-mitered wire loop
+        # and a duplicate ring coincident with the seam.
+        seam_pts = None
+        if self._path_closed:
+            seam_pts = apply_mat(profile_pts, stations[0])
+            move = TransformVerticesCommand(
+                {
+                    vid: (scene.vertex(vid).position.copy(), seam_pts[i])
+                    for i, vid in enumerate(loop)
+                }
+            )
+            if not move.is_empty():
+                move.do(scene)
+                composite.children.append(move)
+
         current = loop
         last = len(stations) - 1
         for i in range(1, len(stations)):
@@ -317,19 +342,21 @@ class FollowMeTool(Tool):
             current = result.dst_vertex_ids
 
         if self._path_closed:
-            # Close the tube back onto the profile's OWN original boundary
-            # loop. loft_between_loops mints destination vertices via
+            # Close the tube back onto the seam ring built above -- the
+            # profile's OWN original boundary loop, now sitting on the seam
+            # miter plane. loft_between_loops mints destination vertices via
             # AddVertexCommand, which Scene.add_vertex makes idempotent on
             # exact float32 match (see scene.py's module docstring and
-            # test_scene.py::test_add_vertex_is_idempotent_on_exact_match).
-            # Handing it the untransformed profile_pts as the destination
-            # therefore welds this seam onto the original loop's own vertex
-            # ids instead of minting a coincident duplicate ring -- no
-            # separate stitching helper needed.
+            # test_scene.py::test_add_vertex_is_idempotent_on_exact_match),
+            # and Scene.set_vertex_position keeps that dedup index current
+            # when a vertex moves. Handing back the SAME float32 array the
+            # move wrote therefore welds this seam onto the source loop's
+            # own vertex ids instead of minting a coincident duplicate ring
+            # -- no separate stitching helper needed.
             result = loft_between_loops(
                 scene,
                 current,
-                profile_pts,
+                seam_pts,
                 cap_start=False,
                 cap_end=False,
             )
