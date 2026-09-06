@@ -66,6 +66,9 @@ ignore = []
 "python/pluton/ui/main_window.py" = ["N802"]
 # Qt dispatches virtual overrides by exact camelCase name (mousePressEvent).
 "python/pluton/ui/outliner_tree.py" = ["N802"]
+# `SweepRefused` is the exact name in the M7.4 Task 7/8 interface contract:
+# Task 8's Follow Me tool imports and catches it by this name.
+"python/pluton/tools/sweep_support.py" = ["N818"]
 
 [tool.ruff.format]
 quote-style = "double"

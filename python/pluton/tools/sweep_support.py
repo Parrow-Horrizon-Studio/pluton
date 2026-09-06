@@ -298,3 +298,276 @@ def _segments_cross(p1: np.ndarray, p2: np.ndarray, p3: np.ndarray, p4: np.ndarr
     d1, d2 = side(p3, p4, p1), side(p3, p4, p2)
     d3, d4 = side(p1, p2, p3), side(p1, p2, p4)
     return bool(d1 != d2 and d3 != d4)
+
+
+# ---------------------------------------------------------------------------
+# sweep_stations (M7.4 Task 7): per-station transforms for Follow Me
+# ---------------------------------------------------------------------------
+
+
+class SweepRefused(Exception):
+    """A corner is too tight for the profile: the mitered plane inverts it."""
+
+
+def sweep_stations(
+    profile_loop: np.ndarray, path_points: np.ndarray, *, closed: bool
+) -> list[np.ndarray]:
+    """Build one 4x4 world-from-profile transform per path vertex.
+
+    Convention: column-vector, right-multiplied, matching
+    `geometry/transforms.py`'s `apply_mat` (`p_world = M @ [p_local; 1]`).
+    `p_local` is `profile_loop` in the caller's own coordinates -- there is
+    no separate "local space" to move into first; each returned matrix maps
+    the profile's own points directly to their position at that station.
+
+    At an interior vertex (or every vertex of a closed path) the plane
+    normal is the unit bisector of the incoming and outgoing directions --
+    the classic miter plane, tilted equally into both segments (Task 8
+    lofts consecutive stations with straight quads; a tilted-but-shared
+    plane is what makes that loft meet without a gap at the corner). At an
+    open path's two endpoints there is only one adjoining segment, so the
+    normal is just that segment's direction.
+
+    A rigid copy of the profile rotated onto the miter plane would not
+    actually close the gap: the incoming and outgoing straight extrusions
+    only agree at a corner if each profile vertex is slid along ITS OWN
+    segment direction until it lands on the shared miter plane (the same
+    construction as a mitered picture-frame corner, generalized to an
+    arbitrary profile). This module computes that per-vertex slide from
+    both sides and averages them, since a general (non-symmetric) profile
+    has no exact common answer.
+
+    Raises `SweepRefused` if the corner is too tight for the profile: see
+    `_mitered_station` for the exact criterion and why it is geometric
+    rather than a tuned constant.
+    """
+    profile = np.asarray(profile_loop, dtype=np.float64)
+    path = np.asarray(path_points, dtype=np.float64)
+    n_path = len(path)
+
+    centroid = profile.mean(axis=0)
+    normal = _cross_sum_normal(profile)
+    u_axis, v_axis = _plane_basis(normal)
+
+    if closed:
+        seg_dirs = [_unit(path[(i + 1) % n_path] - path[i]) for i in range(n_path)]
+        seg_lens = [float(np.linalg.norm(path[(i + 1) % n_path] - path[i])) for i in range(n_path)]
+    else:
+        seg_dirs = [_unit(path[i + 1] - path[i]) for i in range(n_path - 1)]
+        seg_lens = [float(np.linalg.norm(path[i + 1] - path[i])) for i in range(n_path - 1)]
+
+    stations: list[np.ndarray] = []
+    for i in range(n_path):
+        if closed:
+            has_in = has_out = True
+            d_in, len_in = seg_dirs[(i - 1) % n_path], seg_lens[(i - 1) % n_path]
+            d_out, len_out = seg_dirs[i % n_path], seg_lens[i % n_path]
+        else:
+            has_in = i > 0
+            has_out = i < n_path - 1
+            d_in, len_in = (seg_dirs[i - 1], seg_lens[i - 1]) if has_in else (None, None)
+            d_out, len_out = (seg_dirs[i], seg_lens[i]) if has_out else (None, None)
+
+        if has_in and has_out:
+            stations.append(
+                _mitered_station(
+                    profile,
+                    centroid,
+                    normal,
+                    u_axis,
+                    v_axis,
+                    path[i],
+                    d_in,
+                    len_in,
+                    d_out,
+                    len_out,
+                    i,
+                )
+            )
+        else:
+            d = d_out if has_out else d_in
+            stations.append(_straight_station(centroid, normal, u_axis, v_axis, path[i], d))
+
+    return stations
+
+
+def _cross_sum_normal(pts: np.ndarray) -> np.ndarray:
+    """Unit plane normal of a planar loop, via the shoelace cross-sum.
+
+    Same technique as `offset_polygon`'s winding derivation: translation
+    invariant, and its sign follows whatever winding `pts` was authored
+    with rather than an assumed convention.
+    """
+    n = len(pts)
+    cs = np.zeros(3)
+    for i in range(n):
+        cs += np.cross(pts[i], pts[(i + 1) % n])
+    return _unit(cs)
+
+
+def _rotation_between(a: np.ndarray, b: np.ndarray) -> np.ndarray:
+    """Minimal (shortest-arc) rotation matrix mapping unit vector `a` to `b`.
+
+    Standard Rodrigues construction. `a` antiparallel to `b` (dot == -1) is
+    the one case a rotation axis can't be read off `cross(a, b)` (it is a
+    zero vector, not just small); a 180-degree rotation about ANY axis
+    perpendicular to `a` maps a to b there, so one is built from `a` alone.
+    """
+    v = np.cross(a, b)
+    c = float(np.dot(a, b))
+    s = float(np.linalg.norm(v))
+    if s < _EPS:
+        if c > 0.0:
+            return np.eye(3)
+        helper = np.array([1.0, 0.0, 0.0]) if abs(a[0]) < 0.9 else np.array([0.0, 1.0, 0.0])
+        axis = _unit(np.cross(a, helper))
+        k = _skew(axis)
+        return np.eye(3) + 2.0 * (k @ k)
+    k = _skew(v)
+    return np.eye(3) + k + k @ k * ((1.0 - c) / (s * s))
+
+
+def _skew(v: np.ndarray) -> np.ndarray:
+    return np.array([[0.0, -v[2], v[1]], [v[2], 0.0, -v[0]], [-v[1], v[0], 0.0]])
+
+
+def _compose_frame(
+    centroid: np.ndarray,
+    normal: np.ndarray,
+    u_axis: np.ndarray,
+    v_axis: np.ndarray,
+    position: np.ndarray,
+    u_image: np.ndarray,
+    v_image: np.ndarray,
+    n_image: np.ndarray,
+) -> np.ndarray:
+    """Assemble a 4x4 sending `u_axis -> u_image`, `v_axis -> v_image`,
+    `normal -> n_image`, and `centroid -> position`.
+
+    `u_axis`, `v_axis`, `normal` are an orthonormal triad, so this rank-3
+    reconstruction (`M_linear = outer(u_image,u_axis) + outer(v_image,v_axis)
+    + outer(n_image,normal)`) is exact: it is the unique linear map with
+    the three requested images, and every profile point decomposes cleanly
+    into that triad since `centroid`-relative offsets are, by construction
+    (`normal` comes from the profile's own cross-sum), perpendicular to
+    `normal`.
+    """
+    linear = np.outer(u_image, u_axis) + np.outer(v_image, v_axis) + np.outer(n_image, normal)
+    m = np.eye(4, dtype=np.float64)
+    m[:3, :3] = linear
+    m[:3, 3] = position - linear @ centroid
+    return m
+
+
+def _straight_station(
+    centroid: np.ndarray,
+    normal: np.ndarray,
+    u_axis: np.ndarray,
+    v_axis: np.ndarray,
+    position: np.ndarray,
+    direction: np.ndarray,
+) -> np.ndarray:
+    """Station at an open path's endpoint: a rigid copy, cross-section
+    turned to face straight down the one adjoining segment.
+    """
+    r = _rotation_between(normal, direction)
+    return _compose_frame(
+        centroid, normal, u_axis, v_axis, position, r @ u_axis, r @ v_axis, direction
+    )
+
+
+def _mitered_station(
+    profile: np.ndarray,
+    centroid: np.ndarray,
+    normal: np.ndarray,
+    u_axis: np.ndarray,
+    v_axis: np.ndarray,
+    position: np.ndarray,
+    d_in: np.ndarray,
+    len_in: float,
+    d_out: np.ndarray,
+    len_out: float,
+    vertex_index: int,
+) -> np.ndarray:
+    """Station at an interior path vertex (or any vertex of a closed path).
+
+    The construction, per vertex offset `o` (relative to `centroid`):
+
+    1. Rotate `o` into each segment's own straight-extrusion frame:
+       `o_in = R(normal -> d_in) @ o`, and likewise `o_out` for `d_out`.
+       This is what a plain (unmitered) straight sweep would place at this
+       station from that side alone -- `o_in`/`o_out` are exactly
+       perpendicular to `d_in`/`d_out`.
+    2. Slide each along its own segment direction until it lands on the
+       shared miter plane (through `position`, normal = the unit bisector
+       `t` of `d_in` and `d_out`): `o_in - ((o_in . t) / (d_in . t)) * d_in`,
+       and likewise for `o_out`. This is a line/plane intersection, solved
+       once per vertex since each vertex's line is fixed but its offset
+       from the plane differs.
+    3. Average the two. They agree exactly only for a profile symmetric
+       about the corner's bisector plane; averaging is the natural
+       (rotation-and-reflection-symmetric, order-independent) choice for
+       the general case, and both feed into a linear combination that
+       reduces to a plain rotation whenever `d_in == d_out` (a "corner"
+       that isn't one) or the profile is centred and symmetric.
+
+    Refusal criterion: step 2's slide distance for a profile vertex,
+    measured from `position` back along `d_in` (or forward along `d_out`),
+    is unbounded as the turn approaches 180 degrees -- there is no tuned
+    threshold for "too far". What IS a hard geometric fact is that a slide
+    longer than the segment itself reaches past the OTHER end of that
+    segment, i.e. past a neighbouring station that already exists; the
+    corner has then consumed geometry that belongs to the next joint over,
+    which is exactly the profile folding onto itself. So the refusal test
+    is: does any profile vertex's slide distance, on either side, exceed
+    that side's own segment length. `len_in`/`len_out` come from the path
+    itself, not a constant.
+    """
+    t = d_in + d_out
+    t_norm = float(np.linalg.norm(t))
+    if t_norm < _EPS:
+        raise SweepRefused(
+            f"corner at path vertex {vertex_index} reverses back on itself exactly: "
+            "no miter plane bisects a 180-degree turn"
+        )
+    t = t / t_norm
+
+    r_in = _rotation_between(normal, d_in)
+    r_out = _rotation_between(normal, d_out)
+    offsets = profile - centroid
+    o_in = offsets @ r_in.T
+    o_out = offsets @ r_out.T
+
+    dot_in_t = float(np.dot(d_in, t))
+    dot_out_t = float(np.dot(d_out, t))
+    # dot_in_t == dot_out_t == cos(half the turn angle) always (t bisects
+    # d_in/d_out by construction), positive for any turn short of a full
+    # 180-degree reversal (already excluded above), so this never divides
+    # by (near) zero without the t_norm guard already having fired.
+    slide_in = (o_in @ t) / dot_in_t
+    slide_out = (o_out @ t) / dot_out_t
+
+    reach_in = float(np.max(np.abs(slide_in)))
+    reach_out = float(np.max(np.abs(slide_out)))
+    if reach_in > len_in or reach_out > len_out:
+        raise SweepRefused(
+            f"corner at path vertex {vertex_index} is too tight for this profile: "
+            f"mitering would slide a profile vertex {max(reach_in, reach_out):.6g} "
+            f"units along a segment that is only {min(len_in, len_out):.6g} long"
+        )
+
+    # Steps 1-3 are linear in the offset, so the same slide-and-average
+    # construction applied directly to `u_axis`/`v_axis` gives exactly the
+    # images those two basis vectors need for `_compose_frame` -- no need
+    # to redo it per profile vertex (that already happened above, for the
+    # refusal check).
+    def slide_and_average(axis: np.ndarray) -> np.ndarray:
+        a_in = r_in @ axis
+        a_out = r_out @ axis
+        s_in = float(np.dot(a_in, t)) / dot_in_t
+        s_out = float(np.dot(a_out, t)) / dot_out_t
+        return 0.5 * ((a_in - s_in * d_in) + (a_out - s_out * d_out))
+
+    u_image = slide_and_average(u_axis)
+    v_image = slide_and_average(v_axis)
+    return _compose_frame(centroid, normal, u_axis, v_axis, position, u_image, v_image, t)
