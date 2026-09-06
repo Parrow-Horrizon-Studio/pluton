@@ -3,6 +3,8 @@
 #include <cmath>
 #include <cstdint>
 #include <numbers>
+#include <stdexcept>
+#include <string>
 #include <vector>
 
 namespace pluton {
@@ -111,6 +113,10 @@ HalfEdgeMesh make_box(float width, float depth, float height) {
 }
 
 HalfEdgeMesh make_cylinder(float radius, float height, int segments) {
+    if (segments < 3) {
+        throw std::invalid_argument("make_cylinder: segments must be >= 3, got " +
+                                    std::to_string(segments));
+    }
     const int n = segments;
 
     HalfEdgeMesh mesh;
@@ -148,6 +154,10 @@ HalfEdgeMesh make_cylinder(float radius, float height, int segments) {
 }
 
 HalfEdgeMesh make_cone(float radius, float height, int segments) {
+    if (segments < 3) {
+        throw std::invalid_argument("make_cone: segments must be >= 3, got " +
+                                    std::to_string(segments));
+    }
     const int n = segments;
 
     HalfEdgeMesh mesh;
@@ -179,6 +189,14 @@ HalfEdgeMesh make_cone(float radius, float height, int segments) {
 }
 
 HalfEdgeMesh make_sphere(float radius, int rings, int segments) {
+    if (rings < 2) {
+        throw std::invalid_argument("make_sphere: rings must be >= 2, got " +
+                                    std::to_string(rings));
+    }
+    if (segments < 3) {
+        throw std::invalid_argument("make_sphere: segments must be >= 3, got " +
+                                    std::to_string(segments));
+    }
     const int n = segments;
     const int r = rings;
 

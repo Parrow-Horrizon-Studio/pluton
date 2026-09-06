@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <stdexcept>
 
 #include "pluton/halfedge.h"
 #include "pluton/primitives.h"
@@ -260,4 +261,54 @@ TEST(Primitives, EveryPrimitiveIsWatertight) {
     EXPECT_TRUE(IsWatertight(pluton::make_cylinder(1.0f, 2.0f, 12)));
     EXPECT_TRUE(IsWatertight(pluton::make_cone(1.0f, 2.0f, 12)));
     EXPECT_TRUE(IsWatertight(pluton::make_sphere(1.0f, 8, 12)));
+}
+
+// --- Argument validation ----------------------------------------------
+//
+// segments/rings directly index vectors sized off of them (bottom/top rings,
+// interior latitude rings). Out-of-range values don't just degenerate —
+// they read/write past the end of an empty or undersized vector, which is
+// undefined behaviour (observed in practice as a hard interpreter crash
+// from Python). These generators must reject such values instead.
+
+TEST(Primitives, CylinderRejectsTooFewSegments) {
+    EXPECT_THROW(pluton::make_cylinder(1.0f, 1.0f, 2), std::invalid_argument);
+    EXPECT_THROW(pluton::make_cylinder(1.0f, 1.0f, 0), std::invalid_argument);
+    EXPECT_THROW(pluton::make_cylinder(1.0f, 1.0f, -1), std::invalid_argument);
+}
+
+TEST(Primitives, CylinderAcceptsMinimumSegments) {
+    // 3 is the smallest segment count that encloses a volume instead of
+    // collapsing the side quads and caps onto a plane.
+    const auto m = pluton::make_cylinder(1.0f, 1.0f, 3);
+    EXPECT_TRUE(IsWatertight(m));
+    EXPECT_EQ(FaceCount(m), 5u);  // 3 sides + top + bottom
+}
+
+TEST(Primitives, ConeRejectsTooFewSegments) {
+    EXPECT_THROW(pluton::make_cone(1.0f, 1.0f, 2), std::invalid_argument);
+    EXPECT_THROW(pluton::make_cone(1.0f, 1.0f, 0), std::invalid_argument);
+    EXPECT_THROW(pluton::make_cone(1.0f, 1.0f, -1), std::invalid_argument);
+}
+
+TEST(Primitives, ConeAcceptsMinimumSegments) {
+    const auto m = pluton::make_cone(1.0f, 1.0f, 3);
+    EXPECT_TRUE(IsWatertight(m));
+    EXPECT_EQ(FaceCount(m), 4u);  // 3 sides + base
+}
+
+TEST(Primitives, SphereRejectsTooFewRingsOrSegments) {
+    EXPECT_THROW(pluton::make_sphere(1.0f, 1, 8), std::invalid_argument);
+    EXPECT_THROW(pluton::make_sphere(1.0f, 0, 8), std::invalid_argument);
+    EXPECT_THROW(pluton::make_sphere(1.0f, 6, 2), std::invalid_argument);
+    EXPECT_THROW(pluton::make_sphere(1.0f, 6, 0), std::invalid_argument);
+}
+
+TEST(Primitives, SphereAcceptsMinimumRingsAndSegments) {
+    // rings = 2 leaves a single interior (equatorial) ring shared by both
+    // pole fans and no interior bands — a valid bipyramid, not degenerate.
+    // segments = 3 is the smallest polygon a fan/cap can close.
+    const auto m = pluton::make_sphere(1.0f, 2, 3);
+    EXPECT_TRUE(IsWatertight(m));
+    EXPECT_EQ(FaceCount(m), 6u);  // 2 pole fans * 3 segments, no interior bands
 }

@@ -34,7 +34,9 @@ HalfEdgeMesh make_box(float width = 1.0f, float depth = 1.0f, float height = 1.0
 ///
 /// @param radius    Radius of the base/top circle. Defaults to 1.0.
 /// @param height    Extent along z. Defaults to 1.0.
-/// @param segments  Number of sides around the circumference. Defaults to 24.
+/// @param segments  Number of sides around the circumference (>= 3). Defaults to 24.
+/// @throws std::invalid_argument if segments < 3 (fewer sides collapse the
+///         side quads and caps onto a plane instead of enclosing a volume).
 HalfEdgeMesh make_cylinder(float radius = 1.0f, float height = 1.0f, int segments = 24);
 
 /// Cone primitive, as a polygonal HalfEdgeMesh.
@@ -44,7 +46,9 @@ HalfEdgeMesh make_cylinder(float radius = 1.0f, float height = 1.0f, int segment
 ///
 /// @param radius    Radius of the base circle. Defaults to 1.0.
 /// @param height    Extent along z (apex height above the base). Defaults to 1.0.
-/// @param segments  Number of sides around the circumference. Defaults to 24.
+/// @param segments  Number of sides around the circumference (>= 3). Defaults to 24.
+/// @throws std::invalid_argument if segments < 3 (fewer sides collapse the
+///         triangular sides and base onto a plane instead of enclosing a volume).
 HalfEdgeMesh make_cone(float radius = 1.0f, float height = 1.0f, int segments = 24);
 
 /// UV-sphere primitive, as a polygonal HalfEdgeMesh.
@@ -57,6 +61,10 @@ HalfEdgeMesh make_cone(float radius = 1.0f, float height = 1.0f, int segments = 
 /// @param radius    Sphere radius. Defaults to 1.0.
 /// @param rings     Number of latitude subdivisions (>= 2). Defaults to 12.
 /// @param segments  Number of longitude subdivisions (>= 3). Defaults to 24.
+/// @throws std::invalid_argument if rings < 2 (fewer than 2 rings leaves the
+///         interior latitude ring vectors empty, since only levels 1..rings-1
+///         are populated between the two poles) or if segments < 3 (fewer
+///         longitude steps collapse each ring onto a degenerate line/point).
 HalfEdgeMesh make_sphere(float radius = 1.0f, int rings = 12, int segments = 24);
 
 }  // namespace pluton
