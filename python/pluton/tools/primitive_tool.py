@@ -389,7 +389,18 @@ class PrimitiveTool(Tool):
         `_make_mesh`'s generator, or from `build_mesh_into_scene` finding
         coincident vertices where the mesh collapsed on one axis. Either
         way, nothing is left in the scene: `build_mesh_into_scene` rolls
-        back whatever it already applied before re-raising.
+        back whatever it already applied before re-raising, and in the
+        generator-raises case nothing was ever built or pushed in the
+        first place.
+
+        This method deliberately lets that `ValueError` propagate rather
+        than catching and reporting it: there is no reachable path from the
+        UI to a degenerate dimension (the gesture guards above are the only
+        way width/depth/height are ever set before a real commit), so a
+        user can never actually see this exception. Catching it here would
+        only mask a bug in those guards, were one ever introduced --
+        `test_a_degenerate_dimension_raises_and_leaves_the_scene_untouched`
+        in `tests/test_primitive_tools.py` pins this choice.
         """
         scene = self._scene
         mesh = self._make_mesh(width=width, depth_=depth_, height=height)

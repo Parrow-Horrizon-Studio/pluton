@@ -152,6 +152,53 @@ def test_rings_below_the_floor_are_clamped_not_raised(main_window):
     assert len(list(scene.faces_iter())) - before == 8
 
 
+@pytest.mark.parametrize("tool_id", IDS)
+def test_a_degenerate_dimension_raises_and_leaves_the_scene_untouched(
+    main_window_with_square, tool_id
+):
+    # The gesture guards (`_MIN_FOOTPRINT` in `_commit_footprint`,
+    # `_MIN_HEIGHT` in `on_mouse_press`) keep a zero width/depth/height from
+    # ever reaching `_commit_primitive` through normal interaction -- there
+    # is no shortcut, typed-value path, or other reachable way for a user to
+    # arrive here with a degenerate dimension. `_commit_primitive` itself,
+    # called directly (as every test in this file already does, bypassing
+    # the gesture), has no such guard.
+    #
+    # Confirmed by hand: `make_box`/`make_cylinder`/`make_cone`/`make_sphere`
+    # (M7.4 Task 9) raise `ValueError` themselves the moment a dimension
+    # collapses two vertices onto each other (a self-loop edge), before
+    # `_commit_primitive` ever calls `build_mesh_into_scene` -- so no
+    # command is built and nothing is pushed to the stack. Since a bare
+    # `ValueError` here can never reach an actual user (the path is
+    # unreachable through the UI), letting it propagate is the honest
+    # choice: catching and "reporting" it would only paper over a bug in
+    # the gesture guards above, were one ever introduced. This test pins
+    # that decision and the atomicity it depends on -- both would fail if a
+    # future change (e.g. building the mesh in two steps, or pushing before
+    # validating) leaked a partial primitive into the scene or the undo
+    # stack on this path.
+    window = main_window_with_square
+    scene = window._model.active_context.mesh
+    before_vertices = len(list(scene.vertices_iter()))
+    before_edges = len(list(scene.edges_iter()))
+    before_faces = len(list(scene.faces_iter()))
+    depth = len(window._command_stack._undo)
+    tool = window._tool_manager._tools_by_id[tool_id]
+    tool.activate(window._tool_context())
+    # Away from the fixture's own square, same as the tests above -- not
+    # load-bearing here (the generator raises before any welding would
+    # happen), but kept consistent so this test isn't the odd one out.
+    tool._base_center = np.array([10.0, 10.0, 0.0])
+
+    with pytest.raises(ValueError):
+        tool._commit_primitive(width=0.0, depth_=2.0, height=2.0)
+
+    assert len(list(scene.vertices_iter())) == before_vertices
+    assert len(list(scene.edges_iter())) == before_edges
+    assert len(list(scene.faces_iter())) == before_faces
+    assert len(window._command_stack._undo) == depth
+
+
 def test_arming_box_from_its_action_checks_the_toolbar_and_sets_the_cursor(main_window):
     # All four primitives are shortcut-less (M7.4 Task 5's id-keyed registry
     # is what makes that legal); _activate's toolbar/cursor sync must not

@@ -309,7 +309,17 @@ TOOLBARS: tuple[ToolbarSpec, ...] = (
     ToolbarSpec(
         "drawing",
         "Drawing",
-        ("tool_line", "tool_rectangle", "tool_circle", "tool_polygon", "tool_arc"),
+        (
+            "tool_line",
+            "tool_rectangle",
+            "tool_circle",
+            "tool_polygon",
+            "tool_arc",
+            "tool_box",
+            "tool_cylinder",
+            "tool_cone",
+            "tool_sphere",
+        ),
     ),
     ToolbarSpec(
         "modification",
@@ -332,11 +342,6 @@ TOOLBARS: tuple[ToolbarSpec, ...] = (
         "architecture",
         "Architecture",
         ("tool_wall", "tool_door_window", "tool_roof"),
-    ),
-    ToolbarSpec(
-        "primitives",
-        "Primitives",
-        ("tool_box", "tool_cylinder", "tool_cone", "tool_sphere"),
     ),
     ToolbarSpec(
         "styles",
@@ -406,6 +411,10 @@ MENUS: tuple[MenuSpec, ...] = (
             "tool_circle",
             "tool_polygon",
             "tool_arc",
+            "tool_box",
+            "tool_cylinder",
+            "tool_cone",
+            "tool_sphere",
             None,
             "tool_push_pull",
             "tool_offset",
@@ -421,11 +430,6 @@ MENUS: tuple[MenuSpec, ...] = (
             "tool_wall",
             "tool_door_window",
             "tool_roof",
-            None,
-            "tool_box",
-            "tool_cylinder",
-            "tool_cone",
-            "tool_sphere",
         ),
     ),
     MenuSpec(
