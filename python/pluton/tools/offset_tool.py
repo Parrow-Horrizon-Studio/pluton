@@ -297,6 +297,22 @@ class OffsetTool(Tool):
         in offset_polygon itself, so this method needs no special-casing --
         the offset loop always goes through the shared sweep layer exactly
         like Push/Pull's destination loop does.
+
+        The two SIGNS, however, are genuinely different operations and each
+        needs its own answer to three questions -- does the source face
+        survive, does the new loop get a face, and is there a seam to
+        merge:
+
+        * Inward (positive): the new loop lies inside the source face, so
+          the source face is replaced. Remove it, ring the annulus, and
+          face the inner loop.
+        * Outward (negative): the new loop lies outside the source face,
+          which therefore still covers its own region and must be KEPT.
+          The outer loop gets no face at all -- one would overlap every
+          ring quad, coplanar and z-fighting. Removing the source face and
+          facing the outer loop instead, as this method used to do
+          unconditionally, produced exactly that overlap plus an unfaced
+          hole where the source face had been.
         """
         scene = self._scene
         loop = list(scene.face_loop(self._armed_face_id))
@@ -304,20 +320,44 @@ class OffsetTool(Tool):
         pts = np.array([scene.vertex(v).position for v in loop], dtype=np.float64)
 
         offset_pts, applied = offset_polygon(pts, normal, distance)
+        outward = applied < 0.0
 
-        candidate_seam_edges = list(scene.face_edges(self._armed_face_id))
+        # Seam candidates must be captured BEFORE the source face is
+        # removed, since removal invalidates the boundary. There is nothing
+        # to merge on the outward side: these same edges now separate the
+        # SURVIVING source face from a ring quad coplanar with it, so
+        # dissolving them would merge the ring straight back into the
+        # source face and undo the offset. (Whether the new outer loop
+        # should merge against a pre-existing coplanar neighbour is a
+        # separate question neither sign answers today.)
+        candidate_seam_edges = [] if outward else list(scene.face_edges(self._armed_face_id))
 
         composite = CompositeCommand(name="Offset")
-        rm = RemoveFaceCommand(self._armed_face_id)
-        rm.do(scene)
-        composite.children.append(rm)
+        if not outward:
+            rm = RemoveFaceCommand(self._armed_face_id)
+            rm.do(scene)
+            composite.children.append(rm)
 
-        result = loft_between_loops(scene, loop, offset_pts, cap_start=False, cap_end=False)
+        # Outward hands both loops to the loft REVERSED. Every ring quad
+        # shares an edge with the surviving source face, and a half-edge
+        # belongs to at most one face, so the quad has to traverse that
+        # shared edge opposite to the way the source face's own boundary
+        # does. Reversing both loops does exactly that, and it also lands
+        # the ring quads' normals on the same side as the source face's
+        # instead of facing away from it.
+        result = loft_between_loops(
+            scene,
+            list(reversed(loop)) if outward else loop,
+            offset_pts[::-1] if outward else offset_pts,
+            cap_start=False,
+            cap_end=False,
+        )
         composite.children.extend(result.commands)
 
-        inner = AddFaceCommand(tuple(result.dst_vertex_ids))
-        inner.do(scene)
-        composite.children.append(inner)
+        if not outward:
+            inner = AddFaceCommand(tuple(result.dst_vertex_ids))
+            inner.do(scene)
+            composite.children.append(inner)
 
         composite.children.extend(seam_merge(scene, candidate_seam_edges))
         self._command_stack.push_executed(composite, scene)

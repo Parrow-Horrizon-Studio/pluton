@@ -83,6 +83,63 @@ def test_the_inner_face_is_smaller_than_the_source_for_a_positive_distance(main_
     assert all(area < source_area for area in areas)
 
 
+def _planar_area(scene, face_id):
+    """Shoelace area of a face lying in the z = 0 plane."""
+    loop = scene.face_loop(face_id)
+    pts = np.array([scene.vertex(v).position for v in loop], dtype=np.float64)
+    x, y = pts[:, 0], pts[:, 1]
+    return 0.5 * abs(np.dot(x, np.roll(y, -1)) - np.dot(y, np.roll(x, -1)))
+
+
+def test_an_outward_offset_keeps_the_source_face_and_adds_no_outer_face(main_window):
+    # Negative distance is fully reachable and intended: the cursor outside
+    # the boundary makes _signed_distance_to_boundary return negative, and
+    # offset_polygon documents negative as outward. This tool used to treat
+    # both signs alike -- remove the source face, face the new loop -- which
+    # outward means removing the face over the region the user did NOT
+    # touch (an unfaced hole) and then covering the WHOLE 6x6 outer loop
+    # with a face that overlaps all four ring quads: coplanar overlapping
+    # geometry and z-fighting on top of the hole.
+    #
+    # Correct outward behaviour is the mirror of inward's question set: the
+    # source face survives because it still covers its own region, the ring
+    # is added, and the outer loop gets no face at all.
+    fid = _square_face(main_window, size=4.0)
+    scene = main_window._model.active_context.mesh
+    before = len(list(scene.faces_iter()))
+    depth = len(main_window._command_stack._undo)
+
+    tool = _arm(main_window, fid)
+    applied = tool._commit_offset(-1.0)
+    # Outward never collapses, so nothing is clamped.
+    assert applied == pytest.approx(-1.0)
+
+    live_face_ids = {f.id for f in scene.faces_iter()}
+    assert fid in live_face_ids, "the source face was removed, leaving an unfaced hole"
+    assert len(live_face_ids) == before + 4, "expected exactly four new ring quads"
+
+    areas = sorted(_planar_area(scene, f) for f in live_face_ids)
+    # 4x4 source face kept, plus four ring trapezoids of (36 - 16) / 4 = 5.
+    assert areas == pytest.approx([5.0, 5.0, 5.0, 5.0, 16.0], abs=1e-6)
+    # The decisive one: nothing covers the full 6x6 outer loop.
+    assert all(area != pytest.approx(36.0, abs=1e-6) for area in areas)
+
+    # Half-edge integrity across the join. A half-edge belongs to at most
+    # one face and the mesh overwrites silently rather than raising, so a
+    # ring quad wound the same way round as the surviving source face would
+    # quietly steal the source face's own boundary half-edge and leave the
+    # shared edge with one face instead of two.
+    for e in scene.face_edges(fid):
+        f_a, f_b = scene.edge_faces(e)
+        assert f_a is not None and f_b is not None, (
+            f"boundary edge {e} of the source face is bordered by one face, not two"
+        )
+
+    assert len(main_window._command_stack._undo) == depth + 1
+    main_window._command_stack.undo()
+    assert len(list(scene.faces_iter())) == before
+
+
 def test_an_offset_is_one_undo_step(main_window):
     fid = _rectangle_face(main_window, width=6.0, height=2.0)
     depth = len(main_window._command_stack._undo)
