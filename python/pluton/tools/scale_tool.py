@@ -90,6 +90,23 @@ class ScaleTool(Tool):
     def _world_transform(self):
         return self._model.active_world_transform if self._model is not None else None
 
+    def _lift_local_to_world(self, points: np.ndarray) -> np.ndarray:
+        """Lift LOCAL points to WORLD coordinates via the active world transform.
+
+        None/identity-safe: `_world_transform()` returns None if `_model` is
+        unset, and `is_identity_transform` treats None the same as the
+        identity -- so at the root context (or with no model at all) points
+        come back unchanged rather than raising. Extracted (#60) from the
+        three call sites that duplicated this pattern: `_grip_world_pos`,
+        the box-segment lift in `overlay()`, and the anchor lift in
+        `_cursor_world`.
+        """
+        pts = np.asarray(points, np.float64).reshape(-1, 3)
+        wt = self._world_transform()
+        if is_identity_transform(wt):
+            return pts
+        return apply_mat(pts, wt)
+
     def activate(self, ctx: ToolContext) -> None:
         self._scene = ctx.scene
         self._model = ctx.model
@@ -256,15 +273,11 @@ class ScaleTool(Tool):
                 preview_lo = np.minimum(corners[0], corners[1]).astype(np.float32)
                 preview_hi = np.maximum(corners[0], corners[1]).astype(np.float32)
             # Box segments: in entity-mode lo/hi are LOCAL; lift to world if needed.
+            box_segs_local = self._box_segments(preview_lo, preview_hi)
             if self._grips_are_local:
-                wt = self._world_transform()
-                if not is_identity_transform(wt):
-                    box_segs_local = self._box_segments(preview_lo, preview_hi)
-                    box_segs = apply_mat(box_segs_local.reshape(-1, 3), wt).reshape(-1, 3)
-                else:
-                    box_segs = self._box_segments(preview_lo, preview_hi)
+                box_segs = self._lift_local_to_world(box_segs_local.reshape(-1, 3)).reshape(-1, 3)
             else:
-                box_segs = self._box_segments(preview_lo, preview_hi)
+                box_segs = box_segs_local
             polylines.append((box_segs, _BOX_COLOR, 1.5))
             for g in self._grips:
                 is_active = self._active is not None and np.allclose(
@@ -405,10 +418,7 @@ class ScaleTool(Tool):
         """
         if not self._grips_are_local:
             return g.position
-        wt = self._world_transform()
-        if is_identity_transform(wt):
-            return g.position
-        return apply_mat(np.asarray(g.position, np.float64).reshape(1, 3), wt)[0]
+        return self._lift_local_to_world(np.asarray(g.position, np.float64).reshape(1, 3))[0]
 
     def _pick_grip(self, event) -> GripSpec | None:
         if self._camera is None or self._size_provider is None:
@@ -450,11 +460,9 @@ class ScaleTool(Tool):
         else:
             # self._anchor is always in the grips' own frame; lift if local.
             if self._grips_are_local:
-                wt = self._world_transform()
-                if is_identity_transform(wt):
-                    p0 = np.asarray(self._anchor, np.float32)
-                else:
-                    p0 = apply_mat(np.asarray(self._anchor, np.float64).reshape(1, 3), wt)[0]
+                p0 = self._lift_local_to_world(np.asarray(self._anchor, np.float64).reshape(1, 3))[
+                    0
+                ]
             else:
                 p0 = np.asarray(self._anchor, np.float32)
 

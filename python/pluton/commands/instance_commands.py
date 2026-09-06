@@ -36,7 +36,8 @@ class CreateInstanceCommand(Command):
             # redo: re-register the same instance object + back-ref
             if self.created_instance not in self._definition.instances:
                 self._definition.instances.append(self.created_instance)
-        self._parent.children.append(self.created_instance)
+        if self.created_instance not in self._parent.children:
+            self._parent.children.append(self.created_instance)
 
     def undo(self, model) -> None:
         if self.created_instance in self._parent.children:

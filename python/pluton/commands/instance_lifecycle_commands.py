@@ -45,6 +45,7 @@ class DeleteInstanceCommand(Command):
             self._inst.definition.instances.remove(self._inst)
 
     def undo(self, model) -> None:
-        self._parent.children.append(self._inst)
+        if self._inst not in self._parent.children:
+            self._parent.children.append(self._inst)
         if self._inst not in self._inst.definition.instances:
             self._inst.definition.instances.append(self._inst)

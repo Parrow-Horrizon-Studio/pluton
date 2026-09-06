@@ -105,7 +105,8 @@ class MakeGroupCommand(Command):
         inst = self.created_instance
         if inst not in inst.definition.instances:
             inst.definition.instances.append(inst)
-        self._parent.children.append(inst)
+        if inst not in self._parent.children:
+            self._parent.children.append(inst)
 
     def undo(self, model) -> None:
         parent_scene = self._parent.mesh
