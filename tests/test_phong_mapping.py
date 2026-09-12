@@ -113,6 +113,7 @@ def test_a_translucent_material_blends_and_stops_writing_depth():
         dim_ambient=(0.0, 0.0, 0.0),
         dim_diffuse=(0.0, 0.0, 0.0),
         dim_alpha=1.0,
+        dim_alpha_floor=0.0,
         material_alpha=0.4,
     )
     assert r.blend is True
@@ -129,6 +130,7 @@ def test_an_opaque_material_still_writes_depth():
         dim_ambient=(0.0, 0.0, 0.0),
         dim_diffuse=(0.0, 0.0, 0.0),
         dim_alpha=1.0,
+        dim_alpha_floor=0.0,
         material_alpha=1.0,
     )
     assert r.blend is False
@@ -308,7 +310,7 @@ def test_shininess_spans_the_slider_with_no_dead_zone():
 # --- M7.5b (#107): the dim pass must not compound with translucency --------
 
 
-def _dimmed(material_alpha, *, xray=False, dim_alpha=0.35):
+def _dimmed(material_alpha, *, xray=False, dim_alpha=0.35, dim_alpha_floor=0.25):
     return resolve_face_pass(
         RenderStyle(face_style=FaceStyle.SHADED, xray=xray),
         dimmed=True,
@@ -317,37 +319,50 @@ def _dimmed(material_alpha, *, xray=False, dim_alpha=0.35):
         dim_ambient=(0.3, 0.3, 0.31),
         dim_diffuse=(0.4, 0.4, 0.42),
         dim_alpha=dim_alpha,
+        dim_alpha_floor=dim_alpha_floor,
         material_alpha=material_alpha,
     )
 
 
-def test_dimming_a_translucent_face_does_not_make_it_more_transparent():
+def test_dimming_a_translucent_face_is_floored_not_vanished():
     # The reported symptom: `alpha = fu.alpha * dim_alpha` turned a 0.4
     # material into an effective 0.14 once its group stopped being the active
     # context -- very nearly invisible. Dimming says "not the thing you are
     # editing"; it is not licensed to delete the geometry.
-    assert _dimmed(0.4).alpha == pytest.approx(0.35)
-    assert _dimmed(0.4).alpha > 0.4 * 0.35  # the old product, named explicitly
+    #
+    # The fix is no longer "don't multiply" (that was the #107 cap, reverted
+    # -- see test_xray_and_dim_compose_through_the_floor below for why); it is
+    # "multiply, but floor the result": max(0.4 * 0.35, 0.25) == 0.25.
+    assert _dimmed(0.4).alpha == pytest.approx(0.25)
+    assert _dimmed(0.4).alpha > 0.4 * 0.35  # the plain product, named explicitly
 
 
 def test_dimming_still_makes_an_opaque_face_recede():
-    # The other half, and the reason this is min() rather than "leave alpha
-    # alone whenever the material is translucent": an opaque face must still
-    # be pulled down to dim_alpha, or the dim pass stops dimming anything.
+    # An opaque face must still be pulled down to dim_alpha: max(1.0 * 0.35,
+    # 0.25) == 0.35, above the floor, so this is unaffected by it.
     assert _dimmed(1.0).alpha == pytest.approx(0.35)
     assert _dimmed(1.0).blend is True
 
 
-def test_dimming_never_makes_a_barely_visible_face_more_solid():
-    # Kills the lazy fix, `alpha = dim_alpha`, which throws the material's own
-    # opacity away: a deliberately ghostly 0.1 material would become three and
-    # a half times MORE opaque by being dimmed, which is backwards.
-    assert _dimmed(0.1).alpha == pytest.approx(0.1)
+def test_dimming_a_barely_visible_face_is_floored_not_left_alone():
+    # Renamed from test_dimming_never_makes_a_barely_visible_face_more_solid:
+    # that name asserted the cap's behaviour (min(0.1, 0.35) == 0.1, alpha
+    # untouched), which is no longer the rule. A deliberately ghostly 0.1
+    # material dimmed now floors to 0.25 -- more opaque than 0.1, but still
+    # well under a dimmed opaque face's 0.35, and nowhere near the plain
+    # product's near-invisible 0.035.
+    assert _dimmed(0.1).alpha == pytest.approx(0.25)
+    assert _dimmed(0.1).alpha < 0.35  # still fainter than a dimmed opaque face
 
 
-def test_xray_and_dim_still_compose_through_the_cap():
-    # X-Ray's 0.35 sits exactly at the dim floor, so a translucent material
-    # under X-Ray lands below it and keeps its own lower value. Kills a fix
-    # that caps against dim_alpha BEFORE material_alpha and X-Ray are folded
-    # in, which would hand a translucent X-Ray face a flat 0.35.
-    assert _dimmed(0.5, xray=True).alpha == pytest.approx(0.35 * 0.5)
+def test_xray_and_dim_compose_through_the_floor():
+    # Renamed from test_xray_and_dim_still_compose_through_the_cap.
+    # material_alpha=0.5 under X-Ray gives fu.alpha == 0.35 * 0.5 == 0.175,
+    # already below dim_alpha (0.35) -- under the old cap this composed
+    # untouched (min(0.175, 0.35) == 0.175), which is what that test name
+    # described. Under the floored product it is pulled back up:
+    # max(0.175 * 0.35, 0.25) == 0.25, since 0.175 * 0.35 == 0.06125 is below
+    # the floor. The floor's job is exactly this: stop a doubly-attenuated
+    # (translucent + X-Ray + dim) face from vanishing.
+    assert _dimmed(0.5, xray=True).alpha == pytest.approx(0.25)
+    assert _dimmed(0.5, xray=True).alpha > 0.35 * 0.5 * 0.35  # the plain product

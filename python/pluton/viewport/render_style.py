@@ -136,16 +136,17 @@ def resolve_face_pass(
     dim_ambient: tuple[float, float, float],
     dim_diffuse: tuple[float, float, float],
     dim_alpha: float,
+    dim_alpha_floor: float,
     material_alpha: float = 1.0,
 ) -> ResolvedFacePass:
     """Compose face style + X-Ray + the M4e dim pass into one face-pass result.
 
     Dim overrides ambient/diffuse to the desaturated dim colors (preserving the
-    M4e look at the Shaded default) and caps alpha at dim_alpha; X-Ray sets alpha to
-    XRAY_ALPHA and turns depth writes off so geometry behind shows through.
-    A translucent material_alpha behaves like X-Ray for depth purposes: it
-    also stops writing depth, since blended geometry drawn back-to-front
-    should not occlude what is behind it.
+    M4e look at the Shaded default) and multiplies alpha by dim_alpha, floored
+    at dim_alpha_floor; X-Ray sets alpha to XRAY_ALPHA and turns depth writes
+    off so geometry behind shows through. A translucent material_alpha behaves
+    like X-Ray for depth purposes: it also stops writing depth, since blended
+    geometry drawn back-to-front should not occlude what is behind it.
     """
     desc = FACE_STYLE_TABLE[style.face_style]
     if not desc.draw_faces:
@@ -163,12 +164,19 @@ def resolve_face_pass(
         desc.shading, bg=bg, material=material, xray=style.xray, material_alpha=material_alpha
     )
     if dimmed:
-        # M7.5b (#107): min, not a product. Multiplying turned a 0.4 material
-        # into an effective 0.14 once dimmed, which is very nearly invisible.
-        # Dimming should say "not the thing you are editing", not delete the
-        # geometry, so an already-translucent face keeps its own alpha and
-        # only an opaque one is pulled down to dim_alpha.
-        ambient, diffuse, alpha = dim_ambient, dim_diffuse, min(fu.alpha, dim_alpha)
+        # M7.5b (#107, refined): a floored product, not a plain product and
+        # not a cap. A plain product (fu.alpha * dim_alpha) turned a 0.4
+        # material into an effective 0.14 once dimmed -- very nearly
+        # invisible, which is the bug #107 fixed. A plain cap
+        # (min(fu.alpha, dim_alpha)) fixed that, but it also silently stopped
+        # dim and X-Ray from compounding: XRAY_ALPHA is exactly dim_alpha
+        # (0.35), so dimmed X-Ray collapsed to the same alpha as undimmed
+        # X-Ray and the two became visually indistinguishable. Multiplying
+        # keeps "dimmed is fainter" true in every case, including X-Ray's,
+        # and the floor is what stops that product from vanishing for an
+        # already-translucent material.
+        ambient, diffuse = dim_ambient, dim_diffuse
+        alpha = max(fu.alpha * dim_alpha, dim_alpha_floor)
     else:
         ambient, diffuse, alpha = fu.ambient, fu.diffuse, fu.alpha
     return ResolvedFacePass(

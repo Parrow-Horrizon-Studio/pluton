@@ -150,6 +150,9 @@ _SELECTION_EDGE_COLOR = (0.20, 0.55, 1.00)  # selected edges (bright blue)
 _DIM_AMBIENT = (0.30, 0.30, 0.31)  # desaturated ambient for dimmed definitions
 _DIM_DIFFUSE = (0.40, 0.40, 0.42)  # desaturated diffuse for dimmed definitions
 _DIM_ALPHA_BLEND = 0.35  # alpha for dimmed geometry (blended toward bg)
+# M7.5b (#107, refined): floor under the dim*material_alpha product so a
+# deeply translucent material dimmed to near-zero alpha does not vanish.
+_DIM_ALPHA_FLOOR = 0.25
 _INSTANCE_BBOX_COLOR = (0.30, 0.55, 0.95)  # selection-blue bbox for selected instances
 _INSTANCE_BBOX_WIDTH = 2.0
 # Uniform names looked up once per program in initialize_gl().
@@ -344,6 +347,7 @@ def resolve_batch_sides(
             dim_ambient=_DIM_AMBIENT,
             dim_diffuse=_DIM_DIFFUSE,
             dim_alpha=_DIM_ALPHA_BLEND,
+            dim_alpha_floor=_DIM_ALPHA_FLOOR,
             material_alpha=alpha,
         )
 
