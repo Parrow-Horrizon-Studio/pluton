@@ -140,7 +140,7 @@ def stubbed_renderer(monkeypatch):
     r = SceneRenderer()
     calls = []
 
-    def fake_upload(definition, translucent_ids, model=None):
+    def fake_upload(definition, translucent_ids, model):
         calls.append(translucent_ids)
         return _DefBuffers(translucent_ids=translucent_ids)
 
@@ -153,8 +153,8 @@ def test_an_unchanged_translucent_set_reuses_the_buffer(stubbed_renderer):
     # return a fresh buffer and record a second upload call.
     r, calls = stubbed_renderer
     defn = _FakeDefinition()
-    first = r._ensure_buffers(defn, frozenset({2}))
-    again = r._ensure_buffers(defn, frozenset({2}))
+    first = r._ensure_buffers(defn, frozenset({2}), Model())
+    again = r._ensure_buffers(defn, frozenset({2}), Model())
     assert again is first
     assert len(calls) == 1
 
@@ -165,8 +165,8 @@ def test_a_changed_translucent_set_rebuilds_the_buffer(stubbed_renderer):
     # and goes on drawing the now-translucent material in the opaque pass.
     r, calls = stubbed_renderer
     defn = _FakeDefinition()
-    first = r._ensure_buffers(defn, frozenset({2}))
-    changed = r._ensure_buffers(defn, frozenset({2, 3}))
+    first = r._ensure_buffers(defn, frozenset({2}), Model())
+    changed = r._ensure_buffers(defn, frozenset({2, 3}), Model())
     assert changed is not first
     assert calls == [frozenset({2}), frozenset({2, 3})]
     assert changed.translucent_ids == frozenset({2, 3})
@@ -176,16 +176,16 @@ def test_a_dirty_mesh_still_rebuilds_the_buffer(stubbed_renderer):
     # The pre-existing invalidation must survive the new one being added.
     r, calls = stubbed_renderer
     defn = _FakeDefinition()
-    r._ensure_buffers(defn, frozenset({2}))
+    r._ensure_buffers(defn, frozenset({2}), Model())
     defn.mesh.dirty = True
-    r._ensure_buffers(defn, frozenset({2}))
+    r._ensure_buffers(defn, frozenset({2}), Model())
     assert len(calls) == 2
     assert defn.mesh.clean_calls == 2  # re-upload marks the mesh clean again
 
 
 def test_an_unseen_definition_uploads_once(stubbed_renderer):
     r, calls = stubbed_renderer
-    r._ensure_buffers(_FakeDefinition(), frozenset())
+    r._ensure_buffers(_FakeDefinition(), frozenset(), Model())
     assert len(calls) == 1
 
 
@@ -251,15 +251,22 @@ def test_an_empty_suffix_rebuilds_to_no_batches():
 
 
 def _tri_rows(centroid_x: float) -> np.ndarray:
-    """Three interleaved (pos, normal, uv) rows for a triangle centred at x."""
-    return np.array(
+    """Three interleaved face-vertex rows for a triangle centred at x.
+
+    Position and normal are all the translucent sort reads. The remaining
+    columns — the UV blocks — are padded out to _FACE_VERTEX_FLOATS so this
+    fixture follows the vertex format rather than breaking each time it grows.
+    """
+    core = np.array(
         [
-            [centroid_x, -0.5, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0],
-            [centroid_x, 0.5, 0.0, 0.0, 0.0, 1.0, 1.0, 0.0],
-            [centroid_x, 0.0, 0.5, 0.0, 0.0, 1.0, 0.0, 1.0],
+            [centroid_x, -0.5, 0.0, 0.0, 0.0, 1.0],
+            [centroid_x, 0.5, 0.0, 0.0, 0.0, 1.0],
+            [centroid_x, 0.0, 0.5, 0.0, 0.0, 1.0],
         ],
         dtype=np.float32,
     )
+    pad = np.zeros((3, _FACE_VERTEX_FLOATS - core.shape[1]), dtype=np.float32)
+    return np.concatenate([core, pad], axis=1)
 
 
 # Upload order groups by material pair, exactly as plan_face_batches leaves it:

@@ -56,8 +56,22 @@ def _quad_and_triangle(scene: Scene) -> tuple[int, int]:
     return q, t
 
 
-def test_the_face_vertex_carries_position_normal_and_uv():
-    assert _FACE_VERTEX_FLOATS == 8
+def _split_edge_square(scene: Scene) -> int:
+    """A square whose loop STARTS at a mid-edge vertex.
+
+    Its first three boundary vertices are collinear, which is the shape any
+    edge split produces. Scene.face_normal raises on exactly this, while
+    face_triangle_buffer triangulates it correctly.
+    """
+    pts = [(0.0, 0.0), (0.5, 0.0), (1.0, 0.0), (1.0, 1.0), (0.0, 1.0)]
+    v = [scene.add_vertex(np.array([x, y, 0.0], dtype=np.float32)) for x, y in pts]
+    for a, b in zip(v, v[1:] + v[:1], strict=True):
+        scene.add_edge(a, b)
+    return scene.add_face_from_loop(v)
+
+
+def test_the_face_vertex_carries_position_normal_and_both_side_uvs():
+    assert _FACE_VERTEX_FLOATS == 10
 
 
 def test_face_ids_align_one_per_triangle_with_the_buffer():
@@ -170,10 +184,14 @@ def test_each_face_s_corner_block_holds_that_face_s_own_vertices():
 
 
 def test_the_uvs_of_a_face_land_on_that_face_s_own_corner_block():
-    # The alignment invariant with real teeth, on a mesh whose faces have
-    # UNEQUAL triangle counts. Every corner must reproduce, through its OWN
-    # face's plane basis and centre, the UV the builder assigned it — so a
-    # walk that offsets one face's block by another's triangle count fails.
+    # Catches a BLOCK-OFFSET error, on a mesh whose faces have UNEQUAL triangle
+    # counts: a builder that sized one face's corner run by another face's
+    # triangle count slides every later block and fails here.
+    #
+    # It is NOT a second independent guard on the walk order. It re-projects
+    # through the walk's own face assignment, so a walk that disagreed with the
+    # C++ face_triangle_buffer would satisfy it consistently. That is what
+    # test_each_face_s_corner_block_holds_that_face_s_own_vertices is for.
     model = Model()
     scene = model.root.mesh
     _quad_and_triangle(scene)
@@ -213,6 +231,44 @@ def test_an_empty_scene_yields_an_empty_uv_array():
     assert uvs.dtype == np.float32
 
 
+def test_a_face_whose_loop_starts_on_a_split_edge_still_gets_uvs():
+    # Scene.face_normal raises ValueError when a face's first three loop
+    # vertices are collinear, and splitting an edge produces exactly that.
+    # Nothing in the render or upload path called face_normal before M7.5b —
+    # every caller was interactive tool code working on one picked face — so
+    # taking the normal from it would let one ordinary face stop the entire
+    # document from rendering. face_triangle_buffer's own normals block is
+    # correct for this face, so the projection reads it instead.
+    model = Model()
+    scene = model.root.mesh
+    f = _split_edge_square(scene)
+
+    with pytest.raises(ValueError):
+        scene.face_normal(f)  # the trap; if this ever stops raising, say so
+
+    _, normals = scene.face_triangle_buffer()
+    assert np.allclose(normals[0], [0.0, 0.0, 1.0])
+
+    uvs = build_face_uvs(scene, model)
+    assert uvs.shape == (9, 2)
+    assert np.all(np.isfinite(uvs))
+
+
+def test_uploading_a_definition_with_a_split_edge_face_does_not_raise(monkeypatch):
+    # The same trap at the level where it actually bit: the exception
+    # propagated _upload_definition -> _ensure_buffers -> paint, so the whole
+    # viewport went dark rather than one face looking wrong.
+    model = Model()
+    _split_edge_square(model.root.mesh)
+    monkeypatch.setattr(scene_renderer.GL, "glBindBuffer", lambda *a: None)
+    monkeypatch.setattr(scene_renderer.GL, "glBufferData", lambda *a: None)
+    r = SceneRenderer()
+    monkeypatch.setattr(r, "_alloc_def_buffers", lambda: _DefBuffers(face_vbo=1, edge_vbo=2))
+
+    buf = r._ensure_buffers(model.root, frozenset(), model)
+    assert buf.face_count == 9
+
+
 def test_an_untextured_scene_still_produces_finite_uvs():
     # Untextured faces still get UVs, because the attribute exists for every
     # vertex. They are simply never sampled. NaN or inf here would corrupt the
@@ -226,16 +282,19 @@ def test_an_untextured_scene_still_produces_finite_uvs():
 
 
 def test_the_uploaded_vertex_rows_carry_uvs_under_the_batch_permutation(monkeypatch):
-    # Two invariants at once, both silent when broken. The row must be 8 wide
-    # (a concatenate that forgot the UV block uploads 6-wide data against a
-    # 32-byte stride), and the UVs must be permuted by plan.vertex_order just
-    # like positions and normals — leaving them unsorted scrambles texturing
-    # only on definitions that contain translucent faces.
+    # Two invariants at once, both silent when broken. The row must be 10 wide
+    # (a concatenate that forgot a UV block uploads narrow data against a
+    # 40-byte stride), and BOTH UV blocks must be permuted by plan.vertex_order
+    # just like positions and normals — leaving either unsorted scrambles
+    # texturing only on definitions that contain translucent faces.
     model, scene = _boxed()
     glass = model.materials.add_custom("Glass", (0.3, 0.5, 0.9))
     model.materials.edit(glass.id, alpha=0.4, texture_size=(2.0, 2.0))
+    lining = model.materials.add_custom("Lining", (0.9, 0.4, 0.1))
+    model.materials.edit(lining.id, texture_size=(5.0, 5.0))
     for f in list(scene.faces_iter())[:3]:
         scene.set_face_material(f.id, glass.id)
+        scene.set_face_material(f.id, lining.id, Side.BACK)
 
     uploads: list[np.ndarray] = []
     monkeypatch.setattr(scene_renderer.GL, "glBindBuffer", lambda *a: None)
@@ -258,7 +317,14 @@ def test_the_uploaded_vertex_rows_carry_uvs_under_the_batch_permutation(monkeypa
     positions, normals = scene.face_triangle_buffer()
     assert np.allclose(rows[:, 0:3], positions[order])
     assert np.allclose(rows[:, 3:6], normals[order])
-    assert np.allclose(rows[:, 6:8], build_face_uvs(scene, model)[order], atol=1e-6)
+    front = build_face_uvs(scene, model, Side.FRONT)
+    back = build_face_uvs(scene, model, Side.BACK)
+    assert not np.allclose(front, back), (
+        "front and back UVs are identical here, so this test could not tell the "
+        "two blocks apart"
+    )
+    assert np.allclose(rows[:, 6:8], front[order], atol=1e-6)
+    assert np.allclose(rows[:, 8:10], back[order], atol=1e-6)
 
 
 def test_the_upload_records_the_uv_key_it_baked(monkeypatch):
@@ -303,6 +369,35 @@ def test_changing_a_colour_does_not_change_the_uv_key():
     assert uv_material_key(model.root.mesh, model) == before
 
 
+def _back_painted_box():
+    """A box painted only on the BACK, so the front sidecar names nothing."""
+    model, scene = _boxed()
+    mat = model.materials.add_custom("Lining", (0.9, 0.4, 0.1))
+    for f in scene.faces_iter():
+        scene.set_face_material(f.id, mat.id, Side.BACK)
+    return model, scene, mat
+
+
+def test_resizing_a_back_only_material_changes_the_uv_key():
+    # Both sides are baked into the vertex buffer, so the key has to span both.
+    # A key that only walked Side.FRONT would never name this material and a
+    # back texture resize would go on tiling at the old size for ever.
+    model, _, mat = _back_painted_box()
+    before = uv_material_key(model.root.mesh, model)
+    assert any(entry[0] == mat.id for entry in before), "the back material is not in the key"
+    model.materials.edit(mat.id, texture_size=(4.0, 4.0))
+    assert uv_material_key(model.root.mesh, model) != before
+
+
+def test_recolouring_a_back_only_material_does_not_change_the_uv_key():
+    # The paired half for the back side, for the same reason as the front pair:
+    # a key that hashed the whole material would pass the test above alone.
+    model, _, mat = _back_painted_box()
+    before = uv_material_key(model.root.mesh, model)
+    model.materials.edit(mat.id, base_color=(0.1, 0.8, 0.4), alpha=0.6, metallic=0.9)
+    assert uv_material_key(model.root.mesh, model) == before
+
+
 @pytest.fixture
 def uv_stubbed_renderer(monkeypatch):
     """A SceneRenderer whose _upload_definition is a counted stub.
@@ -313,7 +408,7 @@ def uv_stubbed_renderer(monkeypatch):
     r = SceneRenderer()
     calls: list[tuple] = []
 
-    def fake_upload(definition, translucent_ids, model=None):
+    def fake_upload(definition, translucent_ids, model):
         calls.append((translucent_ids, model))
         return _DefBuffers(
             translucent_ids=translucent_ids,
@@ -370,6 +465,19 @@ def test_the_per_frame_staleness_check_does_not_walk_the_triangles(uv_stubbed_re
     assert walks == []
 
 
+def test_a_changed_back_texture_size_rebuilds_the_buffer(uv_stubbed_renderer):
+    # The back UVs are baked into the same buffer, so a back-only material's
+    # resize must invalidate it exactly as a front one does. A key or a
+    # staleness check that only spanned Side.FRONT reuses the stale buffer.
+    r, calls = uv_stubbed_renderer
+    model, _, mat = _back_painted_box()
+    first = r._ensure_buffers(model.root, frozenset(), model)
+    model.materials.edit(mat.id, texture_size=(4.0, 4.0))
+    changed = r._ensure_buffers(model.root, frozenset(), model)
+    assert changed is not first
+    assert len(calls) == 2
+
+
 def test_a_colour_edit_does_not_rebuild_the_buffer(uv_stubbed_renderer):
     # The paired half at buffer level: a colour edit must leave the VBO alone.
     r, calls = uv_stubbed_renderer
@@ -379,3 +487,30 @@ def test_a_colour_edit_does_not_rebuild_the_buffer(uv_stubbed_renderer):
     again = r._ensure_buffers(model.root, frozenset(), model)
     assert again is first
     assert len(calls) == 1
+
+
+def test_painting_a_material_the_key_does_not_name_rebuilds_the_buffer(uv_stubbed_renderer):
+    # uv_key_still_matches re-reads only the materials the cached key already
+    # names. That is safe ONLY because every path that can introduce a new
+    # material id also marks the scene render-dirty (Scene.set_face_material).
+    # Nothing else pins that cross-module invariant: a refactor that stopped
+    # dirtying would leave the renderer baking UVs from the wrong material with
+    # every other test in this file green — the exact shape of failure Step 6b
+    # exists to prevent. Driven through the real dirty flag, not the stub.
+    r, calls = uv_stubbed_renderer
+    model, scene, _ = _painted_box()
+    first = r._ensure_buffers(model.root, frozenset(), model)
+    assert not scene.dirty, "the upload should have marked the scene clean"
+
+    fresh = model.materials.add_custom("Tile", (0.2, 0.2, 0.2))
+    model.materials.edit(fresh.id, texture_size=(3.0, 3.0))
+    assert all(entry[0] != fresh.id for entry in first.uv_key), (
+        "the new material is already in the cached key, so this test would pass "
+        "without the dirty flag doing any work"
+    )
+
+    scene.set_face_material(next(iter(scene.faces_iter())).id, fresh.id)
+    changed = r._ensure_buffers(model.root, frozenset(), model)
+    assert changed is not first
+    assert len(calls) == 2
+    assert any(entry[0] == fresh.id for entry in changed.uv_key)

@@ -187,16 +187,20 @@ def _empty_batch_plan() -> BatchPlan:
     return plan_face_batches([], [])
 
 
-# The face VBO's interleaved layout: (pos.xyz, normal.xyz, uv.xy) float32 per
-# vertex. _alloc_def_buffers' vertex-attribute stride and
-# _sort_translucent_slice's glBufferSubData byte offset are the same number, so
-# they share one constant rather than each hard-coding 32 and drifting apart.
+# The face VBO's interleaved layout: (pos.xyz, normal.xyz, front_uv.xy,
+# back_uv.xy) float32 per vertex. _alloc_def_buffers' vertex-attribute stride
+# and _sort_translucent_slice's glBufferSubData byte offset are the same number,
+# so they share one constant rather than each hard-coding 40 and drifting apart.
 #
-# M7.5b: every face vertex carries a UV whether or not anything in the document
-# is textured (spec section 6). The alternative — two vertex formats chosen per
-# definition — puts a branch in the renderer's hottest path, so the untextured
-# case pays the 8 bytes deliberately.
-_FACE_VERTEX_FLOATS = 8
+# M7.5b: every face vertex carries BOTH sides' UVs whether or not anything in
+# the document is textured. Both, because spec D7 and 1.4 make front and back
+# placement independent while two-sided shading draws both sides in one pass
+# selected by gl_FrontFacing — a single UV attribute would make back placement
+# physically unrepresentable, leaving Task 8's command, Task 10's fields and
+# Task 12's drag with a dead `side` control. Unconditionally, because the
+# alternative — a vertex format chosen per definition — puts a branch in the
+# renderer's hottest path, so the untextured case pays the 16 bytes deliberately.
+_FACE_VERTEX_FLOATS = 10
 _FACE_VERTEX_BYTES = _FACE_VERTEX_FLOATS * 4
 
 
@@ -314,15 +318,20 @@ def _face_corner_runs(face_ids: np.ndarray) -> list[tuple[int, int, int]]:
     ]
 
 
-def build_face_uvs(scene, model, side: Side = Side.FRONT) -> np.ndarray:
+def build_face_uvs(scene, model, side: Side = Side.FRONT, face_buffer=None) -> np.ndarray:
     """(3T, 2) per-corner UVs for one side of a definition's faces.
 
     Walks faces in the same next_live_face order face_triangle_buffer uses, so
     the result is aligned corner for corner with the position buffer. Faces with
     no texture still get UVs; they are simply never sampled.
+
+    `face_buffer` is an already-fetched (positions, normals) pair. _upload_definition
+    holds one and calls this once per side, so passing it avoids re-triangulating
+    the whole definition twice more.
     """
-    positions, _ = scene.face_triangle_buffer()
+    positions, normals = scene.face_triangle_buffer() if face_buffer is None else face_buffer
     positions = np.asarray(positions, dtype=np.float64).reshape(-1, 3)
+    normals = np.asarray(normals, dtype=np.float64).reshape(-1, 3)
     if positions.shape[0] == 0:
         return np.zeros((0, 2), dtype=np.float32)
 
@@ -334,9 +343,16 @@ def build_face_uvs(scene, model, side: Side = Side.FRONT) -> np.ndarray:
         if materials is not None:
             size = materials.get(scene.face_material(f_id, side)).texture_size
 
+        # The normal comes from the triangle buffer, NOT from Scene.face_normal.
+        # face_normal takes the cross product of a face's first three loop
+        # vertices and raises when they are collinear — which is what splitting
+        # an edge leaves behind, on a face that triangulates and renders
+        # perfectly well. Its callers were all interactive tool code working on
+        # one picked face; this runs for every face of every upload, where a
+        # raise propagates out through paint() and blanks the whole viewport.
         uvs = project_corners(
             positions[first : first + count],
-            np.asarray(scene.face_normal(f_id), dtype=np.float64),
+            normals[first],
             np.asarray(scene.face_center(f_id), dtype=np.float64),
             size,
         )
@@ -353,7 +369,7 @@ def build_face_uvs(scene, model, side: Side = Side.FRONT) -> np.ndarray:
     return out
 
 
-def uv_material_key(scene, model, side: Side = Side.FRONT) -> tuple:
+def uv_material_key(scene, model) -> tuple:
     """The material state the baked UVs depend on, for change detection.
 
     UVs are baked into the vertex buffer, but texture_id and texture_size live
@@ -361,6 +377,10 @@ def uv_material_key(scene, model, side: Side = Side.FRONT) -> tuple:
     mesh. Without this snapshot the buffer would keep tiling at the old size
     and the edit would look inert — the same asymmetry that spec 1.7's
     translucent_ids exists for.
+
+    Spans BOTH sides, because both sides' UVs are baked into the same buffer. A
+    key that only walked the front would never name a back-only material, and
+    resizing its texture would go on tiling at the old size for ever.
 
     Only texture_id and texture_size matter: a colour, alpha, metallic or
     roughness edit changes uniforms read per batch at draw time and needs no
@@ -370,8 +390,11 @@ def uv_material_key(scene, model, side: Side = Side.FRONT) -> tuple:
     materials = getattr(model, "materials", None)
     if materials is None:
         return ()
+    ids: set[int] = set()
+    for side in Side:
+        ids.update(int(m) for m in scene.face_triangle_materials(side).tolist())
     key = []
-    for mid in sorted({int(m) for m in scene.face_triangle_materials(side).tolist()}):
+    for mid in sorted(ids):
         mat = materials.get(mid)
         key.append((mid, mat.texture_id, tuple(mat.texture_size)))
     return tuple(key)
@@ -1155,7 +1178,8 @@ class SceneRenderer:
         """Allocate a new _DefBuffers: create empty VAO+VBO pairs for faces and edges."""
         buf = _DefBuffers()
 
-        # Face buffers — interleaved (pos.xyz, normal.xyz, uv.xy), 32 bytes per vertex
+        # Face buffers — interleaved (pos.xyz, normal.xyz, front_uv.xy,
+        # back_uv.xy), 40 bytes per vertex
         buf.face_vao = int(GL.glGenVertexArrays(1))
         buf.face_vbo = int(GL.glGenBuffers(1))
         GL.glBindVertexArray(buf.face_vao)
@@ -1171,6 +1195,10 @@ class SceneRenderer:
             2, 2, GL.GL_FLOAT, GL.GL_FALSE, _FACE_VERTEX_BYTES, ctypes.c_void_p(24)
         )
         GL.glEnableVertexAttribArray(2)
+        GL.glVertexAttribPointer(
+            3, 2, GL.GL_FLOAT, GL.GL_FALSE, _FACE_VERTEX_BYTES, ctypes.c_void_p(32)
+        )
+        GL.glEnableVertexAttribArray(3)
         GL.glBindVertexArray(0)
 
         # Edge buffers — interleaved (pos.xyz, color.rgb), 24 bytes per vertex
@@ -1277,9 +1305,7 @@ class SceneRenderer:
         GL.glBindVertexArray(0)
         GL.glUseProgram(0)
 
-    def _ensure_buffers(
-        self, definition, translucent_ids: frozenset[int], model=None
-    ) -> _DefBuffers:
+    def _ensure_buffers(self, definition, translucent_ids: frozenset[int], model) -> _DefBuffers:
         """The cached buffers for `definition`, re-uploading them if stale.
 
         Lifted out of the draw loop because pass 1 and pass 2 both need it and
@@ -1347,9 +1373,7 @@ class SceneRenderer:
         )
         buf.translucent_sort_key = key
 
-    def _upload_definition(
-        self, definition, translucent_ids: frozenset[int], model=None
-    ) -> _DefBuffers:
+    def _upload_definition(self, definition, translucent_ids: frozenset[int], model) -> _DefBuffers:
         """Build or update GL buffers for a single definition's mesh.
 
         Looks up (or allocates) a _DefBuffers entry for this definition,
@@ -1363,8 +1387,10 @@ class SceneRenderer:
         buffer was last built under, and both must see exactly the same value.
 
         `model` supplies the material library the per-corner UVs are projected
-        through. Optional so the renderer still uploads sane (identity-sized)
-        UVs for a definition with no model behind it.
+        through. Required, not defaulted: a missing model silently bakes
+        identity-sized UVs AND leaves uv_key_still_matches unable to validate a
+        non-empty key, so every frame would re-upload wrong UVs rather than
+        failing. A caller that genuinely has no model must say so explicitly.
         """
         # Re-use existing GL objects if we already have them; allocate if not.
         buf = self._def_buffers.get(id(definition))
@@ -1373,14 +1399,19 @@ class SceneRenderer:
 
         scene = definition.mesh
 
-        # Faces: (3*T, 3) positions + (3*T, 3) normals + (3*T, 2) UVs
-        # -> interleaved (3*T, 8). build_face_uvs walks faces in the same
-        # next_live_face order face_triangle_buffer does, so the three blocks
-        # are aligned corner for corner before plan.vertex_order permutes them.
-        positions, normals = scene.face_triangle_buffer()
+        # Faces: (3*T, 3) positions + (3*T, 3) normals + (3*T, 2) front UVs +
+        # (3*T, 2) back UVs -> interleaved (3*T, 10). build_face_uvs walks faces
+        # in the same next_live_face order face_triangle_buffer does, so all
+        # four blocks are aligned corner for corner before plan.vertex_order
+        # permutes them — and the permutation must reach every one of them.
+        face_buffer = scene.face_triangle_buffer()
+        positions, normals = face_buffer
         if positions.shape[0] > 0:
-            uvs = build_face_uvs(scene, model, Side.FRONT)
-            interleaved = np.concatenate([positions, normals, uvs], axis=1).astype(np.float32)
+            front_uvs = build_face_uvs(scene, model, Side.FRONT, face_buffer)
+            back_uvs = build_face_uvs(scene, model, Side.BACK, face_buffer)
+            interleaved = np.concatenate([positions, normals, front_uvs, back_uvs], axis=1).astype(
+                np.float32
+            )
             # Group triangles by (front, back) material so each pair draws as one
             # contiguous batch, with the translucent pairs as a contiguous suffix
             # that render()'s second pass depth-sorts.

@@ -31,14 +31,23 @@ def plane_basis(normal: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
             np.array([1.0, 0.0, 0.0]),
             np.array([0.0, 1.0, 0.0]),
         )
-    n = n / length
-    seed = (
-        np.array([0.0, 0.0, 1.0]) if abs(float(n[2])) < _AXIS_ALIGNED else np.array([1.0, 0.0, 0.0])
+    nx, ny, nz = (float(c) / length for c in n)
+    # cross(seed, n) and cross(n, u) written out as scalar arithmetic. The seed
+    # is always a unit world axis, so the first cross collapses to two negations
+    # and the second is three multiply-subtracts — the same floating-point
+    # operations np.cross performs, without its moveaxis/broadcast dispatch.
+    # That dispatch dominated the profile: building the UVs for a 9,600-face
+    # definition spent 0.72 s of 1.14 s in np.cross on 3-vectors.
+    if abs(nz) < _AXIS_ALIGNED:
+        ux, uy, uz = -ny, nx, 0.0  # cross((0, 0, 1), n)
+    else:
+        ux, uy, uz = 0.0, -nz, ny  # cross((1, 0, 0), n)
+    u_len = (ux * ux + uy * uy + uz * uz) ** 0.5
+    ux, uy, uz = ux / u_len, uy / u_len, uz / u_len
+    return (
+        np.array([ux, uy, uz]),
+        np.array([ny * uz - nz * uy, nz * ux - nx * uz, nx * uy - ny * ux]),
     )
-    u = np.cross(seed, n)
-    u = u / float(np.linalg.norm(u))
-    v = np.cross(n, u)
-    return u, v
 
 
 def project_corners(
