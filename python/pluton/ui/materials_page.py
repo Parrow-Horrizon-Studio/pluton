@@ -58,7 +58,7 @@ class MaterialsPage(QWidget):
         for idx, mat in enumerate(self._library.materials()):
             btn = QPushButton(self)
             btn.setToolTip(mat.name)
-            btn.setStyleSheet(_swatch_style(mat.color, mat.id == self._active_id))
+            btn.setStyleSheet(_swatch_style(mat.base_color, mat.id == self._active_id))
             btn.clicked.connect(lambda _checked=False, mid=mat.id: self._on_pick(mid))
             self._grid.addWidget(btn, idx // _COLUMNS, idx % _COLUMNS)
             self._buttons[mat.id] = btn
@@ -66,7 +66,7 @@ class MaterialsPage(QWidget):
     def _restyle(self) -> None:
         for mid, btn in self._buttons.items():
             mat = self._library.get(mid)
-            btn.setStyleSheet(_swatch_style(mat.color, mid == self._active_id))
+            btn.setStyleSheet(_swatch_style(mat.base_color, mid == self._active_id))
 
     def _on_pick(self, material_id: int) -> None:
         self._active_id = material_id

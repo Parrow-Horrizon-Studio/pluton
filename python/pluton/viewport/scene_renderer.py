@@ -529,7 +529,7 @@ class SceneRenderer:
                 materials = getattr(model, "materials", None)
                 for batch in buf.batches:
                     if batch.material_id != 0 and materials is not None:
-                        mat = phong_material_for(materials.get(batch.material_id).color)
+                        mat = phong_material_for(materials.get(batch.material_id).base_color)
                     else:
                         mat = _DEFAULT_MATERIAL
                     resolved = resolve_face_pass(

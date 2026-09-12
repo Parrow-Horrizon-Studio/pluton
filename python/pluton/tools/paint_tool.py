@@ -103,7 +103,7 @@ class PaintTool(Tool):
     def overlay(self) -> ToolOverlay:
         fills: list[np.ndarray] = []
         mat = self._active_material()
-        tint = mat.color if mat is not None else _NEUTRAL_COLOR
+        tint = mat.base_color if mat is not None else _NEUTRAL_COLOR
         if self._hovered_face is not None and self._scene is not None:
             try:
                 from pluton.geometry.transforms import apply_mat, is_identity_transform

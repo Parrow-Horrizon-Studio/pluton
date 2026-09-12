@@ -1,23 +1,30 @@
 """Solid-color materials + the per-Model material library (M5b).
 
 Pure Python — no GL, no Qt — so it is fully unit-testable headlessly. A
-Material is a named base RGB color; faces reference materials by id (see
-Scene._face_materials). The library owns the canonical colors and is
-serialization-ready for M6 file I/O.
+Material is a named base RGB color plus PBR-shaped shading fields; faces
+reference materials by id (see Scene._face_materials). The library owns the
+canonical materials and is serialization-ready for M6 file I/O.
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 
 @dataclass(frozen=True, slots=True)
 class Material:
-    """A named solid-color material. `color` is base RGB in 0..1 (opaque)."""
+    """A named material. `base_color` is RGB in 0..1; alpha 1.0 is opaque."""
 
     id: int
     name: str
-    color: tuple[float, float, float]
+    base_color: tuple[float, float, float]
+    alpha: float = 1.0
+    metallic: float = 0.0
+    roughness: float = 0.5
+
+    @property
+    def is_translucent(self) -> bool:
+        return self.alpha < 1.0
 
 
 # The Default swatch color mirrors the renderer's default diffuse
@@ -76,20 +83,64 @@ class MaterialLibrary:
     def next_id(self) -> int:
         return self._next_id
 
+    def edit(self, mid: int, **fields) -> Material:
+        """Replace the material with an edited copy. Unknown fields raise TypeError."""
+        edited = replace(self._materials[mid], **fields)
+        self._materials[mid] = edited
+        if mid == self.DEFAULT_ID:
+            self._default = edited
+        return edited
+
+    def index_of(self, mid: int) -> int:
+        """Position of `mid` in display order."""
+        return self._order.index(mid)
+
+    def remove(self, mid: int) -> Material:
+        """Drop a material and return it. Refuses Default, the unpainted fallback."""
+        if mid == self.DEFAULT_ID:
+            raise ValueError("the Default material cannot be removed")
+        removed = self._materials.pop(mid)
+        self._order.remove(mid)
+        return removed
+
+    def restore(self, material: Material, index: int) -> None:
+        """Put a removed material back at `index` in display order (undo)."""
+        self._materials[material.id] = material
+        self._order.insert(index, material.id)
+
     def to_records(self) -> list[dict]:
         """Serialize all materials in display order (Default first)."""
-        return [{"id": m.id, "name": m.name, "color": list(m.color)} for m in self.materials()]
+        return [
+            {
+                "id": m.id,
+                "name": m.name,
+                "base_color": list(m.base_color),
+                "alpha": m.alpha,
+                "metallic": m.metallic,
+                "roughness": m.roughness,
+            }
+            for m in self.materials()
+        ]
 
     @classmethod
     def from_records(cls, records: list[dict], next_id: int) -> MaterialLibrary:
-        """Rebuild a library authoritatively from saved records (no auto-seed)."""
+        """Rebuild authoritatively from saved records (no auto-seed).
+
+        Accepts the schema <= 4 shape, which wrote "color" and carried no PBR
+        fields; those default to an opaque dielectric.
+        """
         lib = cls()  # seeds default + builtins, then we overwrite
         lib._materials = {}
         lib._order = []
         for r in records:
-            color = r["color"]
+            color = r.get("base_color", r.get("color"))
             mat = Material(
-                int(r["id"]), str(r["name"]), (float(color[0]), float(color[1]), float(color[2]))
+                int(r["id"]),
+                str(r["name"]),
+                (float(color[0]), float(color[1]), float(color[2])),
+                alpha=float(r.get("alpha", 1.0)),
+                metallic=float(r.get("metallic", 0.0)),
+                roughness=float(r.get("roughness", 0.5)),
             )
             lib._materials[mat.id] = mat
             lib._order.append(mat.id)

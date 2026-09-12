@@ -45,7 +45,7 @@ def test_add_custom_appends_with_fresh_id_and_keeps_default_first():
 def test_material_is_frozen():
     m = Material(1, "X", (0.1, 0.2, 0.3))
     with pytest.raises(FrozenInstanceError):
-        m.color = (0.0, 0.0, 0.0)  # type: ignore[misc]
+        m.base_color = (0.0, 0.0, 0.0)  # type: ignore[misc]
 
 
 def test_from_records_with_empty_list_falls_back_to_sentinel_default():
