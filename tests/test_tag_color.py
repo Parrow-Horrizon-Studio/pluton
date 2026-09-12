@@ -8,7 +8,7 @@ from pluton.model.model import Model
 from pluton.model.tag import TagLibrary
 from pluton.viewport.render_style import RenderStyle
 from pluton.viewport.scene_renderer import (
-    apply_tag_color_override,
+    resolve_batch_sides,
     resolve_tag_color,
     traverse_visible_tagged,
 )
@@ -122,26 +122,22 @@ def test_set_tag_color_command_is_undoable_and_tag_specific():
 
 # --- Color-by-Tag reaching the draw: the decision seams --------------------
 #
-# resolve_tag_color and apply_tag_color_override are the GL-free seams the
-# render loop composes (scene_renderer.render); traverse_visible_tagged is
-# the walk that supplies the tag id in the first place, since
-# Model.traverse_visible()'s (definition, world) pairs do not carry the
-# owning Instance. Together these three cover "does Color-by-Tag actually
-# change what an occurrence draws with" without a GL context.
+# resolve_tag_color decides WHICH colour applies; resolve_batch_sides applies
+# it, by substituting it for the batch's materials BEFORE resolution (the fix
+# for the final-review finding: a post-resolution diffuse patch left the
+# material's own ambient and specular reaching the shader, so three faces on
+# one tag painted three ways rendered three different colours).
+# traverse_visible_tagged is the walk that supplies the tag id in the first
+# place, since Model.traverse_visible()'s (definition, world) pairs do not
+# carry the owning Instance. Together these three cover "does Color-by-Tag
+# actually change what an occurrence draws with" without a GL context.
 
 
-def _face_pass(diffuse=(0.5, 0.5, 0.5)):
-    from pluton.viewport.render_style import ResolvedFacePass
+def _batch(front_material_id=0, back_material_id=0):
+    from pluton.viewport.face_batches import FaceBatch
 
-    return ResolvedFacePass(
-        draw_faces=True,
-        ambient=(0.1, 0.1, 0.1),
-        diffuse=diffuse,
-        specular=(0.2, 0.2, 0.2),
-        shininess=8.0,
-        alpha=1.0,
-        blend=False,
-        depth_write=True,
+    return FaceBatch(
+        front_material_id=front_material_id, back_material_id=back_material_id, first=0, count=3
     )
 
 
@@ -163,33 +159,88 @@ def test_resolve_tag_color_returns_the_tags_own_colour():
     assert color == (0.3, 0.4, 0.5)
 
 
-def test_apply_tag_color_override_replaces_both_sides_diffuse():
+def test_a_tag_colour_replaces_both_sides_diffuse():
     # The brief calls out a front-only override as a plausible, easy-to-miss
-    # bug -- asserting only the front side would not catch it. This checks
-    # both, and that the rest of each pass (ambient/specular/alpha/etc.) is
-    # left alone, so the override cannot be implemented by rebuilding the
-    # whole ResolvedFacePass from scratch.
-    front = _face_pass(diffuse=(0.5, 0.5, 0.5))
-    back = _face_pass(diffuse=(0.2, 0.2, 0.2))
-    color = (0.9, 0.1, 0.1)
+    # bug -- asserting only the front side would not catch it.
+    from pluton.model.material import MaterialLibrary
 
-    new_front, new_back = apply_tag_color_override(front, back, color)
+    lib = MaterialLibrary()
+    red = lib.add_custom("Red", (0.8, 0.1, 0.1))
+    blue = lib.add_custom("Blue", (0.1, 0.1, 0.8))
+    color = (0.2, 0.55, 0.9)
 
-    assert new_front.diffuse == color
-    assert new_back.diffuse == color
-    assert new_front.ambient == front.ambient
-    assert new_back.specular == back.specular
-    assert new_front.alpha == front.alpha
+    front, back = resolve_batch_sides(
+        _batch(red.id, blue.id), lib, RenderStyle(), dimmed=False, tag_color=color
+    )
+
+    assert front.diffuse == pytest.approx(color, abs=1e-6)
+    assert back.diffuse == pytest.approx(color, abs=1e-6)
 
 
-def test_apply_tag_color_override_is_a_noop_when_color_is_none():
+def test_the_tag_colour_also_drives_ambient_and_specular_on_both_sides():
+    # The final-review finding, inverted. The defect patched `diffuse` AFTER
+    # resolve_face_pass, so ambient (and, for a metal, specular) still came
+    # from the painted material -- the old test asserted ambient was UNCHANGED
+    # and so pinned exactly that leak. The tag colour must reach every colour
+    # term, identically on both sides, or two faces on one tag painted two
+    # ways still render two different colours.
+    from pluton.model.material import MaterialLibrary
+    from pluton.viewport.render_style import phong_material_for
+
+    lib = MaterialLibrary()
+    gold = lib.add_custom("Gold", (0.9, 0.75, 0.2))
+    lib.edit(gold.id, metallic=1.0)  # a metal: base_color reaches specular too
+    blue = lib.add_custom("Blue", (0.1, 0.1, 0.8))
+    color = (0.2, 0.55, 0.9)
+    expected = phong_material_for(color)
+
+    front, back = resolve_batch_sides(
+        _batch(gold.id, blue.id), lib, RenderStyle(), dimmed=False, tag_color=color
+    )
+
+    assert front.ambient == pytest.approx(expected.ambient, abs=1e-6)
+    assert front.specular == pytest.approx(expected.specular, abs=1e-6)
+    assert front.ambient == pytest.approx(back.ambient, abs=1e-6)
+    assert front.specular == pytest.approx(back.specular, abs=1e-6)
+
+
+def test_a_tag_colour_does_not_bypass_a_materials_alpha():
+    # Alpha is not a colour. A translucent material under Color-by-Tag must
+    # still blend, and each side keeps its OWN alpha -- kills a fix that
+    # substitutes a whole opaque material (or one shared alpha) for both sides.
+    from pluton.model.material import MaterialLibrary
+
+    lib = MaterialLibrary()
+    glass = lib.add_custom("Glass", (0.8, 0.1, 0.1))
+    lib.edit(glass.id, alpha=0.5)
+
+    front, back = resolve_batch_sides(
+        _batch(glass.id, 0), lib, RenderStyle(), dimmed=False, tag_color=(0.2, 0.55, 0.9)
+    )
+
+    assert front.alpha == pytest.approx(0.5)
+    assert back.alpha == pytest.approx(1.0)
+    assert front.blend and back.blend  # blend is draw-call state: both sides
+    assert not front.depth_write
+
+
+def test_no_tag_colour_leaves_the_materials_alone():
     # Kills an implementation that always overrides, ignoring the None sentinel
     # that means "Color-by-Tag is off".
-    front = _face_pass(diffuse=(0.5, 0.5, 0.5))
-    back = _face_pass(diffuse=(0.2, 0.2, 0.2))
-    new_front, new_back = apply_tag_color_override(front, back, None)
-    assert new_front == front
-    assert new_back == back
+    from pluton.model.material import MaterialLibrary
+
+    lib = MaterialLibrary()
+    red = lib.add_custom("Red", (0.8, 0.1, 0.1))
+    blue = lib.add_custom("Blue", (0.1, 0.1, 0.8))
+
+    plain = resolve_batch_sides(_batch(red.id, blue.id), lib, RenderStyle(), dimmed=False)
+    explicit = resolve_batch_sides(
+        _batch(red.id, blue.id), lib, RenderStyle(), dimmed=False, tag_color=None
+    )
+
+    assert plain == explicit
+    assert plain[0].diffuse[0] > plain[0].diffuse[2]  # still red-dominant
+    assert plain[1].diffuse[2] > plain[1].diffuse[0]  # still blue-dominant
 
 
 def _tagged_occurrences(model, definition):
@@ -325,17 +376,215 @@ def test_the_full_chain_from_instance_tag_to_resolved_diffuse():
     m.tags.set_color(walls.id, (0.9, 0.2, 0.2))
     inst.tag_id = walls.id
 
+    painted = m.materials.add_custom("Brick", (0.7, 0.27, 0.22))
+    batch = _batch(painted.id, 0)
+
     (tag_id,) = _tagged_occurrences(m, d)
-    front, back = _face_pass((0.1, 0.1, 0.1)), _face_pass((0.2, 0.2, 0.2))
 
     off_color = resolve_tag_color(tag_id, m.tags, RenderStyle(color_by_tag=False))
-    off_front, off_back = apply_tag_color_override(front, back, off_color)
-    assert (off_front.diffuse, off_back.diffuse) == (front.diffuse, back.diffuse)
+    off_front, off_back = resolve_batch_sides(
+        batch, m.materials, RenderStyle(), dimmed=False, tag_color=off_color
+    )
+    assert off_front.diffuse == pytest.approx((0.7, 0.27, 0.22), abs=1e-6)
 
     on_color = resolve_tag_color(tag_id, m.tags, RenderStyle(color_by_tag=True))
-    on_front, on_back = apply_tag_color_override(front, back, on_color)
-    assert on_front.diffuse == (0.9, 0.2, 0.2)
-    assert on_back.diffuse == (0.9, 0.2, 0.2)
+    on_front, on_back = resolve_batch_sides(
+        batch, m.materials, RenderStyle(), dimmed=False, tag_color=on_color
+    )
+    assert on_front.diffuse == pytest.approx((0.9, 0.2, 0.2), abs=1e-6)
+    assert on_back.diffuse == pytest.approx((0.9, 0.2, 0.2), abs=1e-6)
+
+
+# --- Color-by-Tag through the real render() path ---------------------------
+#
+# The seam tests above prove resolve_batch_sides applies the colour; these
+# prove render() actually routes the tag colour into it, for every batch, in
+# both passes. GL is replaced by a recorder (the pattern from
+# test_translucent_pass.py) rather than a real context, so these run in CI
+# where the offscreen platform is forced and hardware GL may be absent.
+
+
+class _RecordingGL:
+    """Stand-in for the OpenGL module. GL_* names resolve to stable ints
+    (render() ORs GL_COLOR_BUFFER_BIT with GL_DEPTH_BUFFER_BIT); everything
+    else is a no-op returning 0, so glGenVertexArrays hands back zero handles
+    that _DefBuffers.release() already guards against. Every call is recorded
+    so blend / depth-mask state is assertable."""
+
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, tuple]] = []
+        self._consts: dict[str, int] = {}
+
+    def __getattr__(self, name: str):
+        if name.startswith("GL_"):
+            return self._consts.setdefault(name, len(self._consts) + 1)
+
+        def _call(*args, **kwargs):
+            self.calls.append((name, args))
+            return 0
+
+        return _call
+
+
+class _TagRenderHarness:
+    """One group holding three coplanar-free triangles on ONE tag: unpainted,
+    Brick Red, Forest Green. Driven through the real SceneRenderer.render().
+
+    Three faces, one tag, three different paints is exactly the configuration
+    the final-review finding measured: under Color-by-Tag they must resolve to
+    one colour, and a fixture with only painted faces (or only one paint) would
+    not show the leak.
+    """
+
+    TAG_COLOR = (0.20, 0.55, 0.90)
+
+    def __init__(self, monkeypatch, *, translucent_brick=False) -> None:
+        import numpy as np
+        from pluton.viewport import scene_renderer
+        from pluton.viewport.camera import Camera
+        from pluton.viewport.scene_renderer import (
+            _LINE_UNIFORMS,
+            _PHONG_UNIFORMS,
+            SceneRenderer,
+        )
+
+        self.gl = _RecordingGL()
+        monkeypatch.setattr(scene_renderer, "GL", self.gl)
+
+        self.model = Model()
+        lib = self.model.materials
+        self.brick = next(m for m in lib.materials() if m.name == "Brick Red").id
+        self.forest = next(m for m in lib.materials() if m.name == "Forest Green").id
+        if translucent_brick:
+            lib.edit(self.brick, alpha=0.5)
+
+        def triangle(scene, x):
+            ids = [
+                scene.add_vertex(np.array([x, 0.0, 0.0])),
+                scene.add_vertex(np.array([x, 1.0, 0.0])),
+                scene.add_vertex(np.array([x, 0.0, 1.0])),
+            ]
+            return scene.add_face_from_loop(ids)
+
+        self.wall = self.model.new_definition("Wall", is_group=True)
+        self.unpainted_face = triangle(self.wall.mesh, 0.0)
+        self.wall.mesh.set_face_material(triangle(self.wall.mesh, 1.0), self.brick)
+        self.wall.mesh.set_face_material(triangle(self.wall.mesh, 2.0), self.forest)
+
+        tag = self.model.tags.add("Blue")
+        self.model.tags.set_color(tag.id, self.TAG_COLOR)
+        inst = self.model.new_instance(self.wall)
+        inst.tag_id = tag.id
+        self.model.root.children.append(inst)
+
+        self.renderer = SceneRenderer()
+        self.renderer._initialized = True
+        self.renderer._phong_program = 1
+        self.renderer._line_program = 2
+        self.renderer._phong_locs = {n: i for i, n in enumerate(_PHONG_UNIFORMS)}
+        self.renderer._line_locs = {n: i for i, n in enumerate(_LINE_UNIFORMS)}
+
+        self._passes: list[tuple] = []
+        real_faces = self.renderer._draw_definition_faces
+
+        def faces(buf, *a, front, back, first=0, count=None, **kw):
+            self._passes.append((front, back))
+            real_faces(buf, *a, front=front, back=back, first=first, count=count, **kw)
+
+        monkeypatch.setattr(self.renderer, "_draw_definition_faces", faces)
+
+        self.camera = Camera(
+            position=np.array([-10.0, 0.5, 0.5], dtype=np.float32),
+            target=np.array([1.0, 0.5, 0.5], dtype=np.float32),
+        )
+
+    def render(self, style):
+        """Every (front, back) pass render() drew this frame, one per batch."""
+        self._passes.clear()
+        self.gl.calls.clear()
+        self.renderer.set_render_style(style)
+        self.renderer.render(self.camera, self.model)
+        return list(self._passes)
+
+
+def _colour_terms(pass_):
+    return (pass_.diffuse, pass_.ambient, pass_.specular)
+
+
+def test_three_differently_painted_faces_on_one_tag_draw_in_one_colour(monkeypatch):
+    # THE final-review finding. Unpainted, Brick Red and Forest Green on one
+    # blue tag: diffuse, ambient AND specular must agree across all three, on
+    # both sides. The pre-fix renderer agreed on diffuse only, so asserting
+    # diffuse alone would still pass against the defect.
+    h = _TagRenderHarness(monkeypatch)
+
+    off = h.render(RenderStyle(color_by_tag=False))
+    assert len({_colour_terms(f) for f, _ in off}) == 3, "fixture must paint three ways"
+
+    on = h.render(RenderStyle(color_by_tag=True))
+    assert len(on) == 3
+    assert len({_colour_terms(f) for f, _ in on}) == 1
+    assert len({_colour_terms(b) for _, b in on}) == 1
+    front, back = on[0]
+    assert _colour_terms(front) == _colour_terms(back)
+    assert front.diffuse == pytest.approx(_TagRenderHarness.TAG_COLOR, abs=1e-6)
+
+
+def test_hidden_line_keeps_its_flat_background_fill_under_color_by_tag(monkeypatch):
+    # The defect's second half: patching diffuse after resolution clobbered
+    # Hidden Line's deliberate (0, 0, 0) unlit fill with the tag colour, so
+    # faces rendered lit instead of filled. Hidden Line must look exactly the
+    # same whether the mode is on or off.
+    from pluton.viewport.render_style import FaceStyle
+
+    h = _TagRenderHarness(monkeypatch)
+
+    off = h.render(RenderStyle(face_style=FaceStyle.HIDDEN_LINE, color_by_tag=False))
+    on = h.render(RenderStyle(face_style=FaceStyle.HIDDEN_LINE, color_by_tag=True))
+
+    assert [_colour_terms(f) for f, _ in on] == [_colour_terms(f) for f, _ in off]
+    for f, b in on:
+        assert f.diffuse == (0.0, 0.0, 0.0)
+        assert b.diffuse == (0.0, 0.0, 0.0)
+        assert f.specular == (0.0, 0.0, 0.0)
+
+
+def test_monochrome_keeps_mono_color_under_color_by_tag(monkeypatch):
+    # Monochrome's whole job is one uniform grey. Color-by-Tag must not turn it
+    # into a tag-coloured shade -- but ambient still follows the tag, which is
+    # what distinguishes this from Hidden Line's full bypass.
+    from pluton.viewport.render_style import MONO_COLOR, FaceStyle, phong_material_for
+
+    h = _TagRenderHarness(monkeypatch)
+    on = h.render(RenderStyle(face_style=FaceStyle.MONOCHROME, color_by_tag=True))
+
+    expected = phong_material_for(_TagRenderHarness.TAG_COLOR)
+    for f, b in on:
+        assert f.diffuse == MONO_COLOR
+        assert b.diffuse == MONO_COLOR
+        assert f.ambient == pytest.approx(expected.ambient, abs=1e-6)
+
+
+def test_a_translucent_face_still_blends_under_color_by_tag(monkeypatch):
+    # Alpha is deliberately NOT bypassed. Through the real render path: the
+    # translucent batch keeps alpha 0.5, turns GL_BLEND on, masks depth writes,
+    # and stays in the second (translucent) pass.
+    h = _TagRenderHarness(monkeypatch, translucent_brick=True)
+    on = h.render(RenderStyle(color_by_tag=True))
+
+    blended = [f for f, _ in on if f.blend]
+    assert len(blended) == 1
+    assert blended[0].alpha == pytest.approx(0.5)
+    assert not blended[0].depth_write
+    assert blended[0].diffuse == pytest.approx(_TagRenderHarness.TAG_COLOR, abs=1e-6)
+    # The translucent batch is drawn last: pass 2 follows every opaque batch.
+    assert on[-1][0].blend
+
+    names = [n for n, _ in h.gl.calls]
+    assert "glEnable" in names and "glDepthMask" in names
+    enabled = {args[0] for n, args in h.gl.calls if n == "glEnable" and args}
+    assert h.gl.GL_BLEND in enabled
+    assert (h.gl.GL_FALSE,) in [args for n, args in h.gl.calls if n == "glDepthMask"]
 
 
 # --- TagsPage: recoloring goes through the command stack, and is undoable --

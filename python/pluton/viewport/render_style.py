@@ -40,10 +40,12 @@ class RenderStyle:
 
     face_style: FaceStyle = FaceStyle.SHADED
     xray: bool = False
-    # M7.5a Task 11: when on, the render loop replaces each definition's
-    # resolved diffuse with its owning instance's tag colour and bypasses
-    # materials entirely -- resolved in scene_renderer.py (not here), since
-    # tags are per-instance and this dataclass has no scene-graph access.
+    # M7.5a Task 11: when on, every face resolves from its owning instance's
+    # tag colour instead of from its painted materials, so material COLOUR is
+    # bypassed on both sides. Material opacity is not: a translucent material
+    # keeps its alpha and still blends in the sorted pass. Resolved in
+    # scene_renderer.py (not here), since tags are per-instance and this
+    # dataclass has no scene-graph access.
     color_by_tag: bool = False
 
 

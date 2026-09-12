@@ -304,6 +304,7 @@ def resolve_batch_sides(
     render_style: RenderStyle,
     *,
     dimmed: bool,
+    tag_color: tuple[float, float, float] | None = None,
 ) -> tuple[ResolvedFacePass, ResolvedFacePass]:
     """Resolve one batch into its front and back face passes.
 
@@ -311,9 +312,28 @@ def resolve_batch_sides(
     both sides of a face reach the shader in one draw call, and blending and
     the depth mask are draw-call state, so a batch blends if EITHER side is
     translucent and both returned passes carry the same flags.
+
+    `tag_color` is Color-by-Tag's override (None when the mode is off). It
+    replaces the MATERIAL both sides resolve from, before resolution, rather
+    than patching the resolved result afterwards. That distinction is the whole
+    behaviour: a post-hoc diffuse patch leaves the material's own ambient (and,
+    for a metal, its specular) reaching the shader, so three faces on one tag
+    painted three ways still render three different colours, and it overwrites
+    the face style's own diffuse decision -- Hidden Line's deliberate flat
+    (0, 0, 0) fill included. Substituting the material first routes the tag
+    colour through face_uniforms, so every style keeps its own rule: Hidden
+    Line stays a flat background fill, Monochrome stays MONO_COLOR, the dim
+    pass still dims, and both sides get an ambient and specular derived from
+    the tag colour instead of from whatever was painted.
+
+    Each side keeps its OWN alpha. Alpha is not a colour: a translucent
+    material under Color-by-Tag must still blend and still sort into the
+    translucent pass, so opacity is deliberately not bypassed.
     """
     front_mat, front_alpha = _material_terms(materials, batch.front_material_id, Side.FRONT)
     back_mat, back_alpha = _material_terms(materials, batch.back_material_id, Side.BACK)
+    if tag_color is not None:
+        front_mat = back_mat = phong_material_for(tag_color)
 
     def _resolve(mat: PhongMaterial, alpha: float) -> ResolvedFacePass:
         return resolve_face_pass(
@@ -339,10 +359,11 @@ def resolve_batch_sides(
 
 # --- M7.5a Task 11: Color-by-Tag --------------------------------------------
 #
-# Module-level and GL-free for the same reason as resolve_batch_sides above:
-# tags are per-INSTANCE while resolve_batch_sides only ever sees a batch, so
-# the override is decided here in the render loop instead of being threaded
-# into that function. Keeping resolve_batch_sides about materials only.
+# Module-level and GL-free for the same reason as resolve_batch_sides above.
+# Tags are per-INSTANCE while a batch is per-definition, so WHICH colour applies
+# is decided here, in the render loop, from the traversal's tag id. Applying it
+# is resolve_batch_sides' job: the colour has to replace the batch's materials
+# before resolution, not patch the resolved result, so it cannot live here.
 
 
 def traverse_visible_tagged(model):
@@ -390,29 +411,14 @@ def resolve_tag_color(
     Instance that placed the occurrence being drawn; this function decides
     only whether the mode is on and what colour results, so it is testable
     without a scene graph or a GL context.
+
+    The colour it returns is handed to resolve_batch_sides as `tag_color`,
+    which substitutes it for the batch's materials BEFORE resolution -- see
+    that function for why the override cannot be applied afterwards.
     """
     if not render_style.color_by_tag:
         return None
     return tags.get(tag_id).color
-
-
-def apply_tag_color_override(
-    front: ResolvedFacePass,
-    back: ResolvedFacePass,
-    color: tuple[float, float, float] | None,
-) -> tuple[ResolvedFacePass, ResolvedFacePass]:
-    """Replace both sides' diffuse with `color`; a no-op when `color` is None.
-
-    Everything else resolve_batch_sides already computed -- face style, the
-    dim pass, X-Ray alpha, blend/depth flags -- passes through unchanged:
-    Color-by-Tag bypasses material colour, not the rest of the shading
-    pipeline. Both sides are replaced together so a reversed face does not
-    give away the mode by keeping its old back-face colour (a front-only
-    override would be a plausible, easy-to-miss bug here).
-    """
-    if color is None:
-        return front, back
-    return replace(front, diffuse=color), replace(back, diffuse=color)
 
 
 # --- M7.5a Task 7: the translucent pass -------------------------------------
@@ -862,9 +868,12 @@ class SceneRenderer:
                 tag_color = resolve_tag_color(tag_id, model.tags, self._render_style)
                 for batch in buf.plan.opaque:
                     front, back = resolve_batch_sides(
-                        batch, materials, self._render_style, dimmed=dimmed
+                        batch,
+                        materials,
+                        self._render_style,
+                        dimmed=dimmed,
+                        tag_color=tag_color,
                     )
-                    front, back = apply_tag_color_override(front, back, tag_color)
                     # draw_faces comes from the face style alone, so it is the
                     # same on both sides; front is representative.
                     if front.draw_faces and batch.count > 0:
@@ -911,9 +920,12 @@ class SceneRenderer:
                 tag_color = resolve_tag_color(tag_id, model.tags, self._render_style)
                 for batch in buf.translucent_draw_batches:
                     front, back = resolve_batch_sides(
-                        batch, materials, self._render_style, dimmed=dimmed
+                        batch,
+                        materials,
+                        self._render_style,
+                        dimmed=dimmed,
+                        tag_color=tag_color,
                     )
-                    front, back = apply_tag_color_override(front, back, tag_color)
                     if front.draw_faces and batch.count > 0:
                         self._draw_definition_faces(
                             buf,
