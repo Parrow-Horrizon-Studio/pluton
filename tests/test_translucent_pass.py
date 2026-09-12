@@ -8,16 +8,24 @@ and whether a sort is cached. Those are the module-level seams tested here.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+
 import numpy as np
 import pytest
+from pluton.model.model import Model
 from pluton.viewport import scene_renderer
+from pluton.viewport.camera import Camera
 from pluton.viewport.face_batches import FaceBatch, plan_face_batches
+from pluton.viewport.render_style import RenderStyle
 from pluton.viewport.scene_renderer import (
+    _LINE_UNIFORMS,
+    _PHONG_UNIFORMS,
     _DefBuffers,
     _reset_translucent_state,
     SceneRenderer,
     order_definitions_for_translucent_pass,
     rebuild_translucent_batches,
+    resolve_batch_sides,
 )
 
 
@@ -413,3 +421,308 @@ def test_the_local_centroid_is_the_mean_of_the_translucent_triangles():
     # whole mesh (which would include the opaque prefix's x = -99 sentinel).
     buf = _suffix_buffer()
     assert buf.translucent_local_centroid[0] == pytest.approx(1.5)
+
+
+# --- Task 7: the two-pass draw order inside render() ------------------------
+#
+# Everything above tests a seam. render() is the loop those seams hang off, and
+# it had no automated coverage at all — four plausible regressions in it pass
+# every test above:
+#
+#   1. drawing `buf.plan.translucent` instead of `buf.translucent_draw_batches`
+#      (the wrong-material bug, at the one line where it reaches the screen);
+#   2. collapsing pass 2 back into pass 1, so translucent faces no longer
+#      follow ALL opaque geometry across ALL definitions;
+#   3. dropping the `_sort_translucent_slice(...)` call, so nothing sorts;
+#   4. moving edge drawing out of pass 1 and into pass 2.
+#
+# The recorder pattern from
+# test_two_sided_shading.py::test_a_face_draw_sets_every_cached_phong_uniform
+# is extended here to record the *sequence* of draws rather than a set of
+# uniform writes, so ordering is assertable with no GL context — which is what
+# makes these tests runnable in CI, where the offscreen platform is forced and
+# hardware GL may be unavailable.
+
+
+class _SequenceGL:
+    """Stand-in for the OpenGL module for a whole `render()` call.
+
+    Names beginning `GL_` resolve to stable ints rather than callables, because
+    render() ORs GL_COLOR_BUFFER_BIT with GL_DEPTH_BUFFER_BIT. Everything else
+    is a no-op returning 0, so glGenVertexArrays et al. hand back zero handles
+    that _DefBuffers.release() is already guarded against.
+
+    glBufferSubData is captured: it is the only GL call the translucent sort
+    makes that the recorded draw order does not already reveal, so it is how
+    "the suffix was actually re-uploaded back to front" gets asserted.
+    """
+
+    def __init__(self) -> None:
+        self.sub_data: list[tuple[int, np.ndarray]] = []
+        self._consts: dict[str, int] = {}
+
+    def __getattr__(self, name: str):
+        if name.startswith("GL_"):
+            return self._consts.setdefault(name, len(self._consts) + 1)
+        if name == "glBufferSubData":
+
+            def _sub(target, offset, size, data):
+                self.sub_data.append((int(offset), np.asarray(data, dtype=np.float32).copy()))
+                return 0
+
+            return _sub
+
+        def _call(*args, **kwargs):
+            return 0
+
+        return _call
+
+
+@dataclass(frozen=True)
+class _Draw:
+    """One recorded draw call: what was drawn, for which definition, where in
+    that definition's VBO, and which material it was shaded with."""
+
+    kind: str  # "face" | "edge"
+    definition: str
+    first: int
+    count: int
+    front_diffuse: tuple | None
+
+
+def _triangle(scene, x: float) -> int:
+    """A standalone triangle in the plane X = x, with its own vertices so it
+    contributes its own three edges."""
+    ids = [
+        scene.add_vertex(np.array([x, 0.0, 0.0])),
+        scene.add_vertex(np.array([x, 1.0, 0.0])),
+        scene.add_vertex(np.array([x, 0.0, 1.0])),
+    ]
+    return scene.add_face_from_loop(ids)
+
+
+class _Harness:
+    """A real SceneRenderer driven through its real render() over a real Model,
+    with GL replaced by a recorder.
+
+    The scene is built so a collapsed single-traversal loop produces a
+    DIFFERENT recorded sequence from the correct two-pass one: the translucent
+    definition is traversed FIRST, so collapsing pass 2 into pass 1 would put
+    its faces ahead of the opaque definition's face and edges. A fixture where
+    both orderings coincide would prove nothing.
+
+    Inside the translucent definition two translucent materials alternate in
+    depth (x = 0 red, 1 blue, 2 red, 3 blue; camera on the -X side). Upload
+    order groups them into two batches of two triangles; the depth sort re-cuts
+    them into four batches of one. plan.translucent and translucent_draw_batches
+    are therefore observably different lists, which is what lets the
+    wrong-material regression be seen at all.
+    """
+
+    OPAQUE_X = 50.0
+
+    def __init__(self, monkeypatch) -> None:
+        self.gl = _SequenceGL()
+        monkeypatch.setattr(scene_renderer, "GL", self.gl)
+
+        self.model = Model()
+        lib = self.model.materials
+        self.red = lib.add_custom("GlassRed", (0.9, 0.1, 0.1)).id
+        self.blue = lib.add_custom("GlassBlue", (0.1, 0.1, 0.9)).id
+        self.green = lib.add_custom("Solid", (0.1, 0.9, 0.1)).id
+        lib.edit(self.red, alpha=0.4)
+        lib.edit(self.blue, alpha=0.5)
+
+        self.glass = self.model.new_definition("Glass", is_group=True)
+        for x, mid in ((0.0, self.red), (1.0, self.blue), (2.0, self.red), (3.0, self.blue)):
+            self.glass.mesh.set_face_material(_triangle(self.glass.mesh, x), mid)
+
+        self.solid = self.model.new_definition("Solid", is_group=True)
+        self.solid.mesh.set_face_material(_triangle(self.solid.mesh, self.OPAQUE_X), self.green)
+
+        # Glass first: a collapsed loop would draw it before Solid.
+        self.model.root.children.append(self.model.new_instance(self.glass))
+        self.model.root.children.append(self.model.new_instance(self.solid))
+
+        self.renderer = SceneRenderer()
+        self.renderer._initialized = True
+        self.renderer._phong_program = 1
+        self.renderer._line_program = 2
+        self.renderer._phong_locs = {n: i for i, n in enumerate(_PHONG_UNIFORMS)}
+        self.renderer._line_locs = {n: i for i, n in enumerate(_LINE_UNIFORMS)}
+
+        self._records: list[tuple] = []
+        real_faces = self.renderer._draw_definition_faces
+        real_edges = self.renderer._draw_definition_edges
+
+        def faces(buf, *a, front, back, first=0, count=None, **kw):
+            self._records.append(("face", buf, int(first), int(count), front.diffuse))
+            real_faces(buf, *a, front=front, back=back, first=first, count=count, **kw)
+
+        def edges(buf, *a, **kw):
+            self._records.append(("edge", buf, 0, int(buf.edge_count), None))
+            real_edges(buf, *a, **kw)
+
+        monkeypatch.setattr(self.renderer, "_draw_definition_faces", faces)
+        monkeypatch.setattr(self.renderer, "_draw_definition_edges", edges)
+
+        # Looking along +X from the far side of x = 0, so back to front is
+        # descending x.
+        self.camera = Camera(
+            position=np.array([-10.0, 0.5, 0.5], dtype=np.float32),
+            target=np.array([1.5, 0.5, 0.5], dtype=np.float32),
+        )
+
+    def render(self) -> list[_Draw]:
+        self._records.clear()
+        self.gl.sub_data.clear()
+        self.renderer.render(self.camera, self.model)
+        names = {id(d): d.name for d, _ in self.model.traverse()}
+        by_buf = {id(buf): names[key] for key, buf in self.renderer._def_buffers.items()}
+        return [
+            _Draw(kind, by_buf[id(buf)], first, count, diffuse)
+            for kind, buf, first, count, diffuse in self._records
+        ]
+
+    def diffuse_of(self, material_id: int) -> tuple:
+        """The front diffuse a batch of `material_id` resolves to, computed the
+        way render() computes it — so the assertion names a material rather
+        than a magic colour triple."""
+        front, _ = resolve_batch_sides(
+            FaceBatch(front_material_id=material_id, back_material_id=0, first=0, count=3),
+            self.model.materials,
+            RenderStyle(),
+            dimmed=False,
+        )
+        return front.diffuse
+
+    def suffix_triangle_x(self) -> list[float]:
+        """The X of each triangle in the single suffix upload this frame made."""
+        assert len(self.gl.sub_data) == 1, (
+            f"expected one translucent suffix upload, got {len(self.gl.sub_data)}"
+        )
+        rows = self.gl.sub_data[0][1].reshape(-1, 6)
+        return [float(rows[3 * i, 0]) for i in range(rows.shape[0] // 3)]
+
+
+@pytest.fixture
+def harness(monkeypatch):
+    return _Harness(monkeypatch)
+
+
+def test_render_draws_every_opaque_batch_and_edge_before_any_translucent_face(harness):
+    """Kills the collapse of pass 2 back into pass 1.
+
+    Glass is traversed first, so a single-traversal loop draws its translucent
+    faces before Solid's opaque face and edges ever run — exactly the artefact
+    the split traversal exists to prevent. Pinning the whole sequence also
+    catches the missing sort and edges moved into pass 2.
+    """
+    draws = harness.render()
+    assert [(d.kind, d.definition) for d in draws] == [
+        ("edge", "Glass"),
+        ("face", "Solid"),
+        ("edge", "Solid"),
+        ("face", "Glass"),
+        ("face", "Glass"),
+        ("face", "Glass"),
+        ("face", "Glass"),
+    ]
+
+
+def test_every_definitions_edges_draw_in_pass_one(harness):
+    """Kills edge drawing moved into pass 2.
+
+    Pass 2 visits only definitions that HAVE translucent geometry, so an
+    all-opaque definition's edges would silently stop being drawn at all — and
+    Glass's own edges would land after its translucent faces.
+    """
+    draws = harness.render()
+    edge_at = [i for i, d in enumerate(draws) if d.kind == "edge"]
+    glass_faces_at = [
+        i for i, d in enumerate(draws) if d.kind == "face" and d.definition == "Glass"
+    ]
+
+    assert [draws[i].definition for i in edge_at] == ["Glass", "Solid"]
+    assert glass_faces_at, "no translucent faces were drawn at all"
+    assert max(edge_at) < min(glass_faces_at)
+
+
+def test_the_translucent_pass_draws_the_re_cut_batches_not_the_upload_order_ones(harness):
+    """Kills `buf.plan.translucent` at the one line where the wrong-material
+    bug reaches the screen.
+
+    Upload order groups the four triangles into two batches of two (red, red |
+    blue, blue). Depth order from the -X side is 3, 2, 1, 0 — blue, red, blue,
+    red — so the sorted suffix must draw as four one-triangle batches whose
+    materials follow the permutation. Drawing the upload-order ranges over the
+    sorted buffer shades half the triangles with the other material.
+    """
+    draws = harness.render()
+    glass_faces = [d for d in draws if d.kind == "face" and d.definition == "Glass"]
+
+    buf = harness.renderer._def_buffers[id(harness.glass)]
+    assert [(b.first, b.count) for b in buf.plan.translucent] == [(0, 6), (6, 6)]
+
+    assert [(d.first, d.count) for d in glass_faces] == [(0, 3), (3, 3), (6, 3), (9, 3)]
+    assert [d.front_diffuse for d in glass_faces] == [
+        harness.diffuse_of(harness.blue),
+        harness.diffuse_of(harness.red),
+        harness.diffuse_of(harness.blue),
+        harness.diffuse_of(harness.red),
+    ]
+
+
+def test_render_uploads_the_translucent_suffix_back_to_front(harness):
+    """Kills a dropped `_sort_translucent_slice(...)` call.
+
+    Without it no suffix upload happens at all, so the triangles keep their
+    upload order in the VBO and near glass composites over far glass.
+    """
+    assert harness.render()
+    assert harness.suffix_triangle_x() == [3.0, 2.0, 1.0, 0.0]
+
+
+def test_moving_the_camera_re_sorts_through_render(harness):
+    """The sort is not a once-per-buffer initialisation: a camera move must
+    re-upload the suffix in the new depth order, and the batches drawn must
+    follow it."""
+    harness.render()
+    assert harness.suffix_triangle_x() == [3.0, 2.0, 1.0, 0.0]
+
+    harness.camera.position = np.array([20.0, 0.5, 0.5], dtype=np.float32)
+    draws = harness.render()
+    assert harness.suffix_triangle_x() == [0.0, 1.0, 2.0, 3.0]
+
+    glass_faces = [d for d in draws if d.kind == "face" and d.definition == "Glass"]
+    assert [d.front_diffuse for d in glass_faces] == [
+        harness.diffuse_of(harness.red),
+        harness.diffuse_of(harness.blue),
+        harness.diffuse_of(harness.red),
+        harness.diffuse_of(harness.blue),
+    ]
+
+
+def test_pass_two_selects_definitions_by_the_very_list_it_draws(harness):
+    """Pass 2's filter and its draw source must be the same list.
+
+    The filter asks whether a definition has translucent batches; the loop then
+    draws `buf.translucent_draw_batches`. Asking one list and drawing another
+    only works while the two are seeded together in _reset_translucent_state —
+    an invariant nothing enforced. Here a cached buffer is handed a translucent
+    batch directly with `plan.translucent` left empty: a filter keyed on
+    `plan.translucent` skips the definition and the batch is never drawn.
+    """
+    harness.render()  # first frame builds and caches the buffers
+    buf = harness.renderer._def_buffers[id(harness.solid)]
+    assert buf.plan.translucent == []  # Solid is entirely opaque
+    buf.translucent_draw_batches = [
+        FaceBatch(front_material_id=harness.green, back_material_id=0, first=0, count=3)
+    ]
+
+    # The mesh is clean and the translucent id set is unchanged, so pass 1
+    # reuses this buffer rather than re-uploading over the seeded list.
+    draws = harness.render()
+    solid_faces = [d for d in draws if d.kind == "face" and d.definition == "Solid"]
+    assert len(solid_faces) == 2  # once opaque in pass 1, once translucent in pass 2
+    assert draws[-1] == _Draw("face", "Solid", 0, 3, harness.diffuse_of(harness.green))

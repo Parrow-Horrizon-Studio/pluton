@@ -791,8 +791,11 @@ class SceneRenderer:
                     self._draw_definition_edges(buf, view, projection, model_mat, dimmed=dimmed)
 
             # Pass 2: translucent batches only, definitions back to front.
+            # The filter names the same list the loop below draws, so the two
+            # cannot disagree. Filtering on `plan.translucent` instead happens
+            # to work only because _reset_translucent_state seeds both together.
             translucent_entries = [
-                (d, w) for d, w in visible if self._def_buffers[id(d)].plan.translucent
+                (d, w) for d, w in visible if self._def_buffers[id(d)].translucent_draw_batches
             ]
             order = order_definitions_for_translucent_pass(
                 translucent_entries,
