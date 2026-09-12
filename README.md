@@ -6,7 +6,7 @@ Pluton is a long-horizon project inspired by Blender's development model, intend
 
 ## Status
 
-**Alpha, v0.7.0.** Phase 2 (Modeling App) is complete: you can draw, push/pull, transform,
+**Alpha, v0.7.1.** Phase 2 (Modeling App) is complete: you can draw, push/pull, transform,
 organize, paint, annotate, save, and import/export real models. v0.4.0 gave it the surface of a
 real application: seven dockable toolbars over an original icon set, per-tool cursors,
 right-click context menus, and a layout that persists between runs. v0.5.0
@@ -21,7 +21,9 @@ model (base colour, alpha, metallic, roughness) approximated in Phong, gave ever
 independent front and back materials with a distinct back default, added translucent
 materials drawn in a sorted second pass, made material add, edit and delete undoable from a
 real editor, added drag-to-paint, and gave tags a per-tag colour with a Color-by-Tag view
-mode. Still missing: textures and UV mapping (M7.5b), the rest of
+mode. v0.7.1 fixed a long-standing triangulation bug that left half of every closed solid's
+triangles wound inside-out, which the new back-face default had made visible. Still missing:
+textures and UV mapping (M7.5b), the rest of
 [Phase 2.5 (Parity & Polish)](docs/2026-05-16-pluton-design.md) (v0.4 to v0.8), and installers.
 Run it from source.
 
