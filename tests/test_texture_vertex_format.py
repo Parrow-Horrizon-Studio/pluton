@@ -146,6 +146,29 @@ def test_a_face_placement_moves_only_that_face_s_uvs():
     assert np.allclose(before[~moved], after[~moved])
 
 
+def test_each_face_s_corner_block_holds_that_face_s_own_vertices():
+    # The alignment invariant checked against the MESH rather than against the
+    # walk. Every other alignment test here compares face_triangle_face_ids to
+    # something that also came from face_triangle_face_ids, so a walk that
+    # disagreed with the C++ face_triangle_buffer would satisfy all of them
+    # consistently and still scramble texturing. This one asks the geometry:
+    # the corners a face id claims must be that face's own vertices. The quad
+    # sits at x in [0, 1] and the triangle at x in [3, 4], so no corner of one
+    # can be mistaken for a corner of the other.
+    model = Model()
+    scene = model.root.mesh
+    _quad_and_triangle(scene)
+
+    positions, _ = scene.face_triangle_buffer()
+    ids = scene.face_triangle_face_ids()
+    assert len(set(ids.tolist())) == 2
+
+    for f_id in set(ids.tolist()):
+        own = {tuple(np.round(scene.vertex(v).position, 5)) for v in scene.face_loop(int(f_id))}
+        claimed = {tuple(np.round(p, 5)) for p in positions[np.repeat(ids == f_id, 3)]}
+        assert claimed <= own, f"face {f_id} claims corners it does not own"
+
+
 def test_the_uvs_of_a_face_land_on_that_face_s_own_corner_block():
     # The alignment invariant with real teeth, on a mesh whose faces have
     # UNEQUAL triangle counts. Every corner must reproduce, through its OWN
