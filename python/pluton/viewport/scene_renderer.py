@@ -29,6 +29,12 @@ from pluton.viewport.render_style import (
     resolve_face_pass,
 )
 from pluton.viewport.snap_engine import SnapKind
+from pluton.viewport.translucency import (
+    order_back_to_front,
+    transform_points,
+    triangle_centroids,
+    triangle_order_to_vertex_order,
+)
 
 
 def definition_is_dimmed(definition, model) -> bool:
@@ -177,6 +183,18 @@ def _empty_batch_plan() -> BatchPlan:
     return plan_face_batches([], [])
 
 
+# The face VBO's interleaved layout: (pos.xyz, normal.xyz) float32 per vertex.
+# _alloc_def_buffers' vertex-attribute stride and _sort_translucent_slice's
+# glBufferSubData byte offset are the same number, so they share one constant
+# rather than each hard-coding 24 and drifting apart.
+_FACE_VERTEX_FLOATS = 6
+_FACE_VERTEX_BYTES = _FACE_VERTEX_FLOATS * 4
+
+
+def _empty_face_interleaved() -> np.ndarray:
+    return np.zeros((0, _FACE_VERTEX_FLOATS), dtype=np.float32)
+
+
 @dataclass
 class _DefBuffers:
     """Per-definition GL buffer handles and vertex counts."""
@@ -191,6 +209,40 @@ class _DefBuffers:
     # already baked into the buffer, so `opaque` / `translucent` /
     # `translucent_first` index straight into it.
     plan: BatchPlan = field(default_factory=_empty_batch_plan)
+    # The translucent ids the plan above was computed under. Editing a
+    # material's alpha dirties no mesh, so this is the only thing that can tell
+    # the renderer its opaque/translucent partition has gone stale (spec 1.7).
+    translucent_ids: frozenset[int] = frozenset()
+
+    # --- Task 7: state the translucent pass re-sorts each frame -------------
+    #
+    # The interleaved vertex data in its upload order (already permuted by
+    # plan.vertex_order), so the translucent suffix can be re-permuted from a
+    # stable base every time the view changes rather than accumulating
+    # permutations. Kept ONLY for definitions that actually have translucent
+    # faces — _sort_translucent_slice is the sole reader, and holding a CPU
+    # copy of every opaque definition's faces alongside its VBO would roughly
+    # double scene face memory for a pass those definitions never enter.
+    face_interleaved: np.ndarray = field(default_factory=_empty_face_interleaved)
+    # Local-space centroid of each translucent triangle, in upload order.
+    translucent_centroids: np.ndarray = field(
+        default_factory=lambda: np.zeros((0, 3), dtype=np.float64)
+    )
+    # This definition's own sort key for pass 2 — the mean of the above.
+    translucent_local_centroid: np.ndarray = field(
+        default_factory=lambda: np.zeros(3, dtype=np.float64)
+    )
+    # (front, back) material ids per translucent triangle, in upload order, so
+    # the depth-sorted suffix can be re-cut into batches that still name the
+    # right materials.
+    translucent_pairs: np.ndarray = field(default_factory=lambda: np.zeros((0, 2), dtype=np.int64))
+    # The batches that currently describe the face VBO's translucent suffix.
+    # Equal to plan.translucent until the first sort, then re-cut by
+    # rebuild_translucent_batches to follow the permuted order.
+    translucent_draw_batches: list[FaceBatch] = field(default_factory=list)
+    # (camera_pos, world_transform) the suffix was last sorted for; None when
+    # it has never been sorted, or when a re-upload invalidated the sort.
+    translucent_sort_key: tuple | None = None
 
     def release(self) -> None:
         """Delete this definition's GL objects. Guarded so a zero handle
@@ -283,6 +335,99 @@ def resolve_batch_sides(
         replace(front, blend=blend, depth_write=depth_write),
         replace(back, blend=blend, depth_write=depth_write),
     )
+
+
+# --- M7.5a Task 7: the translucent pass -------------------------------------
+#
+# Module-level and GL-free for the same reason as the block above: every
+# ordering decision the pass makes is testable, and none of the GL calls are.
+
+
+def order_definitions_for_translucent_pass(entries, *, camera_pos, centroid_of) -> list[int]:
+    """Indices of (definition, world) entries, farthest definition first.
+
+    Correction 1: face buffers are per-definition, so a scene-global face sort
+    is not available. Faces sort within a definition; definitions sort among
+    themselves here. Two interpenetrating translucent groups therefore sort by
+    centroid rather than per face.
+    """
+    if not entries:
+        return []
+    world_centroids = np.stack(
+        [
+            transform_points(np.asarray(centroid_of(d), dtype=np.float64).reshape(1, 3), w)[0]
+            for d, w in entries
+        ]
+    )
+    return order_back_to_front(world_centroids, camera_pos).tolist()
+
+
+def rebuild_translucent_batches(sorted_pairs, first_vertex: int) -> list[FaceBatch]:
+    """Re-cut the depth-sorted translucent suffix into (front, back) batches.
+
+    `sorted_pairs` is (T, 2) int64 — the (front, back) material id of each
+    translucent triangle in the order it now occupies in the VBO. Runs of the
+    same pair become one batch.
+
+    This is what makes a whole-suffix depth sort safe. plan_face_batches groups
+    the suffix by material pair, so a definition carrying two translucent
+    materials has two batches inside it; sorting the suffix by depth moves
+    triangles across those boundaries, and drawing with the original ranges
+    would shade a triangle with the other material's uniforms. Re-cutting keeps
+    the depth order AND the materials, at the cost of fragmentation: materials
+    that alternate in depth degenerate to one batch per triangle. That bound is
+    accepted rather than capped — a cap would reintroduce the wrong colours.
+    """
+    pairs = np.asarray(sorted_pairs, dtype=np.int64).reshape(-1, 2)
+    if pairs.shape[0] == 0:
+        return []
+    changed = np.any(pairs[1:] != pairs[:-1], axis=1)
+    starts = np.concatenate([np.zeros(1, dtype=np.int64), np.nonzero(changed)[0] + 1])
+    ends = np.concatenate([starts[1:], np.array([pairs.shape[0]], dtype=np.int64)])
+    return [
+        FaceBatch(
+            front_material_id=int(pairs[s, 0]),
+            back_material_id=int(pairs[s, 1]),
+            first=first_vertex + int(s) * 3,
+            count=(int(e) - int(s)) * 3,
+        )
+        for s, e in zip(starts, ends, strict=True)
+    ]
+
+
+def _translucent_pairs(plan: BatchPlan) -> np.ndarray:
+    """(T, 2) int64 (front, back) material id per translucent triangle, in the
+    upload order `plan.vertex_order` baked into the VBO."""
+    total = sum(b.count for b in plan.translucent) // 3
+    pairs = np.zeros((total, 2), dtype=np.int64)
+    for batch in plan.translucent:
+        lo = (batch.first - plan.translucent_first) // 3
+        pairs[lo : lo + batch.count // 3] = (batch.front_material_id, batch.back_material_id)
+    return pairs
+
+
+def _reset_translucent_state(buf: _DefBuffers, plan: BatchPlan, interleaved: np.ndarray) -> None:
+    """Point `buf`'s translucent-pass state at freshly uploaded vertex data.
+
+    Called from _upload_definition for both the has-triangles and no-triangles
+    cases. Every field the pass caches is (re)set together here — in particular
+    `translucent_sort_key` is cleared, because the buffer that a surviving key
+    described has just been replaced under it. _DefBuffers instances are reused
+    across re-uploads, so leaving a stale key would keep the previous frame's
+    permutation and batch ranges over entirely different vertex data.
+    """
+    # Only the translucent pass reads face_interleaved, so an all-opaque
+    # definition keeps nothing.
+    buf.face_interleaved = interleaved if plan.translucent else _empty_face_interleaved()
+    buf.translucent_centroids = triangle_centroids(interleaved[plan.translucent_first :, :3])
+    buf.translucent_local_centroid = (
+        buf.translucent_centroids.mean(axis=0)
+        if buf.translucent_centroids.shape[0]
+        else np.zeros(3, dtype=np.float64)
+    )
+    buf.translucent_pairs = _translucent_pairs(plan)
+    buf.translucent_draw_batches = list(plan.translucent)
+    buf.translucent_sort_key = None
 
 
 def _load_shader_source(name: str) -> str:
@@ -607,20 +752,23 @@ class SceneRenderer:
             # the rest of the session. Requires a current GL context, so this can
             # only run here in the render path (not from an arbitrary caller).
             self.evict_unreachable(model)
-            for definition, world in model.traverse_visible():
-                buf = self._def_buffers.get(id(definition))
-                if buf is None or definition.mesh.dirty:
-                    buf = self._upload_definition(definition, model)
-                    definition.mesh.mark_clean()
-                    self._def_buffers[id(definition)] = buf
+            materials = getattr(model, "materials", None)
+            translucent_ids = _translucent_ids(materials)
+            visible = list(model.traverse_visible())
+
+            # Correction 2: translucent faces must be drawn after ALL opaque
+            # geometry across every definition, not merely after their own
+            # definition's, so the traversal is split in two rather than
+            # gaining a second inner loop.
+            #
+            # Pass 1: every definition's opaque batches, plus its edges.
+            for definition, world in visible:
+                buf = self._ensure_buffers(definition, translucent_ids)
                 model_mat = world.astype(np.float32)
                 # Task 15: dim pass — dim anything that is NOT the active context.
                 # At root (active_path is empty), nothing is dimmed.
                 dimmed = definition_is_dimmed(definition, model)
-                materials = getattr(model, "materials", None)
-                # Still one traversal: opaque and translucent batches draw in
-                # the same pass. Task 7 splits them and depth-sorts the second.
-                for batch in buf.plan.opaque + buf.plan.translucent:
+                for batch in buf.plan.opaque:
                     front, back = resolve_batch_sides(
                         batch, materials, self._render_style, dimmed=dimmed
                     )
@@ -638,8 +786,41 @@ class SceneRenderer:
                             first=batch.first,
                             count=batch.count,
                         )
+                # Edges stay in pass 1 — they are opaque.
                 if buf.edge_count > 0:
                     self._draw_definition_edges(buf, view, projection, model_mat, dimmed=dimmed)
+
+            # Pass 2: translucent batches only, definitions back to front.
+            translucent_entries = [
+                (d, w) for d, w in visible if self._def_buffers[id(d)].plan.translucent
+            ]
+            order = order_definitions_for_translucent_pass(
+                translucent_entries,
+                camera_pos=camera.position,
+                centroid_of=lambda d: self._def_buffers[id(d)].translucent_local_centroid,
+            )
+            for i in order:
+                definition, world = translucent_entries[i]
+                buf = self._def_buffers[id(definition)]
+                self._sort_translucent_slice(buf, world, camera.position)
+                model_mat = world.astype(np.float32)
+                dimmed = definition_is_dimmed(definition, model)
+                for batch in buf.translucent_draw_batches:
+                    front, back = resolve_batch_sides(
+                        batch, materials, self._render_style, dimmed=dimmed
+                    )
+                    if front.draw_faces and batch.count > 0:
+                        self._draw_definition_faces(
+                            buf,
+                            view,
+                            projection,
+                            camera.position,
+                            model_mat,
+                            front=front,
+                            back=back,
+                            first=batch.first,
+                            count=batch.count,
+                        )
 
             # 4.5 Selection highlight (persistent, drawn on top of geometry).
             # Operates on the active context (root at identity, or entered context).
@@ -734,9 +915,11 @@ class SceneRenderer:
         GL.glBindVertexArray(buf.face_vao)
         GL.glBindBuffer(GL.GL_ARRAY_BUFFER, buf.face_vbo)
         GL.glBufferData(GL.GL_ARRAY_BUFFER, 0, None, GL.GL_DYNAMIC_DRAW)
-        GL.glVertexAttribPointer(0, 3, GL.GL_FLOAT, GL.GL_FALSE, 24, None)
+        GL.glVertexAttribPointer(0, 3, GL.GL_FLOAT, GL.GL_FALSE, _FACE_VERTEX_BYTES, None)
         GL.glEnableVertexAttribArray(0)
-        GL.glVertexAttribPointer(1, 3, GL.GL_FLOAT, GL.GL_FALSE, 24, ctypes.c_void_p(12))
+        GL.glVertexAttribPointer(
+            1, 3, GL.GL_FLOAT, GL.GL_FALSE, _FACE_VERTEX_BYTES, ctypes.c_void_p(12)
+        )
         GL.glEnableVertexAttribArray(1)
         GL.glBindVertexArray(0)
 
@@ -844,7 +1027,65 @@ class SceneRenderer:
         GL.glBindVertexArray(0)
         GL.glUseProgram(0)
 
-    def _upload_definition(self, definition, model) -> _DefBuffers:
+    def _ensure_buffers(self, definition, translucent_ids: frozenset[int]) -> _DefBuffers:
+        """The cached buffers for `definition`, re-uploading them if stale.
+
+        Lifted out of the draw loop because pass 1 and pass 2 both need it and
+        duplicating it would let the two drift.
+
+        Staleness has two causes, not one. A dirty mesh is the familiar one.
+        The other is spec 1.7's asymmetry: uniforms are read from the library
+        per batch at draw time, so editing a material's COLOUR shows up with no
+        buffer work at all — but the opaque/translucent partition is computed
+        here, and editing a material's ALPHA dirties no mesh. Without the set
+        comparison a material turned translucent would keep drawing in the
+        opaque pass, writing depth and never sorting, which looks like the edit
+        did nothing. Comparing the whole set rather than tracking a per-material
+        boundary crossing is deliberate: it catches a material being added,
+        removed, or edited in either direction, and the set is a handful of ints.
+        """
+        buf = self._def_buffers.get(id(definition))
+        if buf is None or definition.mesh.dirty or buf.translucent_ids != translucent_ids:
+            buf = self._upload_definition(definition, translucent_ids)
+            definition.mesh.mark_clean()
+            self._def_buffers[id(definition)] = buf
+        return buf
+
+    def _sort_translucent_slice(self, buf: _DefBuffers, world, camera_pos) -> None:
+        """Re-order this definition's translucent suffix back to front.
+
+        No-ops when neither the camera nor the geometry has moved since the
+        last sort, so a static view costs nothing. Only the suffix is touched;
+        the opaque prefix is never re-uploaded. The permutation is always
+        computed against `face_interleaved`, which stays in upload order, so
+        repeated sorts do not compose.
+
+        The suffix may span several material pairs, so the batches that
+        describe it are re-cut from the sorted order — see
+        rebuild_translucent_batches for why drawing with the original ranges
+        would be wrong.
+        """
+        if buf.translucent_centroids.shape[0] == 0:
+            return
+        key = (tuple(np.asarray(camera_pos, dtype=np.float64).tolist()), world.tobytes())
+        if key == buf.translucent_sort_key:
+            return
+
+        world_centroids = transform_points(buf.translucent_centroids, world)
+        tri_order = order_back_to_front(world_centroids, camera_pos)
+        vertex_order = triangle_order_to_vertex_order(tri_order)
+
+        first = buf.plan.translucent_first
+        data = np.ascontiguousarray(buf.face_interleaved[first:][vertex_order], dtype=np.float32)
+        GL.glBindBuffer(GL.GL_ARRAY_BUFFER, buf.face_vbo)
+        GL.glBufferSubData(GL.GL_ARRAY_BUFFER, first * _FACE_VERTEX_BYTES, data.nbytes, data)
+
+        buf.translucent_draw_batches = rebuild_translucent_batches(
+            buf.translucent_pairs[tri_order], first
+        )
+        buf.translucent_sort_key = key
+
+    def _upload_definition(self, definition, translucent_ids: frozenset[int]) -> _DefBuffers:
         """Build or update GL buffers for a single definition's mesh.
 
         Looks up (or allocates) a _DefBuffers entry for this definition,
@@ -852,11 +1093,10 @@ class SceneRenderer:
         The caller is responsible for calling definition.mesh.mark_clean()
         and storing the result back into self._def_buffers[id(definition)].
 
-        `model` supplies the material library, which the batch planner needs
-        in order to classify a batch as translucent. Required rather than
-        optional: a missing library would silently classify every batch as
-        opaque, which Task 7's translucent pass would then draw in the wrong
-        pass.
+        `translucent_ids` is the set the batch planner needs in order to
+        classify a batch as translucent. Passed in rather than derived from the
+        model here because _ensure_buffers also compares it against the set the
+        buffer was last built under, and both must see exactly the same value.
         """
         # Re-use existing GL objects if we already have them; allocate if not.
         buf = self._def_buffers.get(id(definition))
@@ -870,21 +1110,23 @@ class SceneRenderer:
         if positions.shape[0] > 0:
             interleaved = np.concatenate([positions, normals], axis=1).astype(np.float32)
             # Group triangles by (front, back) material so each pair draws as one
-            # contiguous batch. No translucent pass yet (Task 7), so every batch
-            # — opaque and translucent alike — is drawn in today's single pass.
+            # contiguous batch, with the translucent pairs as a contiguous suffix
+            # that render()'s second pass depth-sorts.
             front_mats = scene.face_triangle_materials(Side.FRONT)
             back_mats = scene.face_triangle_materials(Side.BACK)
-            translucent = _translucent_ids(getattr(model, "materials", None))
-            plan = plan_face_batches(front_mats, back_mats, translucent)
-            interleaved = interleaved[plan.vertex_order]
-            data = np.ascontiguousarray(interleaved)
+            plan = plan_face_batches(front_mats, back_mats, translucent_ids)
+            interleaved = np.ascontiguousarray(interleaved[plan.vertex_order])
             GL.glBindBuffer(GL.GL_ARRAY_BUFFER, buf.face_vbo)
-            GL.glBufferData(GL.GL_ARRAY_BUFFER, data.nbytes, data, GL.GL_DYNAMIC_DRAW)
+            GL.glBufferData(GL.GL_ARRAY_BUFFER, interleaved.nbytes, interleaved, GL.GL_DYNAMIC_DRAW)
             buf.face_count = int(positions.shape[0])
             buf.plan = plan
         else:
+            interleaved = _empty_face_interleaved()
+            plan = _empty_batch_plan()
             buf.face_count = 0
-            buf.plan = _empty_batch_plan()
+            buf.plan = plan
+        buf.translucent_ids = translucent_ids
+        _reset_translucent_state(buf, plan, interleaved)
 
         # Edges: (2*E, 3) positions — pack constant color per vertex so the
         # line shader's attribute 1 (in_color) is always satisfied.
