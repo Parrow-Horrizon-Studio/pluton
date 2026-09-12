@@ -22,6 +22,7 @@ from pluton.model.model import Model
 from pluton.model.tag import TagLibrary
 from pluton.scene.scene import Scene, Side
 from pluton.units import Units, units_from_dict, units_to_dict
+from pluton.viewport.face_batches import MAX_MATERIAL_ID
 from pluton.viewport.render_style import FaceStyle, RenderStyle
 
 _DEFAULT_MATERIAL_ID = 0  # mirrors MaterialLibrary.DEFAULT_ID
@@ -82,7 +83,24 @@ def geometry_from_dict(scene: Scene, data: dict) -> None:
             fi = int(face_index_str)
             if not (0 <= fi < len(new_fids)):
                 raise PlutonFormatError(f"face index {fi} out of range (0..{len(new_fids) - 1})")
-            scene.set_face_material(new_fids[fi], int(mat), side)
+            mid = int(mat)
+            # The material id is validated here, beside the face index, because
+            # M7.5a's plan_face_batches rejects ids outside [0, MAX_MATERIAL_ID]
+            # and it runs inside render(). Without this a document carrying
+            # {"0": -3} loaded clean and then raised every single frame, where
+            # nothing can report it; before M7.5a the same file simply rendered
+            # as Default. Failing at load turns a corrupt file into one error
+            # message the UI already knows how to show.
+            #
+            # Only the RANGE is checked. An id that is in range but names no
+            # material in the library is a different case and stays tolerated:
+            # MaterialLibrary.get falls back to Default for it, which is the
+            # forgiving behaviour a file that lost a material should get.
+            if not (0 <= mid <= MAX_MATERIAL_ID):
+                raise PlutonFormatError(
+                    f"face material id {mid} out of range (0..{MAX_MATERIAL_ID})"
+                )
+            scene.set_face_material(new_fids[fi], mid, side)
 
     _apply_face_materials(data.get("face_materials", {}), Side.FRONT)
     _apply_face_materials(data.get("face_materials_back", {}), Side.BACK)

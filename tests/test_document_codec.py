@@ -68,6 +68,53 @@ def test_geometry_from_dict_rejects_bad_index():
         geometry_from_dict(dst, bad)
 
 
+def _one_face_doc(face_materials, key="face_materials"):
+    return {
+        "vertices": [[0, 0, 0], [1, 0, 0], [1, 1, 0], [0, 1, 0]],
+        "edges": [],
+        "faces": [[0, 1, 2, 3]],
+        key: face_materials,
+    }
+
+
+@pytest.mark.parametrize("bad_id", [-3, -1, 1 << 20, 1 << 40])
+@pytest.mark.parametrize("key", ["face_materials", "face_materials_back"])
+def test_geometry_from_dict_rejects_an_out_of_range_material_id(bad_id, key):
+    # M7.5a regression: the face INDEX was validated but the material id was
+    # not, while plan_face_batches (new this milestone) rejects ids outside
+    # [0, 2**20). So a document holding {"0": -3} loaded clean and then raised
+    # ValueError from inside render() -- every frame, where nothing can report
+    # it. Before M7.5a the same file rendered as Default.
+    #
+    # Both sides and both ends of the range: a guard that only checks
+    # face_materials, or only the negative end, is a plausible half-fix.
+    with pytest.raises(PlutonFormatError):
+        geometry_from_dict(Scene(), _one_face_doc({"0": bad_id}, key))
+
+
+def test_an_in_range_material_id_naming_no_material_still_loads():
+    # Only the RANGE is validated. An id the library does not contain is a
+    # different case and stays forgiving: MaterialLibrary.get falls back to
+    # Default, so a file that lost a material opens rather than refusing.
+    dst = Scene()
+    geometry_from_dict(dst, _one_face_doc({"0": 999}))
+    fid = next(iter(dst.faces_iter())).id
+    assert dst.face_material(fid) == 999
+
+
+def test_a_document_with_a_malformed_material_id_fails_at_load_not_at_render():
+    # The whole point of the fix, through the real document path: the error
+    # arrives once, from the loader, as the PlutonFormatError the UI already
+    # knows how to show.
+    model = Model()
+    _square(model.root.mesh)
+    data = document_to_dict(model, Camera(), DocumentSettings(), RenderStyle())
+    data["model"]["definitions"][0]["geometry"]["face_materials"] = {"0": -3}
+
+    with pytest.raises(PlutonFormatError):
+        document_from_dict(data)
+
+
 def _add_box(scene):
     vids = [scene.add_vertex(np.array(p, dtype=np.float32))
             for p in ((0, 0, 0), (1, 0, 0), (1, 1, 0), (0, 1, 0))]

@@ -41,6 +41,12 @@ class BatchPlan:
 
 _ID_BITS = 20  # material ids are monotonic and small; 1M per side is ample
 
+# The inclusive upper bound on a material id. Public because the .pluton loader
+# validates against it: an id outside [0, MAX_MATERIAL_ID] would otherwise load
+# clean and then raise from plan_face_batches inside render(), i.e. every frame.
+# One constant so the loader's rule and the planner's cannot drift apart.
+MAX_MATERIAL_ID = (1 << _ID_BITS) - 1
+
 
 def plan_face_batches(
     front_ids: Sequence[int],
@@ -71,7 +77,7 @@ def plan_face_batches(
     if t == 0:
         return BatchPlan(np.zeros(0, dtype=np.int64), [], [], 0)
 
-    id_limit = 1 << _ID_BITS
+    id_limit = MAX_MATERIAL_ID + 1
     for name, ids in (("front_ids", front), ("back_ids", back)):
         invalid = ids[(ids < 0) | (ids >= id_limit)]
         if invalid.size:
