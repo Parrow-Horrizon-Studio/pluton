@@ -264,6 +264,9 @@ ACTIONS: tuple[ActionSpec, ...] = (
         group=FACE_STYLE_GROUP,
     ),
     ActionSpec("view_xray", "X-Ray", "_on_toggle_xray", icon="view_xray", checkable=True),
+    # M7.5a Task 11. No icon: a menu entry only, like the units toggles above,
+    # not a toolbar button.
+    ActionSpec("view_color_by_tag", "Color by Tag", "_on_toggle_color_by_tag", checkable=True),
     ActionSpec(
         "view_zoom_extents",
         "Zoom Extents",
@@ -441,6 +444,7 @@ MENUS: tuple[MenuSpec, ...] = (
             "view_style_shaded",
             None,
             "view_xray",
+            "view_color_by_tag",
             None,
             "view_zoom_extents",
             None,

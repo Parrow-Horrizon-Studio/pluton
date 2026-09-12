@@ -184,7 +184,9 @@ class MainWindow(QMainWindow):
         # Tags page. Not referenced by the ToolContext (tag assignment uses the
         # existing Select tool + Selection).
         self._active_tag_id = TagLibrary.UNTAGGED_ID
-        self._tags_page = TagsPage(self._model.tags, self)
+        self._tags_page = TagsPage(
+            self._model.tags, self, command_stack=self._command_stack, model=self._model
+        )
         self._tags_page.active_tag_changed.connect(self._on_active_tag_changed)
         self._tags_page.visibility_changed.connect(self._viewport.update)
         # Spec 1.7: "Tag visibility toggled -> full rebuild (tag_hidden
@@ -371,6 +373,7 @@ class MainWindow(QMainWindow):
             for style, action_id in self._FACE_STYLE_ACTION_IDS.items()
         }
         self._xray_action = self._actions["view_xray"]
+        self._color_by_tag_action = self._actions["view_color_by_tag"]
 
         # Dynamic View entries: the Properties panel is still a real dock, so
         # it keeps a genuine toggleViewAction. Materials/Tags/Scenes are now
@@ -1317,6 +1320,8 @@ class MainWindow(QMainWindow):
         # swatch grid and editor can now go stale behind an undo the same way
         # the Scenes list can.
         self._materials_page.refresh()
+        # Tag colour became undoable in M7.5a Task 11 -- same staleness risk.
+        self._tags_page.refresh()
 
     def _prune_selection(self) -> None:
         """Keep only selected entities still live in the active context (#46)."""
@@ -1329,6 +1334,10 @@ class MainWindow(QMainWindow):
 
     def _on_toggle_xray(self, checked: bool) -> None:
         self._render_style.xray = bool(checked)
+        self._viewport.set_render_style(self._render_style)
+
+    def _on_toggle_color_by_tag(self, checked: bool) -> None:
+        self._render_style.color_by_tag = bool(checked)
         self._viewport.set_render_style(self._render_style)
 
     # --- Toolbars (M7.2, Task 11) -----------------------------------------
@@ -1364,6 +1373,9 @@ class MainWindow(QMainWindow):
         self._xray_action.blockSignals(True)
         self._xray_action.setChecked(self._render_style.xray)
         self._xray_action.blockSignals(False)
+        self._color_by_tag_action.blockSignals(True)
+        self._color_by_tag_action.setChecked(self._render_style.color_by_tag)
+        self._color_by_tag_action.blockSignals(False)
         self._viewport.set_render_style(self._render_style)
 
     def _on_create_view(self) -> None:

@@ -337,6 +337,71 @@ def resolve_batch_sides(
     )
 
 
+# --- M7.5a Task 11: Color-by-Tag --------------------------------------------
+#
+# Module-level and GL-free for the same reason as resolve_batch_sides above:
+# tags are per-INSTANCE while resolve_batch_sides only ever sees a batch, so
+# the override is decided here in the render loop instead of being threaded
+# into that function. Keeping resolve_batch_sides about materials only.
+
+
+def _definition_tag_ids(model) -> dict[int, int]:
+    """Map id(child definition) -> the tag id of the Instance that places it.
+
+    model.traverse()'s (definition, world) pairs do not carry the owning
+    Instance (see Model._traverse) -- only the definition and its world
+    transform -- so Color-by-Tag needs its own walk of the same tree to learn
+    which instance placed a given definition. When a Definition is shared by
+    more than one Instance carrying different tags, the last one visited
+    wins: resolving per-occurrence instead of per-definition would need the
+    Instance threaded through traverse() itself, out of scope for this task.
+    """
+    mapping: dict[int, int] = {}
+
+    def walk(definition) -> None:
+        for inst in definition.children:
+            mapping[id(inst.definition)] = inst.tag_id
+            walk(inst.definition)
+
+    walk(model.root)
+    return mapping
+
+
+def resolve_definition_tag_color(
+    tag_id: int, tags, render_style: RenderStyle
+) -> tuple[float, float, float] | None:
+    """The tag-colour override for one definition's draw, or None when
+    Color-by-Tag is off.
+
+    `tag_id` is looked up once per definition by the render loop (via
+    _definition_tag_ids) and passed in here; this function decides only
+    whether the mode is on and what colour results, so it is testable
+    without a scene graph or a GL context.
+    """
+    if not render_style.color_by_tag:
+        return None
+    return tags.get(tag_id).color
+
+
+def apply_tag_color_override(
+    front: ResolvedFacePass,
+    back: ResolvedFacePass,
+    color: tuple[float, float, float] | None,
+) -> tuple[ResolvedFacePass, ResolvedFacePass]:
+    """Replace both sides' diffuse with `color`; a no-op when `color` is None.
+
+    Everything else resolve_batch_sides already computed -- face style, the
+    dim pass, X-Ray alpha, blend/depth flags -- passes through unchanged:
+    Color-by-Tag bypasses material colour, not the rest of the shading
+    pipeline. Both sides are replaced together so a reversed face does not
+    give away the mode by keeping its old back-face colour (a front-only
+    override would be a plausible, easy-to-miss bug here).
+    """
+    if color is None:
+        return front, back
+    return replace(front, diffuse=color), replace(back, diffuse=color)
+
+
 # --- M7.5a Task 7: the translucent pass -------------------------------------
 #
 # Module-level and GL-free for the same reason as the block above: every
@@ -755,6 +820,12 @@ class SceneRenderer:
             materials = getattr(model, "materials", None)
             translucent_ids = _translucent_ids(materials)
             visible = list(model.traverse_visible())
+            # Task 11: which tag placed each definition, so Color-by-Tag can
+            # resolve a colour per definition below. Computed unconditionally
+            # (like translucent_ids above) rather than gated on the style
+            # flag -- resolve_definition_tag_color itself is the None-when-off
+            # gate, and one tree walk per frame is cheap next to traversal.
+            tag_ids_by_definition = _definition_tag_ids(model)
 
             # Correction 2: translucent faces must be drawn after ALL opaque
             # geometry across every definition, not merely after their own
@@ -768,10 +839,18 @@ class SceneRenderer:
                 # Task 15: dim pass — dim anything that is NOT the active context.
                 # At root (active_path is empty), nothing is dimmed.
                 dimmed = definition_is_dimmed(definition, model)
+                # Task 11: resolved once per definition, not per batch, the
+                # same way `dimmed` above is.
+                tag_color = resolve_definition_tag_color(
+                    tag_ids_by_definition.get(id(definition), model.tags.UNTAGGED_ID),
+                    model.tags,
+                    self._render_style,
+                )
                 for batch in buf.plan.opaque:
                     front, back = resolve_batch_sides(
                         batch, materials, self._render_style, dimmed=dimmed
                     )
+                    front, back = apply_tag_color_override(front, back, tag_color)
                     # draw_faces comes from the face style alone, so it is the
                     # same on both sides; front is representative.
                     if front.draw_faces and batch.count > 0:
@@ -808,10 +887,16 @@ class SceneRenderer:
                 self._sort_translucent_slice(buf, world, camera.position)
                 model_mat = world.astype(np.float32)
                 dimmed = definition_is_dimmed(definition, model)
+                tag_color = resolve_definition_tag_color(
+                    tag_ids_by_definition.get(id(definition), model.tags.UNTAGGED_ID),
+                    model.tags,
+                    self._render_style,
+                )
                 for batch in buf.translucent_draw_batches:
                     front, back = resolve_batch_sides(
                         batch, materials, self._render_style, dimmed=dimmed
                     )
+                    front, back = apply_tag_color_override(front, back, tag_color)
                     if front.draw_faces and batch.count > 0:
                         self._draw_definition_faces(
                             buf,
