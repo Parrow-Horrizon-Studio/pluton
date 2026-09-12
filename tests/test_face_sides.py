@@ -96,9 +96,16 @@ def test_clear_resets_both_sides():
     s.set_face_material(f, 3, Side.FRONT)
     s.set_face_material(f, 5, Side.BACK)
     s.clear()
-    f2 = _square(s)
-    assert s.face_material(f2, Side.FRONT) == 0
-    assert s.face_material(f2, Side.BACK) == 0
+    assert s.faces_with_material(3) == []
+    assert s.faces_with_material(5) == []
+
+
+def test_faces_with_material_finds_both_sides_on_the_same_face():
+    s = Scene()
+    f = _square(s)
+    s.set_face_material(f, 7, Side.FRONT)
+    s.set_face_material(f, 7, Side.BACK)
+    assert set(s.faces_with_material(7)) == {(f, Side.FRONT), (f, Side.BACK)}
 
 
 def test_painting_the_back_marks_the_scene_render_dirty():
