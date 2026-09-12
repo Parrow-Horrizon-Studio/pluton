@@ -8,9 +8,9 @@ from pluton.model.model import Model
 from pluton.model.tag import TagLibrary
 from pluton.viewport.render_style import RenderStyle
 from pluton.viewport.scene_renderer import (
-    _definition_tag_ids,
     apply_tag_color_override,
-    resolve_definition_tag_color,
+    resolve_tag_color,
+    traverse_visible_tagged,
 )
 
 
@@ -45,8 +45,29 @@ def test_colour_round_trips_through_records():
 
 def test_records_without_a_colour_still_load():
     # Schema <= 4 wrote no tag colour. Task 12's migration relies on this.
-    rebuilt = TagLibrary.from_records([{"id": 0, "name": "Untagged", "visible": True}], 1)
-    assert len(rebuilt.get(0).color) == 3
+    # Asserting WHICH colour, not merely that there are three floats: keying
+    # the fallback on record position alone hands Untagged (always record 0)
+    # _PALETTE[0] -- bright red -- so every untagged face in a pre-Task-11
+    # file reads as a real red tag under Color-by-Tag.
+    rebuilt = TagLibrary.from_records(
+        [
+            {"id": 0, "name": "Untagged", "visible": True},
+            {"id": 1, "name": "Walls", "visible": True},
+        ],
+        2,
+    )
+    assert rebuilt.get(0).color == TagLibrary._UNTAGGED_COLOR
+    assert rebuilt.get(1).color == TagLibrary._PALETTE[0]
+
+
+def test_untagged_consumes_no_palette_hue_after_a_load():
+    # Untagged occupies a record slot but no hue, so the first tag added
+    # after a load must continue the cycle at the next UNUSED entry --
+    # seeding _next_palette_index from len(records) skips one.
+    lib = TagLibrary()
+    lib.add("Walls")
+    rebuilt = TagLibrary.from_records(lib.to_records(), lib.next_id)
+    assert rebuilt.add("Roof").color == TagLibrary._PALETTE[1]
 
 
 def test_color_by_tag_defaults_off():
@@ -101,12 +122,12 @@ def test_set_tag_color_command_is_undoable_and_tag_specific():
 
 # --- Color-by-Tag reaching the draw: the decision seams --------------------
 #
-# resolve_definition_tag_color and apply_tag_color_override are the GL-free
-# seams the render loop composes (scene_renderer.render); _definition_tag_ids
-# is the tree walk that supplies the tag id in the first place, since
-# Model.traverse()'s (definition, world) pairs do not carry the owning
-# Instance. Together these three cover "does Color-by-Tag actually change
-# what a definition draws with" without a GL context.
+# resolve_tag_color and apply_tag_color_override are the GL-free seams the
+# render loop composes (scene_renderer.render); traverse_visible_tagged is
+# the walk that supplies the tag id in the first place, since
+# Model.traverse_visible()'s (definition, world) pairs do not carry the
+# owning Instance. Together these three cover "does Color-by-Tag actually
+# change what an occurrence draws with" without a GL context.
 
 
 def _face_pass(diffuse=(0.5, 0.5, 0.5)):
@@ -124,21 +145,21 @@ def _face_pass(diffuse=(0.5, 0.5, 0.5)):
     )
 
 
-def test_resolve_definition_tag_color_is_none_when_the_mode_is_off():
+def test_resolve_tag_color_is_none_when_the_mode_is_off():
     # Kills an implementation that always returns a colour regardless of the
     # style flag -- a materials-bypassing override that never turns off.
     lib = TagLibrary()
     t = lib.add("Walls")
-    assert resolve_definition_tag_color(t.id, lib, RenderStyle(color_by_tag=False)) is None
+    assert resolve_tag_color(t.id, lib, RenderStyle(color_by_tag=False)) is None
 
 
-def test_resolve_definition_tag_color_returns_the_tags_own_colour():
+def test_resolve_tag_color_returns_the_tags_own_colour():
     # Kills an implementation that ignores tag_id and returns some fixed or
     # default colour instead of the specific tag's.
     lib = TagLibrary()
     t = lib.add("Walls")
     lib.set_color(t.id, (0.3, 0.4, 0.5))
-    color = resolve_definition_tag_color(t.id, lib, RenderStyle(color_by_tag=True))
+    color = resolve_tag_color(t.id, lib, RenderStyle(color_by_tag=True))
     assert color == (0.3, 0.4, 0.5)
 
 
@@ -171,24 +192,124 @@ def test_apply_tag_color_override_is_a_noop_when_color_is_none():
     assert new_back == back
 
 
-def test_definition_tag_ids_maps_a_child_definition_to_its_instances_tag():
+def _tagged_occurrences(model, definition):
+    """The tag id of every visible occurrence of `definition`, in draw order."""
+    return [tid for d, _, tid in traverse_visible_tagged(model) if d is definition]
+
+
+def test_traverse_visible_tagged_carries_the_placing_instances_tag():
     m = Model()
     d = m.new_definition("Wall", is_group=True)
     inst = m.new_instance(d)
     inst.tag_id = 5
     m.root.children.append(inst)
 
-    ids = _definition_tag_ids(m)
-    assert ids[id(d)] == 5
+    assert _tagged_occurrences(m, d) == [5]
 
 
-def test_definition_tag_ids_has_no_entry_for_the_root():
-    # The root definition is never placed by an Instance, so it must not
-    # appear -- a lookup that defaulted a missing key to 0 would be
-    # indistinguishable from "explicitly Untagged" without this.
+def test_the_root_occurrence_is_reported_untagged():
+    # The root definition is placed by no Instance, so the walk has no tag to
+    # carry for it and must report UNTAGGED_ID -- the render loop draws the
+    # root's own geometry and needs a real tag id for it, which is why this
+    # is a documented value rather than a missing entry.
     m = Model()
-    ids = _definition_tag_ids(m)
-    assert id(m.root) not in ids
+    root_entry = next(iter(traverse_visible_tagged(m)))
+    assert root_entry[0] is m.root
+    assert root_entry[2] == TagLibrary.UNTAGGED_ID
+
+
+def test_two_instances_of_one_definition_on_two_tags_resolve_to_two_colours():
+    # THE per-definition bug: a component placed twice, on two tags, is the
+    # ordinary case Color-by-Tag exists to serve. A map keyed by
+    # id(definition) collapses both placements onto whichever instance was
+    # visited last, so both draw in one colour.
+    m = Model()
+    chair = m.new_definition("Chair", is_group=False)
+    walls = m.tags.add("Walls")
+    roof = m.tags.add("Roof")
+    m.tags.set_color(walls.id, (0.90, 0.25, 0.25))
+    m.tags.set_color(roof.id, (0.95, 0.60, 0.15))
+    for tag in (walls, roof):
+        inst = m.new_instance(chair)
+        inst.tag_id = tag.id
+        m.root.children.append(inst)
+
+    style = RenderStyle(color_by_tag=True)
+    colors = [resolve_tag_color(tid, m.tags, style) for tid in _tagged_occurrences(m, chair)]
+
+    assert colors == [(0.90, 0.25, 0.25), (0.95, 0.60, 0.15)]
+
+
+def test_a_hidden_instance_does_not_supply_the_colour_a_visible_one_draws_with():
+    # The aggravating half of the same bug: a walk of the whole tree sees
+    # instances the draw never does, so a hidden placement visited later
+    # could hand its colour to the visible one. The hidden instance is
+    # appended SECOND on purpose -- last-write-wins is what it would win.
+    m = Model()
+    chair = m.new_definition("Chair", is_group=False)
+    walls = m.tags.add("Walls")
+    roof = m.tags.add("Roof")
+    m.tags.set_color(walls.id, (0.90, 0.25, 0.25))
+    m.tags.set_color(roof.id, (0.95, 0.60, 0.15))
+
+    shown = m.new_instance(chair)
+    shown.tag_id = walls.id
+    hidden = m.new_instance(chair)
+    hidden.tag_id = roof.id
+    hidden.hidden = True
+    m.root.children.extend([shown, hidden])
+
+    style = RenderStyle(color_by_tag=True)
+    colors = [resolve_tag_color(tid, m.tags, style) for tid in _tagged_occurrences(m, chair)]
+
+    assert colors == [(0.90, 0.25, 0.25)]
+
+
+def test_an_instance_on_a_hidden_tag_does_not_supply_a_colour_either():
+    # Same aggravation via the other pruning rule traverse_visible applies.
+    m = Model()
+    chair = m.new_definition("Chair", is_group=False)
+    walls = m.tags.add("Walls")
+    roof = m.tags.add("Roof")
+    m.tags.set_color(walls.id, (0.90, 0.25, 0.25))
+    m.tags.set_color(roof.id, (0.95, 0.60, 0.15))
+    m.tags.set_visible(roof.id, False)
+
+    shown = m.new_instance(chair)
+    shown.tag_id = walls.id
+    off_tag = m.new_instance(chair)
+    off_tag.tag_id = roof.id
+    m.root.children.extend([shown, off_tag])
+
+    style = RenderStyle(color_by_tag=True)
+    colors = [resolve_tag_color(tid, m.tags, style) for tid in _tagged_occurrences(m, chair)]
+
+    assert colors == [(0.90, 0.25, 0.25)]
+
+
+def test_traverse_visible_tagged_visits_exactly_what_traverse_visible_does():
+    # traverse_visible_tagged repeats traverse_visible's pruning rule inside
+    # scene_renderer (so Model.traverse_visible keeps its two-tuple shape).
+    # This pins the two walks together -- same entries, same order -- so the
+    # copy cannot drift from the walk the rest of the renderer uses.
+    m = Model()
+    outer = m.new_definition("Outer", is_group=True)
+    inner = m.new_definition("Inner", is_group=True)
+    hidden_tag = m.tags.add("Hidden")
+    m.tags.set_visible(hidden_tag.id, False)
+
+    child = m.new_instance(inner)
+    outer.children.append(child)
+    a = m.new_instance(outer)
+    b = m.new_instance(outer)
+    b.hidden = True
+    c = m.new_instance(inner)
+    c.tag_id = hidden_tag.id
+    m.root.children.extend([a, b, c])
+
+    plain = [(id(d), w.tobytes()) for d, w in m.traverse_visible()]
+    tagged = [(id(d), w.tobytes()) for d, w, _ in traverse_visible_tagged(m)]
+    assert tagged == plain
 
 
 def test_the_full_chain_from_instance_tag_to_resolved_diffuse():
@@ -204,16 +325,14 @@ def test_the_full_chain_from_instance_tag_to_resolved_diffuse():
     m.tags.set_color(walls.id, (0.9, 0.2, 0.2))
     inst.tag_id = walls.id
 
-    tag_ids = _definition_tag_ids(m)
+    (tag_id,) = _tagged_occurrences(m, d)
     front, back = _face_pass((0.1, 0.1, 0.1)), _face_pass((0.2, 0.2, 0.2))
 
-    off_color = resolve_definition_tag_color(
-        tag_ids[id(d)], m.tags, RenderStyle(color_by_tag=False)
-    )
+    off_color = resolve_tag_color(tag_id, m.tags, RenderStyle(color_by_tag=False))
     off_front, off_back = apply_tag_color_override(front, back, off_color)
     assert (off_front.diffuse, off_back.diffuse) == (front.diffuse, back.diffuse)
 
-    on_color = resolve_definition_tag_color(tag_ids[id(d)], m.tags, RenderStyle(color_by_tag=True))
+    on_color = resolve_tag_color(tag_id, m.tags, RenderStyle(color_by_tag=True))
     on_front, on_back = apply_tag_color_override(front, back, on_color)
     assert on_front.diffuse == (0.9, 0.2, 0.2)
     assert on_back.diffuse == (0.9, 0.2, 0.2)
@@ -275,11 +394,42 @@ def test_picking_the_same_tag_colour_pushes_no_undo_entry(main_window, monkeypat
     assert len(win._command_stack._undo) == depth, "an unchanged colour is not an edit"
 
 
-def test_edit_color_is_a_noop_without_an_injected_command_stack(qtbot):
+def test_a_library_recolor_repaints_the_viewport(main_window):
+    # library_changed marks the document dirty and retitles the window, which
+    # is not enough: a recolored tag under Color-by-Tag (and a recolored
+    # material under any face style) changes what is on screen right now, so
+    # the viewport must repaint instead of waiting for an incidental one.
+    # PySide's disconnect() only warns ("Failed to disconnect ...") when the
+    # connection is absent, so the warning is promoted to an error -- that
+    # promotion IS the assertion. Each page is reconnected immediately.
+    import warnings
+
+    win = main_window
+    for page in (win._tags_page, win._materials_page):
+        with warnings.catch_warnings():
+            warnings.simplefilter("error", RuntimeWarning)
+            page.library_changed.disconnect(win._viewport.update)
+        page.library_changed.connect(win._viewport.update)
+
+
+def test_edit_color_is_a_noop_without_an_injected_command_stack(qtbot, monkeypatch):
     # Kills a version that crashes (or silently mutates the library without
     # undo support) when used standalone -- the shape every pre-Task-11
     # TagsPage(lib) test in test_tags_page.py already constructs.
+    #
+    # QColorDialog is patched even though the None guard should return first:
+    # unpatched, a regressed guard opens a real modal and HANGS the suite
+    # instead of failing it. Patched, the same regression fails this
+    # assertion in milliseconds.
+    from pluton.ui import tags_page as tags_page_module
     from pluton.ui.tags_page import TagsPage
+    from PySide6.QtGui import QColor
+
+    monkeypatch.setattr(
+        tags_page_module.QColorDialog,
+        "getColor",
+        staticmethod(lambda *a, **k: QColor(10, 20, 30)),
+    )
 
     lib = TagLibrary()
     walls = lib.add("Walls")

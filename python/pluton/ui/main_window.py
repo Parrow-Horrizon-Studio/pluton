@@ -257,6 +257,13 @@ class MainWindow(QMainWindow):
         self._materials_page.library_changed.connect(self._on_document_changed)
         self._tags_page.library_changed.connect(self._on_document_changed)
         self._tags_page.visibility_changed.connect(self._on_document_changed)
+        # _on_document_changed only marks dirty and retitles, but a library
+        # edit can change what is on screen right now -- a tag recolored under
+        # Color-by-Tag (Task 11), a material recolored under any face style --
+        # so both pages also repaint instead of waiting for the next
+        # incidental one. visibility_changed is already wired to update above.
+        self._materials_page.library_changed.connect(self._viewport.update)
+        self._tags_page.library_changed.connect(self._viewport.update)
 
         # NOW we can build the ToolContext that includes the viewport refs.
         self._rebuild_tool_context()

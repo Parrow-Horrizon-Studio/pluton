@@ -345,37 +345,50 @@ def resolve_batch_sides(
 # into that function. Keeping resolve_batch_sides about materials only.
 
 
-def _definition_tag_ids(model) -> dict[int, int]:
-    """Map id(child definition) -> the tag id of the Instance that places it.
+def traverse_visible_tagged(model):
+    """Yield (definition, world, tag_id) once per visible OCCURRENCE.
 
-    model.traverse()'s (definition, world) pairs do not carry the owning
-    Instance (see Model._traverse) -- only the definition and its world
-    transform -- so Color-by-Tag needs its own walk of the same tree to learn
-    which instance placed a given definition. When a Definition is shared by
-    more than one Instance carrying different tags, the last one visited
-    wins: resolving per-occurrence instead of per-definition would need the
-    Instance threaded through traverse() itself, out of scope for this task.
+    The same tree, the same order and the same pruning as
+    Model.traverse_visible() -- which already yields one entry per
+    occurrence, so a component placed twice appears twice -- with the tag of
+    the Instance that placed *this* occurrence carried alongside.
+
+    Per occurrence, not per definition, because a tag is a property of the
+    Instance: one definition placed by two instances on two tags must draw
+    in two colours, and collapsing that into an id(definition) -> tag_id map
+    lets the last instance visited win. Walking the pruned tree (rather than
+    all of model.root) matters for the same reason: a hidden instance, or
+    one on a hidden tag, must not supply the colour a visible placement
+    draws with.
+
+    model.root is placed by no Instance, so it is reported as UNTAGGED_ID.
+
+    Lives here rather than on Model so traverse()/traverse_visible() keep
+    their two-tuple shape; test_tag_color.py pins this walk to
+    traverse_visible()'s so the repeated pruning rule cannot drift.
     """
-    mapping: dict[int, int] = {}
+    active_ids = {inst.id for inst in model.active_path}
+    tags = model.tags
 
-    def walk(definition) -> None:
+    def walk(definition, world, tag_id):
+        yield definition, world, tag_id
         for inst in definition.children:
-            mapping[id(inst.definition)] = inst.tag_id
-            walk(inst.definition)
+            if inst.id not in active_ids and (inst.hidden or not tags.is_visible(inst.tag_id)):
+                continue
+            yield from walk(inst.definition, world @ inst.transform, inst.tag_id)
 
-    walk(model.root)
-    return mapping
+    yield from walk(model.root, np.eye(4, dtype=np.float64), tags.UNTAGGED_ID)
 
 
-def resolve_definition_tag_color(
+def resolve_tag_color(
     tag_id: int, tags, render_style: RenderStyle
 ) -> tuple[float, float, float] | None:
-    """The tag-colour override for one definition's draw, or None when
+    """The tag-colour override for one occurrence's draw, or None when
     Color-by-Tag is off.
 
-    `tag_id` is looked up once per definition by the render loop (via
-    _definition_tag_ids) and passed in here; this function decides only
-    whether the mode is on and what colour results, so it is testable
+    `tag_id` comes from traverse_visible_tagged, so it is the tag of the
+    Instance that placed the occurrence being drawn; this function decides
+    only whether the mode is on and what colour results, so it is testable
     without a scene graph or a GL context.
     """
     if not render_style.color_by_tag:
@@ -819,13 +832,15 @@ class SceneRenderer:
             self.evict_unreachable(model)
             materials = getattr(model, "materials", None)
             translucent_ids = _translucent_ids(materials)
-            visible = list(model.traverse_visible())
-            # Task 11: which tag placed each definition, so Color-by-Tag can
-            # resolve a colour per definition below. Computed unconditionally
+            # Task 11: traverse_visible_tagged is traverse_visible() plus the
+            # tag of the Instance that placed each occurrence, so `visible`
+            # entries are (definition, world, tag_id) triples. The tag rides
+            # along in the traversal itself -- rather than being looked up in
+            # a per-definition map -- because one definition placed twice on
+            # two tags must draw in two colours. Carried unconditionally
             # (like translucent_ids above) rather than gated on the style
-            # flag -- resolve_definition_tag_color itself is the None-when-off
-            # gate, and one tree walk per frame is cheap next to traversal.
-            tag_ids_by_definition = _definition_tag_ids(model)
+            # flag: resolve_tag_color itself is the None-when-off gate.
+            visible = list(traverse_visible_tagged(model))
 
             # Correction 2: translucent faces must be drawn after ALL opaque
             # geometry across every definition, not merely after their own
@@ -833,19 +848,18 @@ class SceneRenderer:
             # gaining a second inner loop.
             #
             # Pass 1: every definition's opaque batches, plus its edges.
-            for definition, world in visible:
+            for definition, world, tag_id in visible:
                 buf = self._ensure_buffers(definition, translucent_ids)
                 model_mat = world.astype(np.float32)
                 # Task 15: dim pass — dim anything that is NOT the active context.
                 # At root (active_path is empty), nothing is dimmed.
                 dimmed = definition_is_dimmed(definition, model)
-                # Task 11: resolved once per definition, not per batch, the
-                # same way `dimmed` above is.
-                tag_color = resolve_definition_tag_color(
-                    tag_ids_by_definition.get(id(definition), model.tags.UNTAGGED_ID),
-                    model.tags,
-                    self._render_style,
-                )
+                # Task 11: resolved once per occurrence, not per batch. Not the
+                # same shape as `dimmed` above despite the similar line: dimming
+                # is a property of the definition relative to the active path,
+                # while the tag belongs to the Instance that placed THIS
+                # occurrence -- hence tag_id comes from the traversal entry.
+                tag_color = resolve_tag_color(tag_id, model.tags, self._render_style)
                 for batch in buf.plan.opaque:
                     front, back = resolve_batch_sides(
                         batch, materials, self._render_style, dimmed=dimmed
@@ -873,25 +887,28 @@ class SceneRenderer:
             # The filter names the same list the loop below draws, so the two
             # cannot disagree. Filtering on `plan.translucent` instead happens
             # to work only because _reset_translucent_state seeds both together.
+            # Task 11: the tag id rides along in these triples, so `order`
+            # (which indexes into translucent_entries) keeps naming the same
+            # occurrence's tag. order_definitions_for_translucent_pass sorts
+            # (definition, world) pairs, so it gets the projection -- built in
+            # the same order, so the indices still line up.
             translucent_entries = [
-                (d, w) for d, w in visible if self._def_buffers[id(d)].translucent_draw_batches
+                (d, w, t)
+                for d, w, t in visible
+                if self._def_buffers[id(d)].translucent_draw_batches
             ]
             order = order_definitions_for_translucent_pass(
-                translucent_entries,
+                [(d, w) for d, w, _ in translucent_entries],
                 camera_pos=camera.position,
                 centroid_of=lambda d: self._def_buffers[id(d)].translucent_local_centroid,
             )
             for i in order:
-                definition, world = translucent_entries[i]
+                definition, world, tag_id = translucent_entries[i]
                 buf = self._def_buffers[id(definition)]
                 self._sort_translucent_slice(buf, world, camera.position)
                 model_mat = world.astype(np.float32)
                 dimmed = definition_is_dimmed(definition, model)
-                tag_color = resolve_definition_tag_color(
-                    tag_ids_by_definition.get(id(definition), model.tags.UNTAGGED_ID),
-                    model.tags,
-                    self._render_style,
-                )
+                tag_color = resolve_tag_color(tag_id, model.tags, self._render_style)
                 for batch in buf.translucent_draw_batches:
                     front, back = resolve_batch_sides(
                         batch, materials, self._render_style, dimmed=dimmed

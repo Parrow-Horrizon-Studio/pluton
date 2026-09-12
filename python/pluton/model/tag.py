@@ -130,16 +130,26 @@ class TagLibrary:
 
         Schema <= 4 wrote no "color" key (Task 12's migration relies on
         this): a missing colour falls back to the same cycling palette
-        `add()` uses, keyed by the record's position, so an old file's tags
-        still come up visually distinct rather than uniformly gray.
+        `add()` uses, so an old file's tags still come up visually distinct
+        rather than uniformly gray. Untagged is excluded from that cycle --
+        keyed on record position it would take _PALETTE[0] (bright red) and
+        make every untagged face in a pre-Task-11 file read as a real tag.
+        It consumes no hue either, so the cycle a loaded library resumes at
+        matches the one a freshly-built library would be on.
         """
         lib = cls()  # seeds Untagged, then we overwrite
         lib._tags = {}
         lib._order = []
-        for i, r in enumerate(records):
+        hues_used = 0
+        for r in records:
             color = r.get("color")
             if color is None:
-                color = cls._PALETTE[i % len(cls._PALETTE)]
+                if int(r["id"]) == cls.UNTAGGED_ID:
+                    color = cls._UNTAGGED_COLOR
+                else:
+                    color = cls._PALETTE[hues_used % len(cls._PALETTE)]
+            if int(r["id"]) != cls.UNTAGGED_ID:
+                hues_used += 1
             tag = Tag(
                 int(r["id"]),
                 str(r["name"]),
@@ -150,5 +160,5 @@ class TagLibrary:
             lib._order.append(tag.id)
         lib._untagged = lib._tags.get(cls.UNTAGGED_ID, lib._untagged)
         lib._next_id = int(next_id)
-        lib._next_palette_index = len(records)
+        lib._next_palette_index = hues_used
         return lib
