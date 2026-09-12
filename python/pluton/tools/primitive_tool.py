@@ -252,8 +252,17 @@ class PrimitiveTool(Tool):
             and self._first_corner is not None
             and self._preview_corner is not None
         ):
-            x0, y0 = float(self._first_corner[0]), float(self._first_corner[1])
-            x1, y1 = float(self._preview_corner[0]), float(self._preview_corner[1])
+            # Resolve in the same frame _commit_footprint will actually use --
+            # the active context's local ground plane (local Z=0) -- rather
+            # than a literal world Z=0, then transform back to world for
+            # display. Inside a group translated in Z, local Z=0 is not world
+            # Z=0, so a hardcoded 0.0 here would draw the rubber band on a
+            # different plane than where the primitive is about to land.
+            wt = self._world_transform()
+            p0 = world_to_local_point(self._first_corner, wt)
+            p1 = world_to_local_point(self._preview_corner, wt)
+            x0, y0 = float(p0[0]), float(p0[1])
+            x1, y1 = float(p1[0]), float(p1[1])
             segments = np.array(
                 [
                     [x0, y0, 0.0],
@@ -265,8 +274,11 @@ class PrimitiveTool(Tool):
                     [x0, y1, 0.0],
                     [x0, y0, 0.0],
                 ],
-                dtype=np.float32,
+                dtype=np.float64,
             )
+            if wt is not None and not is_identity_transform(wt):
+                segments = apply_mat(segments, wt)
+            segments = segments.astype(np.float32)
         elif self._state == _State.DRAGGING_HEIGHT:
             polygons = self._build_ghost_polygons()
             wt = self._world_transform()
