@@ -15,6 +15,7 @@ from __future__ import annotations
 
 from collections import namedtuple
 from collections.abc import Iterable, Sequence
+from dataclasses import dataclass
 from enum import Enum
 from typing import TYPE_CHECKING
 
@@ -45,6 +46,25 @@ class Side(Enum):
 
     FRONT = 0
     BACK = 1
+
+
+@dataclass(frozen=True, slots=True)
+class TexturePlacement:
+    """A face's override of its material's default texture projection.
+
+    `scale` is uniform: non-uniform sizing lives on the material, whose
+    `texture_size` already carries independent width and height in model units.
+    Applied as scale, then rotation, then offset, matching
+    viewport/uv_projection.apply_placement. That order is contractual.
+    """
+
+    offset_u: float = 0.0
+    offset_v: float = 0.0
+    scale: float = 1.0
+    rotation: float = 0.0
+
+
+DEFAULT_PLACEMENT = TexturePlacement()
 
 
 def _project_loop_to_2d_for_earcut(positions_3d: np.ndarray) -> np.ndarray:
@@ -110,6 +130,8 @@ class Scene:
         self._mesh = HalfEdgeMesh()
         self._face_materials_front: dict[int, int] = {}
         self._face_materials_back: dict[int, int] = {}
+        self._face_placements_front: dict[int, TexturePlacement] = {}
+        self._face_placements_back: dict[int, TexturePlacement] = {}
         self._render_dirty = False
 
     # --- Mutators ---------------------------------------------------------
@@ -246,6 +268,8 @@ class Scene:
         self._mesh.clear()
         self._face_materials_front.clear()
         self._face_materials_back.clear()
+        self._face_placements_front.clear()
+        self._face_placements_back.clear()
         self._render_dirty = True
 
     # --- Lifecycle (renderer sync) ----------------------------------------
@@ -523,6 +547,40 @@ class Scene:
         found = [(f, Side.FRONT) for f, m in self._face_materials_front.items() if m == material_id]
         found += [(f, Side.BACK) for f, m in self._face_materials_back.items() if m == material_id]
         return found
+
+    # --- Per-face texture placement sidecar --------------------------------
+
+    def _placements_for(self, side: Side) -> dict[int, TexturePlacement]:
+        return self._face_placements_back if side is Side.BACK else self._face_placements_front
+
+    def face_placement(self, f_id: int, side: Side = Side.FRONT) -> TexturePlacement:
+        """This face side's placement, or the identity if it was never adjusted."""
+        return self._placements_for(side).get(int(f_id), DEFAULT_PLACEMENT)
+
+    def set_face_placement(
+        self, f_id: int, placement: TexturePlacement, side: Side = Side.FRONT
+    ) -> None:
+        """Store an adjustment, or clear the entry if it is the identity.
+
+        The sidecars hold only adjusted faces, mirroring how painting Default
+        clears a material entry, which is what keeps faces_with_placement cheap
+        and the serialized form small.
+        """
+        if placement == DEFAULT_PLACEMENT:
+            self.clear_face_placement(f_id, side)
+            return
+        self._placements_for(side)[int(f_id)] = placement
+        self._render_dirty = True
+
+    def clear_face_placement(self, f_id: int, side: Side = Side.FRONT) -> None:
+        if self._placements_for(side).pop(int(f_id), None) is not None:
+            self._render_dirty = True
+
+    def faces_with_placement(self) -> list[tuple[int, Side]]:
+        """Every adjusted (face, side) pair. Never walks the mesh."""
+        pairs = [(f, Side.FRONT) for f in self._face_placements_front]
+        pairs += [(f, Side.BACK) for f in self._face_placements_back]
+        return pairs
 
     def face_triangle_materials(self, side: Side = Side.FRONT) -> np.ndarray:
         """Per-triangle material id, aligned 1:1 with face_triangle_buffer().
