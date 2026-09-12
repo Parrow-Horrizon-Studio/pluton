@@ -18,6 +18,8 @@ from pluton.viewport.camera import Camera
 from pluton.viewport.face_batches import FaceBatch, plan_face_batches
 from pluton.viewport.render_style import RenderStyle
 from pluton.viewport.scene_renderer import (
+    _FACE_VERTEX_BYTES,
+    _FACE_VERTEX_FLOATS,
     _LINE_UNIFORMS,
     _PHONG_UNIFORMS,
     _DefBuffers,
@@ -138,7 +140,7 @@ def stubbed_renderer(monkeypatch):
     r = SceneRenderer()
     calls = []
 
-    def fake_upload(definition, translucent_ids):
+    def fake_upload(definition, translucent_ids, model=None):
         calls.append(translucent_ids)
         return _DefBuffers(translucent_ids=translucent_ids)
 
@@ -249,12 +251,12 @@ def test_an_empty_suffix_rebuilds_to_no_batches():
 
 
 def _tri_rows(centroid_x: float) -> np.ndarray:
-    """Three interleaved (pos, normal) rows for a triangle centred at x."""
+    """Three interleaved (pos, normal, uv) rows for a triangle centred at x."""
     return np.array(
         [
-            [centroid_x, -0.5, 0.0, 0.0, 0.0, 1.0],
-            [centroid_x, 0.5, 0.0, 0.0, 0.0, 1.0],
-            [centroid_x, 0.0, 0.5, 0.0, 0.0, 1.0],
+            [centroid_x, -0.5, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0],
+            [centroid_x, 0.5, 0.0, 0.0, 0.0, 1.0, 1.0, 0.0],
+            [centroid_x, 0.0, 0.5, 0.0, 0.0, 1.0, 0.0, 1.0],
         ],
         dtype=np.float32,
     )
@@ -272,7 +274,7 @@ _TRANSLUCENT_FIRST = _OPAQUE_TRIS * 3
 
 
 def _suffix_buffer() -> _DefBuffers:
-    opaque = np.zeros((_TRANSLUCENT_FIRST, 6), dtype=np.float32)
+    opaque = np.zeros((_TRANSLUCENT_FIRST, _FACE_VERTEX_FLOATS), dtype=np.float32)
     opaque[:, 0] = -99.0  # sentinel: the prefix must never be re-uploaded
     suffix = np.concatenate([_tri_rows(_SUFFIX_X[i]) for i in range(4)], axis=0)
     interleaved = np.concatenate([opaque, suffix], axis=0)
@@ -305,9 +307,9 @@ def test_sorting_uploads_only_the_suffix_back_to_front(captured_gl):
     assert len(captured_gl) == 1
     offset, size, data = captured_gl[0]
     # Offset and size are the suffix alone: the opaque prefix is untouched.
-    assert offset == _TRANSLUCENT_FIRST * 6 * 4
-    assert size == 12 * 6 * 4
-    rows = data.reshape(-1, 6)
+    assert offset == _TRANSLUCENT_FIRST * _FACE_VERTEX_BYTES
+    assert size == 12 * _FACE_VERTEX_BYTES
+    rows = data.reshape(-1, _FACE_VERTEX_FLOATS)
     assert rows.shape[0] == 12
     assert not np.any(rows[:, 0] == -99.0)
     # Farthest first from a camera at x = -10 means descending x.
@@ -325,7 +327,7 @@ def test_the_rebuilt_batches_match_the_materials_of_what_was_uploaded(captured_g
     buf = _suffix_buffer()
     r._sort_translucent_slice(buf, _identity(), np.array([-10.0, 0.0, 0.0]))
 
-    rows = captured_gl[0][2].reshape(-1, 6)
+    rows = captured_gl[0][2].reshape(-1, _FACE_VERTEX_FLOATS)
     assert len(buf.translucent_draw_batches) == 4  # fully interleaved
     for batch in buf.translucent_draw_batches:
         lo = batch.first - _TRANSLUCENT_FIRST
@@ -353,7 +355,7 @@ def test_moving_the_camera_re_sorts_and_re_uploads(captured_gl):
     r._sort_translucent_slice(buf, _identity(), np.array([-10.0, 0.0, 0.0]))
     r._sort_translucent_slice(buf, _identity(), np.array([+10.0, 0.0, 0.0]))
     assert len(captured_gl) == 2
-    near_side = captured_gl[1][2].reshape(-1, 6)
+    near_side = captured_gl[1][2].reshape(-1, _FACE_VERTEX_FLOATS)
     assert [float(near_side[3 * i, 0]) for i in range(4)] == [0.0, 1.0, 2.0, 3.0]
 
 
@@ -367,8 +369,8 @@ def test_moving_the_definition_re_sorts_and_re_uploads(captured_gl):
     r._sort_translucent_slice(buf, _translate(+100.0), camera)
     assert len(captured_gl) == 2
     # Mirrored across the camera, so the depth order flips.
-    first = [float(captured_gl[0][2].reshape(-1, 6)[3 * i, 0]) for i in range(4)]
-    second = [float(captured_gl[1][2].reshape(-1, 6)[3 * i, 0]) for i in range(4)]
+    first = [float(captured_gl[0][2].reshape(-1, _FACE_VERTEX_FLOATS)[3 * i, 0]) for i in range(4)]
+    second = [float(captured_gl[1][2].reshape(-1, _FACE_VERTEX_FLOATS)[3 * i, 0]) for i in range(4)]
     assert first == list(reversed(second))
 
 
@@ -376,7 +378,7 @@ def test_a_definition_with_no_translucent_faces_uploads_nothing(captured_gl):
     r = SceneRenderer()
     plan = plan_face_batches([1, 1], [0, 0], frozenset())
     buf = _DefBuffers(face_vbo=1, plan=plan)
-    _reset_translucent_state(buf, plan, np.zeros((6, 6), dtype=np.float32))
+    _reset_translucent_state(buf, plan, np.zeros((6, _FACE_VERTEX_FLOATS), dtype=np.float32))
     r._sort_translucent_slice(buf, _identity(), np.array([1.0, 2.0, 3.0]))
     assert captured_gl == []
 
@@ -406,7 +408,7 @@ def test_an_all_opaque_definition_keeps_no_cpu_copy_of_its_faces():
     # stores the array unconditionally.
     plan = plan_face_batches([1, 2], [0, 0], frozenset())
     buf = _DefBuffers()
-    _reset_translucent_state(buf, plan, np.ones((6, 6), dtype=np.float32))
+    _reset_translucent_state(buf, plan, np.ones((6, _FACE_VERTEX_FLOATS), dtype=np.float32))
     assert buf.face_interleaved.shape[0] == 0
 
 
@@ -601,7 +603,7 @@ class _Harness:
         assert len(self.gl.sub_data) == 1, (
             f"expected one translucent suffix upload, got {len(self.gl.sub_data)}"
         )
-        rows = self.gl.sub_data[0][1].reshape(-1, 6)
+        rows = self.gl.sub_data[0][1].reshape(-1, _FACE_VERTEX_FLOATS)
         return [float(rows[3 * i, 0]) for i in range(rows.shape[0] // 3)]
 
 

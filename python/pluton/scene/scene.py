@@ -598,6 +598,21 @@ class Scene:
             f = self._mesh.next_live_face(f + 1)
         return np.asarray(mats, dtype=np.int64)
 
+    def face_triangle_face_ids(self) -> np.ndarray:
+        """Per-triangle owning face id, aligned 1:1 with face_triangle_buffer().
+
+        Same next_live_face walk as face_triangle_materials, which is the exact
+        order the C++ face_triangle_buffer uses. Texture UVs are built per face,
+        so this is how a triangle finds the face whose plane it was projected on.
+        """
+        ids: list[int] = []
+        f = self._mesh.next_live_face(0)
+        while f != HalfEdgeMesh.INVALID_ID:
+            n_tris = len(self._mesh.face_triangles(f)) // 3
+            ids.extend([f] * n_tris)
+            f = self._mesh.next_live_face(f + 1)
+        return np.asarray(ids, dtype=np.int64)
+
     # --- Render-buffer projection -----------------------------------------
 
     def edge_line_buffer(self) -> np.ndarray:

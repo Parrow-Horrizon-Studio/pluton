@@ -17,7 +17,7 @@ import numpy as np
 from OpenGL import GL
 
 from pluton.geometry.transforms import apply_mat, is_identity_transform
-from pluton.scene.scene import Side
+from pluton.scene.scene import DEFAULT_PLACEMENT, Side
 from pluton.viewport.camera import Camera
 from pluton.viewport.face_batches import BatchPlan, FaceBatch, plan_face_batches
 from pluton.viewport.render_style import (
@@ -35,6 +35,7 @@ from pluton.viewport.translucency import (
     triangle_centroids,
     triangle_order_to_vertex_order,
 )
+from pluton.viewport.uv_projection import apply_placement, project_corners
 
 
 def definition_is_dimmed(definition, model) -> bool:
@@ -186,11 +187,16 @@ def _empty_batch_plan() -> BatchPlan:
     return plan_face_batches([], [])
 
 
-# The face VBO's interleaved layout: (pos.xyz, normal.xyz) float32 per vertex.
-# _alloc_def_buffers' vertex-attribute stride and _sort_translucent_slice's
-# glBufferSubData byte offset are the same number, so they share one constant
-# rather than each hard-coding 24 and drifting apart.
-_FACE_VERTEX_FLOATS = 6
+# The face VBO's interleaved layout: (pos.xyz, normal.xyz, uv.xy) float32 per
+# vertex. _alloc_def_buffers' vertex-attribute stride and
+# _sort_translucent_slice's glBufferSubData byte offset are the same number, so
+# they share one constant rather than each hard-coding 32 and drifting apart.
+#
+# M7.5b: every face vertex carries a UV whether or not anything in the document
+# is textured (spec section 6). The alternative — two vertex formats chosen per
+# definition — puts a branch in the renderer's hottest path, so the untextured
+# case pays the 8 bytes deliberately.
+_FACE_VERTEX_FLOATS = 8
 _FACE_VERTEX_BYTES = _FACE_VERTEX_FLOATS * 4
 
 
@@ -216,6 +222,10 @@ class _DefBuffers:
     # material's alpha dirties no mesh, so this is the only thing that can tell
     # the renderer its opaque/translucent partition has gone stale (spec 1.7).
     translucent_ids: frozenset[int] = frozenset()
+    # M7.5b: the same asymmetry one level down. UVs are baked into the face VBO
+    # from each material's texture_size, which lives on the MaterialLibrary, so
+    # resizing a texture dirties no mesh either. See uv_material_key.
+    uv_key: tuple = ()
 
     # --- Task 7: state the translucent pass re-sorts each frame -------------
     #
@@ -273,6 +283,121 @@ class _DefBuffers:
 # per-side behaviour actually lives, and the fragment shader it feeds cannot
 # be unit-tested. Keeping this importable without a GL context or a
 # QApplication is what makes the shading testable at all.
+
+
+# --- M7.5b Task 4: the UV vertex attribute ----------------------------------
+#
+# GL-free and module-level for the same reason as the block above: a face's UVs
+# are computed entirely on the CPU at upload time, and a misaligned UV array
+# produces scrambled texturing rather than an exception, so it has to be
+# testable without a GL context or a QApplication.
+
+
+def _face_corner_runs(face_ids: np.ndarray) -> list[tuple[int, int, int]]:
+    """(face_id, first_corner, corner_count) for each face, in walk order.
+
+    face_ids comes from Scene.face_triangle_face_ids, which repeats each id by
+    the face's triangle count in next_live_face order — so a face's triangles
+    are always one contiguous run. Reading the runs off directly keeps the walk
+    order (which is what the position buffer is in) and is linear, where
+    de-duplicating the ids and counting matches per face would be quadratic.
+    """
+    n = int(face_ids.shape[0])
+    if n == 0:
+        return []
+    cuts = np.flatnonzero(face_ids[1:] != face_ids[:-1]) + 1
+    starts = np.concatenate(([0], cuts))
+    ends = np.concatenate((cuts, [n]))
+    return [
+        (int(face_ids[s]), int(s) * 3, (int(e) - int(s)) * 3)
+        for s, e in zip(starts, ends, strict=True)
+    ]
+
+
+def build_face_uvs(scene, model, side: Side = Side.FRONT) -> np.ndarray:
+    """(3T, 2) per-corner UVs for one side of a definition's faces.
+
+    Walks faces in the same next_live_face order face_triangle_buffer uses, so
+    the result is aligned corner for corner with the position buffer. Faces with
+    no texture still get UVs; they are simply never sampled.
+    """
+    positions, _ = scene.face_triangle_buffer()
+    positions = np.asarray(positions, dtype=np.float64).reshape(-1, 3)
+    if positions.shape[0] == 0:
+        return np.zeros((0, 2), dtype=np.float32)
+
+    materials = getattr(model, "materials", None)
+    out = np.zeros((positions.shape[0], 2), dtype=np.float32)
+
+    for f_id, first, count in _face_corner_runs(scene.face_triangle_face_ids()):
+        size = (1.0, 1.0)
+        if materials is not None:
+            size = materials.get(scene.face_material(f_id, side)).texture_size
+
+        uvs = project_corners(
+            positions[first : first + count],
+            np.asarray(scene.face_normal(f_id), dtype=np.float64),
+            np.asarray(scene.face_center(f_id), dtype=np.float64),
+            size,
+        )
+        placement = scene.face_placement(f_id, side)
+        if placement != DEFAULT_PLACEMENT:
+            uvs = apply_placement(
+                uvs,
+                placement.offset_u,
+                placement.offset_v,
+                placement.scale,
+                placement.rotation,
+            )
+        out[first : first + count] = uvs
+    return out
+
+
+def uv_material_key(scene, model, side: Side = Side.FRONT) -> tuple:
+    """The material state the baked UVs depend on, for change detection.
+
+    UVs are baked into the vertex buffer, but texture_id and texture_size live
+    on the MaterialLibrary rather than the Scene, so editing either dirties no
+    mesh. Without this snapshot the buffer would keep tiling at the old size
+    and the edit would look inert — the same asymmetry that spec 1.7's
+    translucent_ids exists for.
+
+    Only texture_id and texture_size matter: a colour, alpha, metallic or
+    roughness edit changes uniforms read per batch at draw time and needs no
+    re-upload. Including them would re-upload every definition on every colour
+    tweak, rebuilding visible geometry while the user drags a colour picker.
+    """
+    materials = getattr(model, "materials", None)
+    if materials is None:
+        return ()
+    key = []
+    for mid in sorted({int(m) for m in scene.face_triangle_materials(side).tolist()}):
+        mat = materials.get(mid)
+        key.append((mid, mat.texture_id, tuple(mat.texture_size)))
+    return tuple(key)
+
+
+def uv_key_still_matches(key: tuple, model) -> bool:
+    """Does `key` still describe the library's texture state?
+
+    The per-frame half of uv_material_key, and deliberately not a second
+    mechanism: it re-reads the very materials the key already names. Re-deriving
+    the whole key each frame would mean walking every triangle of every visible
+    definition on every frame — face_triangle_materials measures ~3.5 ms for a
+    10k-face definition, a fifth of a 60 fps budget for one definition alone.
+
+    A material entering the scene that the key does not name can only happen by
+    painting a face, which marks the scene render-dirty and re-uploads anyway,
+    so scanning only the named materials misses nothing.
+    """
+    materials = getattr(model, "materials", None)
+    if materials is None:
+        return not key
+    for mid, texture_id, texture_size in key:
+        mat = materials.get(mid)
+        if mat.texture_id != texture_id or tuple(mat.texture_size) != texture_size:
+            return False
+    return True
 
 
 def _translucent_ids(materials) -> frozenset[int]:
@@ -859,7 +984,7 @@ class SceneRenderer:
             #
             # Pass 1: every definition's opaque batches, plus its edges.
             for definition, world, tag_id in visible:
-                buf = self._ensure_buffers(definition, translucent_ids)
+                buf = self._ensure_buffers(definition, translucent_ids, model)
                 model_mat = world.astype(np.float32)
                 # Task 15: dim pass — dim anything that is NOT the active context.
                 # At root (active_path is empty), nothing is dimmed.
@@ -1030,7 +1155,7 @@ class SceneRenderer:
         """Allocate a new _DefBuffers: create empty VAO+VBO pairs for faces and edges."""
         buf = _DefBuffers()
 
-        # Face buffers — interleaved (pos.xyz, normal.xyz), 24 bytes per vertex
+        # Face buffers — interleaved (pos.xyz, normal.xyz, uv.xy), 32 bytes per vertex
         buf.face_vao = int(GL.glGenVertexArrays(1))
         buf.face_vbo = int(GL.glGenBuffers(1))
         GL.glBindVertexArray(buf.face_vao)
@@ -1042,6 +1167,10 @@ class SceneRenderer:
             1, 3, GL.GL_FLOAT, GL.GL_FALSE, _FACE_VERTEX_BYTES, ctypes.c_void_p(12)
         )
         GL.glEnableVertexAttribArray(1)
+        GL.glVertexAttribPointer(
+            2, 2, GL.GL_FLOAT, GL.GL_FALSE, _FACE_VERTEX_BYTES, ctypes.c_void_p(24)
+        )
+        GL.glEnableVertexAttribArray(2)
         GL.glBindVertexArray(0)
 
         # Edge buffers — interleaved (pos.xyz, color.rgb), 24 bytes per vertex
@@ -1148,7 +1277,9 @@ class SceneRenderer:
         GL.glBindVertexArray(0)
         GL.glUseProgram(0)
 
-    def _ensure_buffers(self, definition, translucent_ids: frozenset[int]) -> _DefBuffers:
+    def _ensure_buffers(
+        self, definition, translucent_ids: frozenset[int], model=None
+    ) -> _DefBuffers:
         """The cached buffers for `definition`, re-uploading them if stale.
 
         Lifted out of the draw loop because pass 1 and pass 2 both need it and
@@ -1164,10 +1295,20 @@ class SceneRenderer:
         did nothing. Comparing the whole set rather than tracking a per-material
         boundary crossing is deliberate: it catches a material being added,
         removed, or edited in either direction, and the set is a handful of ints.
+
+        M7.5b adds a third cause of the same shape: the per-corner UVs are baked
+        into the vertex buffer from each material's texture_size, which also
+        lives on the library, so resizing a texture dirties no mesh and would
+        otherwise go on tiling at the old size.
         """
         buf = self._def_buffers.get(id(definition))
-        if buf is None or definition.mesh.dirty or buf.translucent_ids != translucent_ids:
-            buf = self._upload_definition(definition, translucent_ids)
+        if (
+            buf is None
+            or definition.mesh.dirty
+            or buf.translucent_ids != translucent_ids
+            or not uv_key_still_matches(buf.uv_key, model)
+        ):
+            buf = self._upload_definition(definition, translucent_ids, model)
             definition.mesh.mark_clean()
             self._def_buffers[id(definition)] = buf
         return buf
@@ -1206,7 +1347,9 @@ class SceneRenderer:
         )
         buf.translucent_sort_key = key
 
-    def _upload_definition(self, definition, translucent_ids: frozenset[int]) -> _DefBuffers:
+    def _upload_definition(
+        self, definition, translucent_ids: frozenset[int], model=None
+    ) -> _DefBuffers:
         """Build or update GL buffers for a single definition's mesh.
 
         Looks up (or allocates) a _DefBuffers entry for this definition,
@@ -1218,6 +1361,10 @@ class SceneRenderer:
         classify a batch as translucent. Passed in rather than derived from the
         model here because _ensure_buffers also compares it against the set the
         buffer was last built under, and both must see exactly the same value.
+
+        `model` supplies the material library the per-corner UVs are projected
+        through. Optional so the renderer still uploads sane (identity-sized)
+        UVs for a definition with no model behind it.
         """
         # Re-use existing GL objects if we already have them; allocate if not.
         buf = self._def_buffers.get(id(definition))
@@ -1226,10 +1373,14 @@ class SceneRenderer:
 
         scene = definition.mesh
 
-        # Faces: (3*T, 3) positions + (3*T, 3) normals -> interleaved (3*T, 6)
+        # Faces: (3*T, 3) positions + (3*T, 3) normals + (3*T, 2) UVs
+        # -> interleaved (3*T, 8). build_face_uvs walks faces in the same
+        # next_live_face order face_triangle_buffer does, so the three blocks
+        # are aligned corner for corner before plan.vertex_order permutes them.
         positions, normals = scene.face_triangle_buffer()
         if positions.shape[0] > 0:
-            interleaved = np.concatenate([positions, normals], axis=1).astype(np.float32)
+            uvs = build_face_uvs(scene, model, Side.FRONT)
+            interleaved = np.concatenate([positions, normals, uvs], axis=1).astype(np.float32)
             # Group triangles by (front, back) material so each pair draws as one
             # contiguous batch, with the translucent pairs as a contiguous suffix
             # that render()'s second pass depth-sorts.
@@ -1247,6 +1398,7 @@ class SceneRenderer:
             buf.face_count = 0
             buf.plan = plan
         buf.translucent_ids = translucent_ids
+        buf.uv_key = uv_material_key(scene, model)
         _reset_translucent_state(buf, plan, interleaved)
 
         # Edges: (2*E, 3) positions — pack constant color per vertex so the
