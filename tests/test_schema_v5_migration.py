@@ -161,15 +161,27 @@ def test_a_hand_crafted_v6_0_shaped_document_opens_through_the_real_container(tm
     pluton_file.py are byte-identical between the v0.6.0 tag and this
     milestone's starting point -- Tasks 1/3/11 touched material.py, scene.py
     and tag.py only -- so a hand-built document matching exactly what
-    v0.6.0's to_records()/geometry_to_dict() wrote, pushed through the REAL
-    zip+manifest+json container and the CURRENT load_document, exercises the
-    same code path a genuine old file would.
+    v0.6.0's to_records()/geometry_to_dict()/ViewLibrary.to_records()/
+    render_style_to_dict() wrote, pushed through the REAL zip+manifest+json
+    container and the CURRENT load_document, exercises the same code path a
+    genuine old file would.
+
+    Includes real top-level "scenes" and "style" keys, shaped exactly as
+    v0.6.0's document_to_dict() unconditionally wrote them (confirmed via
+    `git show v0.6.0:python/pluton/io/document_codec.py`): one saved Scene
+    from ViewLibrary.to_records() and a non-default RenderStyle from
+    render_style_to_dict(). A fixture omitting those keys is not a faithful
+    v0.6.0 shape -- it only happens to load because document_from_dict()'s
+    `.get("scenes", {})` / `.get("style")` tolerance for their absence
+    predates this milestone and is unrelated to what Task 12 changed; that
+    tolerance is not what this test is exercising or asserting on.
 
     Checks every field the migration is supposed to populate, including the
     ones whose correct value is a default: a loader that silently drops
     back-side materials and one that correctly writes none are
     indistinguishable unless a back side is asserted explicitly (it is,
-    below: Default on both faces)."""
+    below: Default on both faces). The scenes/style values are likewise
+    asserted below, not just carried as inert payload."""
     import json
     import zipfile
 
@@ -207,6 +219,29 @@ def test_a_hand_crafted_v6_0_shaped_document_opens_through_the_real_container(tm
                 {"id": 1, "name": "Interior", "visible": True},
             ],
         },
+        # document_to_dict() at v0.6.0 wrote "scenes" and "style"
+        # unconditionally -- a genuine v0.6.0 document.json always has both.
+        # Shapes below match ViewLibrary.to_records() / render_style_to_dict()
+        # at that tag exactly (both unchanged by this milestone).
+        "scenes": {
+            "next_id": 1,
+            "items": [
+                {
+                    "id": 0,
+                    "name": "Front View",
+                    "camera": {
+                        "position": [0.0, 0.0, 5.0],
+                        "target": [0.0, 0.0, 0.0],
+                        "up": [0.0, 1.0, 0.0],
+                        "fov_y_deg": 35.0,
+                    },
+                    "tag_visibility": {"1": False},
+                    "face_style": "WIREFRAME",
+                    "xray": True,
+                },
+            ],
+        },
+        "style": {"face_style": "HIDDEN_LINE", "xray": True},
         "model": {
             "next_def_id": 1,
             "next_inst_id": 0,
@@ -261,3 +296,21 @@ def test_a_hand_crafted_v6_0_shaped_document_opens_through_the_real_container(tm
     fid = next(iter(loaded.model.root.mesh.faces_iter())).id
     assert loaded.model.root.mesh.face_material(fid, Side.FRONT) == 1
     assert loaded.model.root.mesh.face_material(fid, Side.BACK) == 0
+
+    # Scenes: the one saved Scene from the v0.6.0-shaped "scenes" key
+    # survives the load intact -- not merely tolerated as absent.
+    view = loaded.model.views.get(0)
+    assert view is not None
+    assert view.name == "Front View"
+    assert view.camera.position == (0.0, 0.0, 5.0)
+    assert view.tag_visibility == {1: False}
+    assert view.face_style == "WIREFRAME"
+    assert view.xray is True
+
+    # Style: the document-level render style from the v0.6.0-shaped "style"
+    # key survives the load intact, and is not the RenderStyle() default
+    # (SHADED/xray=False) that render_style_from_dict() falls back to when
+    # "style" is absent -- so this genuinely checks the value was read, not
+    # just that the default happens to match.
+    assert loaded.style.face_style.name == "HIDDEN_LINE"
+    assert loaded.style.xray is True
