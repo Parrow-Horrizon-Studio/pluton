@@ -1,8 +1,14 @@
-"""Group a definition's triangles by material into contiguous draw batches (M5b).
+"""Group a definition's triangles by (front, back) material into draw batches.
 
-Pure Python + numpy — no GL — so it is fully unit-testable headlessly. The
-renderer reorders its interleaved face VBO by `vertex_order` so each material's
-triangles are contiguous, then issues one glDrawArrays per FaceBatch.
+M5b introduced single-material batching; M7.5a Task 4 generalizes it to a
+(front, back) material pair per triangle (SketchUp-style two-sided faces) and
+splits translucent triangles into a separate, contiguous suffix so the
+renderer can draw them in a later depth-sorted pass (Task 5/6).
+
+Pure Python + numpy — no GL, no `pluton.model` — so it is fully unit-testable
+headlessly. The renderer reorders its interleaved face VBO by `vertex_order`
+so each (front, back) pair's triangles are contiguous, then issues one
+glDrawArrays per FaceBatch.
 """
 
 from __future__ import annotations
@@ -15,43 +21,84 @@ import numpy as np
 
 @dataclass(frozen=True, slots=True)
 class FaceBatch:
-    """A contiguous run of same-material vertices in the (reordered) face VBO."""
+    """A contiguous run of same-(front, back)-material vertices in the VBO."""
 
-    material_id: int
+    front_material_id: int
+    back_material_id: int
     first: int  # first vertex index
     count: int  # vertex count (a multiple of 3)
 
 
+@dataclass(frozen=True, slots=True)
+class BatchPlan:
+    """The reordering and the two batch lists it produces."""
+
+    vertex_order: np.ndarray
+    opaque: list[FaceBatch]
+    translucent: list[FaceBatch]
+    translucent_first: int
+
+
+_ID_BITS = 20  # material ids are monotonic and small; 1M per side is ample
+
+
 def plan_face_batches(
-    triangle_material_ids: Sequence[int],
-) -> tuple[np.ndarray, list[FaceBatch]]:
-    """Stable-sort triangles by material id into contiguous batches.
+    front_ids: Sequence[int],
+    back_ids: Sequence[int],
+    translucent_mids: frozenset[int] = frozenset(),
+) -> BatchPlan:
+    """Stable-sort triangles by (is_translucent, front, back) into batches.
 
     Args:
-        triangle_material_ids: material id of each triangle, length T, in
-            face-VBO order (e.g. Scene.face_triangle_materials()).
+        front_ids: front-side material id of each triangle, length T, in
+            face-VBO order (e.g. Scene.face_triangle_materials(Side.FRONT)).
+        back_ids: back-side material id of each triangle, same length and
+            order (e.g. Scene.face_triangle_materials(Side.BACK)).
+        translucent_mids: material ids that are translucent (Material.alpha
+            < 1.0). A triangle is translucent when EITHER of its side
+            materials is (spec D5).
 
-    Returns:
-        vertex_order: int64 permutation of 0..3T-1 to apply to the (3T, .)
-            vertex arrays so each material's triangles are contiguous. Identity
-            when triangles are already grouped (e.g. all one material).
-        batches: one FaceBatch per distinct material, ascending by material id.
-            Empty when T == 0.
+    Because translucency leads the key, translucent triangles land as a
+    contiguous suffix of `vertex_order`, starting at `translucent_first`.
+    Task 5 re-permutes only that range and Task 6 re-uploads only that slice,
+    so the suffix property is load-bearing rather than incidental.
     """
-    tri_mats = np.asarray(triangle_material_ids, dtype=np.int64)
-    t = int(tri_mats.shape[0])
+    front = np.asarray(front_ids, dtype=np.int64)
+    back = np.asarray(back_ids, dtype=np.int64)
+    t = int(front.shape[0])
+    if int(back.shape[0]) != t:
+        raise ValueError(f"front/back length mismatch: {t} vs {int(back.shape[0])}")
     if t == 0:
-        return np.zeros(0, dtype=np.int64), []
+        return BatchPlan(np.zeros(0, dtype=np.int64), [], [], 0)
 
-    tri_order = np.argsort(tri_mats, kind="stable")  # stable: keeps in-group order
-    sorted_mats = tri_mats[tri_order]
+    if translucent_mids:
+        tl = np.fromiter(translucent_mids, dtype=np.int64, count=len(translucent_mids))
+        is_tl = np.isin(front, tl) | np.isin(back, tl)
+    else:
+        is_tl = np.zeros(t, dtype=bool)
+
+    key = (is_tl.astype(np.int64) << (2 * _ID_BITS)) | (front << _ID_BITS) | back
+    tri_order = np.argsort(key, kind="stable")
     vertex_order = (tri_order[:, None] * 3 + np.arange(3)).reshape(-1).astype(np.int64)
 
-    batches: list[FaceBatch] = []
-    uniq, starts = np.unique(sorted_mats, return_index=True)  # ascending mat id, group starts
-    for k, mid in enumerate(uniq):
+    sorted_key = key[tri_order]
+    sorted_front = front[tri_order]
+    sorted_back = back[tri_order]
+    sorted_tl = is_tl[tri_order]
+
+    opaque: list[FaceBatch] = []
+    translucent: list[FaceBatch] = []
+    _, starts = np.unique(sorted_key, return_index=True)
+    for k in range(len(starts)):
         tri_start = int(starts[k])
         tri_end = int(starts[k + 1]) if k + 1 < len(starts) else t
-        n_tris = tri_end - tri_start
-        batches.append(FaceBatch(material_id=int(mid), first=tri_start * 3, count=n_tris * 3))
-    return vertex_order, batches
+        batch = FaceBatch(
+            front_material_id=int(sorted_front[tri_start]),
+            back_material_id=int(sorted_back[tri_start]),
+            first=tri_start * 3,
+            count=(tri_end - tri_start) * 3,
+        )
+        (translucent if bool(sorted_tl[tri_start]) else opaque).append(batch)
+
+    translucent_first = translucent[0].first if translucent else t * 3
+    return BatchPlan(vertex_order, opaque, translucent, translucent_first)
