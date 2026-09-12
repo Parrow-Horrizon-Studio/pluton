@@ -185,7 +185,7 @@ class LineTool(Tool):
         v_cmd = AddVertexCommand(target_local)
         v_cmd.do(s)
         self._composite.children.append(v_cmd)
-        new_vid = v_cmd._vertex_id  # type: ignore[attr-defined]
+        new_vid = v_cmd.vertex_id
         e_cmd = AddEdgeCommand(self._gesture_vertex_ids[-1], new_vid)
         e_cmd.do(s)
         self._composite.children.append(e_cmd)
@@ -314,7 +314,7 @@ class LineTool(Tool):
         local = world_to_local_point(snap.world_position, self._world_transform())
         cmd = AddVertexCommand(local)
         cmd.do(scene)
-        return cmd._vertex_id, cmd  # type: ignore[attr-defined]
+        return cmd.vertex_id, cmd
 
     def _reset_gesture(self) -> None:
         self._state = _State.IDLE

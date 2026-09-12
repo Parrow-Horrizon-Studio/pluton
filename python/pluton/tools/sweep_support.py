@@ -30,7 +30,8 @@ class LoftResult:
     """Commands already executed against the scene, plus the ids they created.
 
     `dst_vertex_ids` is parallel to the `src_loop_vids` passed in. Returning
-    it is what lets callers stop reading AddVertexCommand._vertex_id.
+    it is what lets callers avoid re-deriving the ids from the executed
+    commands themselves.
     """
 
     commands: list
@@ -70,11 +71,7 @@ def loft_between_loops(
         c.do(scene)
         dst_vert_cmds.append(c)
         commands.append(c)
-    # AddVertexCommand has no public accessor for the id it allocated (kept
-    # private per this milestone's resolution: scene_commands.py is touched
-    # by other tasks and widening its API is out of scope). This matches the
-    # shipped Push/Pull code's own reach-in.
-    dst_vids = [c._vertex_id for c in dst_vert_cmds]  # type: ignore[attr-defined]
+    dst_vids = [c.vertex_id for c in dst_vert_cmds]
 
     for src_vid, dst_vid in zip(src_loop_vids, dst_vids, strict=True):
         c = AddEdgeCommand(src_vid, dst_vid)

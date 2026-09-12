@@ -32,6 +32,11 @@ class AddVertexCommand(Command):
         self._vertex_id: int | None = None
         self._created = False
 
+    @property
+    def vertex_id(self) -> int | None:
+        """The vertex this command created or resolved onto; None before do()."""
+        return self._vertex_id
+
     def do(self, scene) -> None:
         if self._vertex_id is None:
             # First execution — allocate a new slot, or dedup onto an existing one.

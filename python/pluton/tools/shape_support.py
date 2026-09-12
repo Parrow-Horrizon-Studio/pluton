@@ -50,7 +50,7 @@ def _resolve_vertex(scene, composite: CompositeCommand, point: np.ndarray) -> in
     cmd = AddVertexCommand(p)
     cmd.do(scene)
     composite.children.append(cmd)
-    return cmd._vertex_id  # type: ignore[attr-defined]
+    return cmd.vertex_id
 
 
 def _resolve_ring(scene, composite, world_points):

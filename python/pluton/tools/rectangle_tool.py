@@ -203,7 +203,7 @@ class RectangleTool(Tool):
         for c in v_cmds:
             c.do(s)
             composite.children.append(c)
-        vids = [c._vertex_id for c in v_cmds]  # type: ignore[attr-defined]
+        vids = [c.vertex_id for c in v_cmds]
         for a, b in [(0, 1), (1, 2), (2, 3), (3, 0)]:
             e_cmd = AddEdgeCommand(vids[a], vids[b])
             e_cmd.do(s)

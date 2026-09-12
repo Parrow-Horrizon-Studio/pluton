@@ -98,10 +98,7 @@ def build_mesh_into_scene(mesh, scene, transform: np.ndarray | None = None) -> l
             v_cmd = AddVertexCommand(pos.astype(np.float32))
             v_cmd.do(scene)
             commands.append(v_cmd)
-            # AddVertexCommand has no public accessor for the id it allocated
-            # (kept private per this milestone's resolution -- see the same
-            # reach-in, with the same rationale, in sweep_support.loft_between_loops).
-            vertex_map[src_v] = v_cmd._vertex_id  # type: ignore[attr-defined]
+            vertex_map[src_v] = v_cmd.vertex_id
             src_v = mesh.next_live_vertex(src_v + 1)
 
         src_f = mesh.next_live_face(0)
