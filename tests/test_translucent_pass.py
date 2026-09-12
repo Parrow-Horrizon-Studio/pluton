@@ -602,6 +602,9 @@ class _Harness:
             self.model.materials,
             RenderStyle(),
             dimmed=False,
+            translucent_ids=scene_renderer._translucent_ids(
+                self.model.materials, self.model.textures
+            ),
         )
         return front.diffuse
 

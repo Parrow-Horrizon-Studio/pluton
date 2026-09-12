@@ -31,6 +31,18 @@ def _lib():
     return lib, red.id, blue.id
 
 
+def _ids(lib) -> frozenset[int]:
+    """The library's translucent set, computed the way render() computes it.
+
+    resolve_batch_sides requires it (M7.5b Task 6): a cutout texture is
+    translucent in a way the material's own alpha cannot show, so the set is
+    the only thing that can tell the resolver to blend. None of the fixtures
+    here is textured, so this is just the alpha-driven set these tests always
+    had implicitly.
+    """
+    return sr._translucent_ids(lib, None)
+
+
 def _declared_uniforms(shader: str) -> set[str]:
     return set(_UNIFORM_DECL.findall(_load_shader_source(shader)))
 
@@ -43,7 +55,7 @@ def test_the_two_sides_resolve_to_different_diffuse():
     lib, red, blue = _lib()
     batch = FaceBatch(front_material_id=red, back_material_id=blue, first=0, count=3)
     front, back = resolve_batch_sides(
-        batch, lib, RenderStyle(face_style=FaceStyle.SHADED), dimmed=False
+        batch, lib, RenderStyle(face_style=FaceStyle.SHADED), dimmed=False, translucent_ids=_ids(lib)
     )
     assert front.diffuse != back.diffuse
     assert front.diffuse[0] > front.diffuse[2]  # red-dominant
@@ -54,7 +66,7 @@ def test_an_unpainted_back_uses_the_back_default_not_the_front_default():
     lib, red, _ = _lib()
     batch = FaceBatch(front_material_id=red, back_material_id=0, first=0, count=3)
     front, back = resolve_batch_sides(
-        batch, lib, RenderStyle(face_style=FaceStyle.SHADED), dimmed=False
+        batch, lib, RenderStyle(face_style=FaceStyle.SHADED), dimmed=False, translucent_ids=_ids(lib)
     )
     # The back must be the distinct blue-grey, not the front's red and not the
     # front default. A resolver that ignored side entirely would fail here.
@@ -66,7 +78,7 @@ def test_both_sides_unpainted_still_differ():
     lib, _, _ = _lib()
     batch = FaceBatch(front_material_id=0, back_material_id=0, first=0, count=3)
     front, back = resolve_batch_sides(
-        batch, lib, RenderStyle(face_style=FaceStyle.SHADED), dimmed=False
+        batch, lib, RenderStyle(face_style=FaceStyle.SHADED), dimmed=False, translucent_ids=_ids(lib)
     )
     assert front.diffuse != pytest.approx(back.diffuse)
 
@@ -76,7 +88,7 @@ def test_a_translucent_side_makes_the_whole_batch_blend():
     lib.edit(blue, alpha=0.3)
     batch = FaceBatch(front_material_id=red, back_material_id=blue, first=0, count=3)
     front, back = resolve_batch_sides(
-        batch, lib, RenderStyle(face_style=FaceStyle.SHADED), dimmed=False
+        batch, lib, RenderStyle(face_style=FaceStyle.SHADED), dimmed=False, translucent_ids=_ids(lib)
     )
     # blend and depth_write are per-BATCH, taken from whichever side is more
     # translucent (correction 4), so the opaque front reports them too.
@@ -94,7 +106,7 @@ def test_an_all_opaque_batch_writes_depth():
     lib, red, blue = _lib()
     batch = FaceBatch(front_material_id=red, back_material_id=blue, first=0, count=3)
     front, back = resolve_batch_sides(
-        batch, lib, RenderStyle(face_style=FaceStyle.SHADED), dimmed=False
+        batch, lib, RenderStyle(face_style=FaceStyle.SHADED), dimmed=False, translucent_ids=_ids(lib)
     )
     assert front.blend is False
     assert front.depth_write is True
@@ -105,7 +117,7 @@ def test_metallic_and_roughness_reach_the_resolved_uniforms():
     lib.edit(red, metallic=1.0, roughness=0.05)
     batch = FaceBatch(front_material_id=red, back_material_id=0, first=0, count=3)
     front, _ = resolve_batch_sides(
-        batch, lib, RenderStyle(face_style=FaceStyle.SHADED), dimmed=False
+        batch, lib, RenderStyle(face_style=FaceStyle.SHADED), dimmed=False, translucent_ids=_ids(lib)
     )
     # a smooth metal: no diffuse, tight highlight
     assert front.diffuse == pytest.approx((0.0, 0.0, 0.0))
@@ -116,7 +128,7 @@ def test_wireframe_style_skips_both_sides():
     lib, red, blue = _lib()
     batch = FaceBatch(front_material_id=red, back_material_id=blue, first=0, count=3)
     front, back = resolve_batch_sides(
-        batch, lib, RenderStyle(face_style=FaceStyle.WIREFRAME), dimmed=False
+        batch, lib, RenderStyle(face_style=FaceStyle.WIREFRAME), dimmed=False, translucent_ids=_ids(lib)
     )
     assert front.draw_faces is False
     assert back.draw_faces is False
@@ -199,7 +211,9 @@ def test_a_face_draw_sets_every_cached_phong_uniform(monkeypatch):
 
     lib, red, blue = _lib()
     batch = FaceBatch(front_material_id=red, back_material_id=blue, first=0, count=3)
-    front, back = resolve_batch_sides(batch, lib, RenderStyle(), dimmed=False)
+    front, back = resolve_batch_sides(
+        batch, lib, RenderStyle(), dimmed=False, translucent_ids=_ids(lib)
+    )
 
     renderer._draw_definition_faces(
         buf,

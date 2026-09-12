@@ -51,6 +51,8 @@ def _png(w: int, h: int, rgba: list[int]) -> bytes:
     )
 
 
+_FIRST_GL_TEXTURE = 101  # the first id _GLRecorder.glGenTextures hands out
+
 _OPAQUE_PNG = _png(1, 1, [255, 255, 255, 255])
 _CUTOUT_PNG = _png(1, 1, [255, 255, 255, 0])
 
@@ -123,6 +125,23 @@ def test_the_back_side_samples_the_back_sampler_with_the_back_uv():
     assert re.search(r"texture\s*\(\s*u_texture\s*,\s*v_uv\s*\)", body)
 
 
+def test_the_texel_ternary_is_not_swapped():
+    # The two assertions above only prove each sampler/uv pairing appears
+    # SOMEWHERE. Swapping the whole ternary keeps both pairings intact and
+    # shows the back's image on front faces:
+    #
+    #   front ? texture(u_texture_back, v_uv_back) : texture(u_texture, v_uv)
+    #
+    # That is the load-bearing invariant of this task, so the ternary is pinned
+    # end to end rather than by its halves.
+    body = _frag_main()
+    assert re.search(
+        r"front\s*\?\s*texture\s*\(\s*u_texture\s*,\s*v_uv\s*\)"
+        r"\s*:\s*texture\s*\(\s*u_texture_back\s*,\s*v_uv_back\s*\)",
+        body,
+    )
+
+
 def test_the_side_is_chosen_by_gl_front_facing_like_the_uniform_sets():
     body = _frag_main()
     assert re.search(r"\bfront\s*\?\s*u_has_texture\s*:\s*u_has_texture_back\b", body)
@@ -144,6 +163,15 @@ class _GLRecorder:
         # what the flag reads at the end of the frame.
         self.blend_enables = 0
         self._consts: dict[str, int] = {}
+        self._next_texture = _FIRST_GL_TEXTURE - 1
+
+    def glGenTextures(self, _n):
+        # A real, non-zero id. GL never allocates texture name 0, and 0 is
+        # exactly what "untextured" means downstream, so a recorder handing
+        # back 0 would let "resolved to nothing" pass as "resolved to a
+        # texture" in every test that only checks `is not None`.
+        self._next_texture += 1
+        return self._next_texture
 
     def glEnable(self, cap):
         if cap == self.GL_BLEND:
@@ -208,7 +236,9 @@ def _draw(renderer, *, front_texture=None, back_texture=None):
     lib = MaterialLibrary()
     red = lib.add_custom("Red", (0.8, 0.1, 0.1))
     batch = FaceBatch(front_material_id=red.id, back_material_id=0, first=0, count=3)
-    front, back = resolve_batch_sides(batch, lib, RenderStyle(), dimmed=False)
+    front, back = resolve_batch_sides(
+        batch, lib, RenderStyle(), dimmed=False, translucent_ids=frozenset()
+    )
     renderer._draw_definition_faces(
         sr._DefBuffers(face_vao=1, face_count=3),
         np.eye(4),
@@ -287,18 +317,33 @@ def test_a_painted_textured_material_resolves_to_the_cached_gl_id(monkeypatch):
     materials, textures, mat, tex = _painted()
 
     gl_id = renderer._texture_for_material(materials, textures, mat.id)
-    assert gl_id is not None
+    # The actual id, not merely "not None": 0 is a legal `is not None` value
+    # and is precisely what every caller downstream reads as untextured.
+    assert gl_id == _FIRST_GL_TEXTURE
     # Cached: the second resolve is the same object, not a second upload.
     assert renderer._texture_for_material(materials, textures, mat.id) == gl_id
 
 
-def test_an_unpainted_side_resolves_to_no_texture(monkeypatch):
+def test_the_default_material_is_never_textured_even_when_it_carries_one(monkeypatch):
+    # MaterialLibrary.edit permits editing id 0, so a texture CAN be put on
+    # Default. The renderer must ignore it on both halves and agree with
+    # itself. Id 0 means "unpainted", and every unpainted back face carries it,
+    # so a cutout on Default entering translucent_ids would blend and stop
+    # depth writes for essentially every batch in the model while nothing
+    # rendered textured at all -- incoherent in both directions at once.
+    #
+    # A Default with NO texture would pass whether or not the guards exist, so
+    # the fixture deliberately gives it a cutout.
     recorder = _GLRecorder()
     monkeypatch.setattr(sr, "GL", recorder)
     renderer = _renderer(recorder)
-    materials, textures, _, _ = _painted()
+    materials = MaterialLibrary()
+    textures = TextureLibrary()
+    tex = textures.add("cut.png", _CUTOUT_PNG, "png", 1, 1, True)
+    materials.edit(0, texture_id=tex.id)
 
     assert renderer._texture_for_material(materials, textures, 0) is None
+    assert 0 not in sr._translucent_ids(materials, textures)
 
 
 def test_an_untextured_material_resolves_to_no_texture(monkeypatch):
@@ -432,8 +477,6 @@ def _rendered(monkeypatch, *, transparent: bool, style: RenderStyle | None = Non
     from pluton.viewport.scene_renderer import _LINE_UNIFORMS, SceneRenderer
 
     recorder = _GLRecorder()
-    # A real GL id, because 0 is what "untextured" means downstream.
-    recorder.glGenTextures = lambda _n: 101
     monkeypatch.setattr(sr, "GL", recorder)
 
     model = Model()
@@ -463,7 +506,7 @@ def test_render_carries_the_model_texture_all_the_way_to_the_draw(monkeypatch):
 
     locs = renderer._phong_locs
     assert recorder.uniforms[locs["u_has_texture"]] == 1.0
-    assert (sr._TEXTURE_UNIT_ENUM[sr._TEXTURE_UNIT_FRONT], 101) in recorder.bound
+    assert (sr._TEXTURE_UNIT_ENUM[sr._TEXTURE_UNIT_FRONT], _FIRST_GL_TEXTURE) in recorder.bound
 
 
 def test_render_does_not_texture_under_a_style_that_has_no_colour(monkeypatch):
@@ -472,7 +515,7 @@ def test_render_does_not_texture_under_a_style_that_has_no_colour(monkeypatch):
     )
 
     assert recorder.uniforms[renderer._phong_locs["u_has_texture"]] == 0.0
-    assert 101 not in {tid for _, tid in recorder.bound}
+    assert _FIRST_GL_TEXTURE not in {tid for _, tid in recorder.bound}
 
 
 def test_render_blends_a_cutout_and_leaves_an_opaque_texture_unblended(monkeypatch):

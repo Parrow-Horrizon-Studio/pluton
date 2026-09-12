@@ -525,6 +525,15 @@ def _translucent_ids(materials, textures) -> frozenset[int]:
     forgot it would quietly drop every cutout back into the opaque pass, which
     looks like nothing happened. Passing None is still allowed and means the
     model has no texture library, so nothing can enter by the second route.
+
+    The Default material (id 0) is excluded from the TEXTURE route, and only
+    that route. MaterialLibrary.edit permits editing id 0, but the renderer
+    never textures it -- _texture_for_material short-circuits mid == 0, because
+    id 0 means "unpainted" and every unpainted back face carries it. Without
+    this guard a cutout on Default would put 0 into the set, which would blend
+    and stop depth writes for essentially EVERY batch in the model while
+    nothing rendered textured at all. Its `alpha < 1.0` behaviour is
+    pre-existing M7.5a behaviour and is deliberately left alone.
     """
     if materials is None:
         return frozenset()
@@ -533,7 +542,7 @@ def _translucent_ids(materials, textures) -> frozenset[int]:
         if m.is_translucent:
             ids.add(m.id)
             continue
-        if m.texture_id is None or textures is None:
+        if m.id == 0 or m.texture_id is None or textures is None:
             continue
         tex = textures.get(m.texture_id)
         if tex is not None and tex.has_transparency:
@@ -587,8 +596,8 @@ def resolve_batch_sides(
     render_style: RenderStyle,
     *,
     dimmed: bool,
+    translucent_ids: frozenset[int],
     tag_color: tuple[float, float, float] | None = None,
-    translucent_ids: frozenset[int] = frozenset(),
 ) -> tuple[ResolvedFacePass, ResolvedFacePass]:
     """Resolve one batch into its front and back face passes.
 
@@ -616,11 +625,13 @@ def resolve_batch_sides(
 
     `translucent_ids` is the same set the buffer partition was built from (see
     _translucent_ids). It is needed here because a CUTOUT texture is
-    translucent in a way no argument below can see: the material's own alpha is
+    translucent in a way no other argument can see: the material's own alpha is
     1.0, so resolve_face_pass would leave blending off, the fragment shader's
     sampled alpha would be written into a buffer that ignores it, and the holes
-    would come out solid. Defaulting to the empty set means "nothing is
-    translucent", which is what a caller with no material library has.
+    would come out solid. Required rather than defaulted, matching
+    _translucent_ids' own discipline: a caller that omitted it would get solid
+    cutouts and no error, which looks exactly like the feature not existing.
+    Pass `frozenset()` to mean "nothing here is translucent".
     """
     front_mat, front_alpha = _material_terms(materials, batch.front_material_id, Side.FRONT)
     back_mat, back_alpha = _material_terms(materials, batch.back_material_id, Side.BACK)
@@ -1712,16 +1723,21 @@ class SceneRenderer:
         _set_float(locs["u_material_shininess_back"], back.shininess)
         _set_float(locs["u_alpha_back"], back.alpha)
 
-        _set_float(locs["u_has_texture"], 1.0 if front_texture else 0.0)
-        _set_float(locs["u_has_texture_back"], 1.0 if back_texture else 0.0)
+        # `is not None`, not truthiness: the two sentinels are different
+        # things. None means "this side resolved to no texture"; 0 is the GL
+        # name for "no texture object", which is what gets BOUND in that case.
+        # Conflating them would make a resolver that wrongly returned 0 look
+        # indistinguishable from one that correctly returned None.
+        _set_float(locs["u_has_texture"], 1.0 if front_texture is not None else 0.0)
+        _set_float(locs["u_has_texture_back"], 1.0 if back_texture is not None else 0.0)
         GL.glActiveTexture(_TEXTURE_UNIT_ENUM[_TEXTURE_UNIT_BACK])
-        GL.glBindTexture(GL.GL_TEXTURE_2D, back_texture or 0)
+        GL.glBindTexture(GL.GL_TEXTURE_2D, 0 if back_texture is None else back_texture)
         # The front is bound LAST so unit 0 is the active unit when this
         # returns. Anything that binds a texture without selecting a unit first
         # — TextureCache's own upload included — would otherwise land in unit 1
         # and leave the back side reading a stale object.
         GL.glActiveTexture(_TEXTURE_UNIT_ENUM[_TEXTURE_UNIT_FRONT])
-        GL.glBindTexture(GL.GL_TEXTURE_2D, front_texture or 0)
+        GL.glBindTexture(GL.GL_TEXTURE_2D, 0 if front_texture is None else front_texture)
 
         if front.blend:
             GL.glEnable(GL.GL_BLEND)

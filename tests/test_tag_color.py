@@ -8,10 +8,23 @@ from pluton.model.model import Model
 from pluton.model.tag import TagLibrary
 from pluton.viewport.render_style import RenderStyle
 from pluton.viewport.scene_renderer import (
+    _translucent_ids,
     resolve_batch_sides,
     resolve_tag_color,
     traverse_visible_tagged,
 )
+
+
+def _ids(lib) -> frozenset[int]:
+    """The library's translucent set, computed the way render() computes it.
+
+    resolve_batch_sides requires it (M7.5b Task 6): a cutout texture is
+    translucent in a way the material's own alpha cannot show, so the set is
+    the only thing that can tell the resolver to blend. Nothing here is
+    textured, so this is the alpha-driven set these tests always had
+    implicitly.
+    """
+    return _translucent_ids(lib, None)
 
 
 def test_a_new_tag_gets_a_colour():
@@ -170,7 +183,12 @@ def test_a_tag_colour_replaces_both_sides_diffuse():
     color = (0.2, 0.55, 0.9)
 
     front, back = resolve_batch_sides(
-        _batch(red.id, blue.id), lib, RenderStyle(), dimmed=False, tag_color=color
+        _batch(red.id, blue.id),
+        lib,
+        RenderStyle(),
+        dimmed=False,
+        translucent_ids=_ids(lib),
+        tag_color=color,
     )
 
     assert front.diffuse == pytest.approx(color, abs=1e-6)
@@ -195,7 +213,12 @@ def test_the_tag_colour_also_drives_ambient_and_specular_on_both_sides():
     expected = phong_material_for(color)
 
     front, back = resolve_batch_sides(
-        _batch(gold.id, blue.id), lib, RenderStyle(), dimmed=False, tag_color=color
+        _batch(gold.id, blue.id),
+        lib,
+        RenderStyle(),
+        dimmed=False,
+        translucent_ids=_ids(lib),
+        tag_color=color,
     )
 
     assert front.ambient == pytest.approx(expected.ambient, abs=1e-6)
@@ -215,7 +238,12 @@ def test_a_tag_colour_does_not_bypass_a_materials_alpha():
     lib.edit(glass.id, alpha=0.5)
 
     front, back = resolve_batch_sides(
-        _batch(glass.id, 0), lib, RenderStyle(), dimmed=False, tag_color=(0.2, 0.55, 0.9)
+        _batch(glass.id, 0),
+        lib,
+        RenderStyle(),
+        dimmed=False,
+        translucent_ids=_ids(lib),
+        tag_color=(0.2, 0.55, 0.9),
     )
 
     assert front.alpha == pytest.approx(0.5)
@@ -233,9 +261,16 @@ def test_no_tag_colour_leaves_the_materials_alone():
     red = lib.add_custom("Red", (0.8, 0.1, 0.1))
     blue = lib.add_custom("Blue", (0.1, 0.1, 0.8))
 
-    plain = resolve_batch_sides(_batch(red.id, blue.id), lib, RenderStyle(), dimmed=False)
+    plain = resolve_batch_sides(
+        _batch(red.id, blue.id), lib, RenderStyle(), dimmed=False, translucent_ids=_ids(lib)
+    )
     explicit = resolve_batch_sides(
-        _batch(red.id, blue.id), lib, RenderStyle(), dimmed=False, tag_color=None
+        _batch(red.id, blue.id),
+        lib,
+        RenderStyle(),
+        dimmed=False,
+        translucent_ids=_ids(lib),
+        tag_color=None,
     )
 
     assert plain == explicit
@@ -383,13 +418,23 @@ def test_the_full_chain_from_instance_tag_to_resolved_diffuse():
 
     off_color = resolve_tag_color(tag_id, m.tags, RenderStyle(color_by_tag=False))
     off_front, off_back = resolve_batch_sides(
-        batch, m.materials, RenderStyle(), dimmed=False, tag_color=off_color
+        batch,
+        m.materials,
+        RenderStyle(),
+        dimmed=False,
+        translucent_ids=_ids(m.materials),
+        tag_color=off_color,
     )
     assert off_front.diffuse == pytest.approx((0.7, 0.27, 0.22), abs=1e-6)
 
     on_color = resolve_tag_color(tag_id, m.tags, RenderStyle(color_by_tag=True))
     on_front, on_back = resolve_batch_sides(
-        batch, m.materials, RenderStyle(), dimmed=False, tag_color=on_color
+        batch,
+        m.materials,
+        RenderStyle(),
+        dimmed=False,
+        translucent_ids=_ids(m.materials),
+        tag_color=on_color,
     )
     assert on_front.diffuse == pytest.approx((0.9, 0.2, 0.2), abs=1e-6)
     assert on_back.diffuse == pytest.approx((0.9, 0.2, 0.2), abs=1e-6)
@@ -720,7 +765,12 @@ def test_the_dim_pass_still_dims_under_a_tag_colour():
     color = (0.2, 0.55, 0.9)
 
     front, back = resolve_batch_sides(
-        _batch(gold.id, blue.id), lib, RenderStyle(), dimmed=True, tag_color=color
+        _batch(gold.id, blue.id),
+        lib,
+        RenderStyle(),
+        dimmed=True,
+        translucent_ids=_ids(lib),
+        tag_color=color,
     )
 
     for side in (front, back):
