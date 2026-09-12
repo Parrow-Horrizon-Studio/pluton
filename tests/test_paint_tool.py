@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pluton.model.material import Material
+from pluton.scene.scene import Side
 from pluton.tools import paint_tool as paint_tool_mod
 from pluton.tools.paint_tool import PaintTool
 from pluton.tools.tool import ToolContext
@@ -9,19 +10,19 @@ from PySide6.QtCore import QPointF, Qt
 
 class _FakeScene:
     def __init__(self):
-        self._mats: dict[int, int] = {}
+        self._mats: dict[tuple[int, Side], int] = {}
 
-    def face_material(self, fid):
-        return self._mats.get(fid, 0)
+    def face_material(self, fid, side=Side.FRONT):
+        return self._mats.get((fid, side), 0)
 
-    def set_face_material(self, fid, mid):
+    def set_face_material(self, fid, mid, side=Side.FRONT):
         if mid == 0:
-            self._mats.pop(fid, None)
+            self._mats.pop((fid, side), None)
         else:
-            self._mats[fid] = mid
+            self._mats[(fid, side)] = mid
 
-    def clear_face_material(self, fid):
-        self._mats.pop(fid, None)
+    def clear_face_material(self, fid, side=Side.FRONT):
+        self._mats.pop((fid, side), None)
 
 
 class _FakeStack:
