@@ -237,7 +237,12 @@ class PaintTool(Tool):
 
     @property
     def has_active_gesture(self) -> bool:
-        return False
+        # Mirrors EraserTool.has_active_gesture: True only for a live stroke,
+        # not for a mere hover -- so a right-click mid-drag is suppressed as
+        # a cancel (ViewportWidget.contextMenuEvent) instead of popping the
+        # context menu, and Esc/tool-switch semantics stay consistent with
+        # the sibling drag tools.
+        return self._stroke_active
 
     @property
     def anchor_or_none(self) -> np.ndarray | None:

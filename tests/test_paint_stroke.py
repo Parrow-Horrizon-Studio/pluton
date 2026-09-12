@@ -54,11 +54,86 @@ def test_re_crossing_a_face_does_not_add_a_second_command(main_window_with_squar
     tool._begin_stroke(mat.id)
     for _ in range(5):
         tool._paint_during_stroke(f, Side.FRONT, mat.id)
+    # Discriminates a real dedup guard from a "rebuilt every move"
+    # implementation: without the guard, five re-crossings of the same
+    # (face, side) collect five identical PaintFaceCommands here, and
+    # len(undo_stack) == 1 / face_material == 0 after undo would STILL hold
+    # (push_executed pushes once regardless of child count, and undoing five
+    # paired do/undo commands is a correct no-op) -- neither assertion below
+    # would catch it. Only the child count does.
+    assert len(tool._stroke_commands) == 1, "re-crossing must not collect a second command"
     tool._end_stroke()
 
     assert len(win._command_stack._undo) == depth + 1
+    composite = win._command_stack._undo[-1][0]
+    assert len(composite.children) == 1, "the pushed composite must have exactly one child"
     win._command_stack.undo()
     assert scene.face_material(f) == 0, "one undo must clear it, not five"
+
+
+def test_deactivate_mid_stroke_rolls_back_every_painted_face_and_pushes_nothing(main_window):
+    """PaintTool.deactivate() (mirroring EraserTool.deactivate) must undo any
+    in-progress stroke when a tool switch interrupts a drag, so a wrong
+    rollback never leaves the scene mutated with nothing on the undo stack
+    for the user to recover with."""
+    win = main_window
+    scene = win._model.active_context.mesh
+    for i in range(2):
+        v = [
+            scene.add_vertex(np.array([i, 0.0, 0.0], dtype=np.float32)),
+            scene.add_vertex(np.array([i + 1.0, 0.0, 0.0], dtype=np.float32)),
+            scene.add_vertex(np.array([i + 1.0, 1.0, 0.0], dtype=np.float32)),
+            scene.add_vertex(np.array([i, 1.0, 0.0], dtype=np.float32)),
+        ]
+        for a, b in zip(v, v[1:] + v[:1], strict=True):
+            scene.add_edge(a, b)
+        scene.add_face_from_loop(v)
+    ids = _faces(scene)
+    assert len(ids) == 2
+    win._activate("paint")
+    tool = win._tool_manager.active
+    mat = win._model.materials.materials()[1]
+    depth = len(win._command_stack._undo)
+
+    tool._begin_stroke(mat.id)
+    for f in ids:
+        tool._paint_during_stroke(f, Side.FRONT, mat.id)
+    assert all(scene.face_material(f) == mat.id for f in ids)  # live, pre-release
+
+    tool.deactivate()  # e.g. the user switches tools mid-drag
+
+    assert all(scene.face_material(f) == 0 for f in ids), (
+        "mid-drag rollback must revert every painted face"
+    )
+    assert len(win._command_stack._undo) == depth, (
+        "an aborted stroke must leave nothing on the undo stack"
+    )
+
+
+def test_has_active_gesture_reflects_stroke_state(main_window_with_square):
+    """Mirrors EraserTool: has_active_gesture must be True only for a live
+    stroke, so ViewportWidget.contextMenuEvent suppresses a right-click as a
+    mid-gesture cancel instead of popping the context menu -- False both
+    before a stroke starts and after it ends, whether by release or by a
+    mid-drag deactivate()."""
+    win = main_window_with_square
+    win._activate("paint")
+    tool = win._tool_manager.active
+    mat = win._model.materials.materials()[1]
+
+    assert tool.has_active_gesture is False
+
+    tool._begin_stroke(mat.id)
+    assert tool.has_active_gesture is True
+
+    tool._end_stroke()
+    assert tool.has_active_gesture is False
+
+    tool._begin_stroke(mat.id)
+    assert tool.has_active_gesture is True
+
+    tool.deactivate()
+    assert tool.has_active_gesture is False
 
 
 def test_a_stroke_that_paints_nothing_pushes_nothing(main_window_with_square):
