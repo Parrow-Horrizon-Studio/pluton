@@ -141,7 +141,7 @@ def resolve_face_pass(
     """Compose face style + X-Ray + the M4e dim pass into one face-pass result.
 
     Dim overrides ambient/diffuse to the desaturated dim colors (preserving the
-    M4e look at the Shaded default) and multiplies alpha; X-Ray sets alpha to
+    M4e look at the Shaded default) and caps alpha at dim_alpha; X-Ray sets alpha to
     XRAY_ALPHA and turns depth writes off so geometry behind shows through.
     A translucent material_alpha behaves like X-Ray for depth purposes: it
     also stops writing depth, since blended geometry drawn back-to-front
@@ -163,7 +163,12 @@ def resolve_face_pass(
         desc.shading, bg=bg, material=material, xray=style.xray, material_alpha=material_alpha
     )
     if dimmed:
-        ambient, diffuse, alpha = dim_ambient, dim_diffuse, fu.alpha * dim_alpha
+        # M7.5b (#107): min, not a product. Multiplying turned a 0.4 material
+        # into an effective 0.14 once dimmed, which is very nearly invisible.
+        # Dimming should say "not the thing you are editing", not delete the
+        # geometry, so an already-translucent face keeps its own alpha and
+        # only an opaque one is pulled down to dim_alpha.
+        ambient, diffuse, alpha = dim_ambient, dim_diffuse, min(fu.alpha, dim_alpha)
     else:
         ambient, diffuse, alpha = fu.ambient, fu.diffuse, fu.alpha
     return ResolvedFacePass(
@@ -192,6 +197,42 @@ _DIELECTRIC_F0 = 0.04  # normal-incidence reflectance of a non-metal
 _MIN_SHININESS = 1.0
 _MAX_SHININESS = 256.0
 
+# M7.5b (#107): roughness shifts the ambient/directional-diffuse balance.
+#
+# A dielectric's specular is pinned at _DIELECTRIC_F0, i.e. 10/255, so 10/255
+# was the hard ceiling on how far roughness could move any pixel no matter
+# what the highlight lobe did -- and a measured sweep hit exactly that
+# ceiling. Roughness therefore has to move a term that is not the highlight.
+# It moves the one a real renderer's environment term would move: a rough
+# surface scatters incoming light in every direction, so it reads flat and
+# evenly lit (more ambient, less directional), and a smooth one reads
+# contrasty (less ambient, more directional).
+#
+# Both scales are 1.0 at roughness 0.5 BY CONSTRUCTION, so the default
+# dielectric that every unpainted back face and most painted faces use keeps
+# exactly its v0.7.1 ambient and diffuse.
+#
+# The gains are tuned against a measured render, not picked to look
+# reasonable in the formula. Sweeping a lit sphere through the real renderer
+# and reading pixels back (v0.7.2 report, section 3):
+#
+#   gains       max delta   mean |delta|   mean SIGNED delta
+#   1.0 / 0.7      74           16.6           +14.7   <- brightens
+#   1.0 / 1.0      74           19.8            -1.1   <- chosen
+#   1.0 / 1.3      89           30.9           -16.8   <- dims
+#
+# Equal gains are what makes the signed mean vanish: the balance point is
+# _AMBIENT_FACTOR * _ROUGH_AMBIENT_GAIN / _ROUGH_DIFFUSE_GAIN == 0.55, and
+# 0.55 is very close to the mean dot(N, -L) over a lit solid's visible face
+# pixels, so what one term gives up the other takes back. The slider then
+# redistributes rather than dimming: over the same sweep the darkest quartile
+# of face pixels rises 31.7/255 and the brightest quartile falls 24.9/255.
+# Magnitude 1.0 was preferred over 1.2 because it is already a 7x improvement
+# on v0.7.1's 10/255 ceiling and it does not clip a bright swatch any harder
+# (White 0.92 clips an identical 65.3% of face pixels before and after).
+_ROUGH_AMBIENT_GAIN = 1.0
+_ROUGH_DIFFUSE_GAIN = 1.0
+
 # The unpainted back-face colour. A renderer constant rather than a library
 # entry (spec D3), so it never appears as a swatch; its only job is to make a
 # reversed face obvious.
@@ -210,26 +251,48 @@ def phong_material_for(
 ) -> PhongMaterial:
     """Approximate a PBR material with Blinn-Phong terms.
 
-    diffuse  = base_color * (1 - metallic)      metals have no diffuse lobe
+    diffuse  = base_color * (1 - metallic) * diffuse_scale(roughness)
     specular = mix(0.04, base_color, metallic)  dielectric F0, tinted for metals
-    shininess = clamp(2 / roughness**4 - 2)     the standard Blinn-Phong
-                                                 to roughness equivalence
-    ambient  = base_color * _AMBIENT_FACTOR * (1 - metallic)
+    shininess = 256 ** (1 - roughness)          256 / 64 / 16 / 4 / 1 across
+                                                 the slider, never clamped
+    ambient  = base_color * _AMBIENT_FACTOR * ambient_scale(roughness)
 
     An approximation, not real PBR: M12's renderer will not match it pixel for
     pixel. What it buys is that every editable field changes what you see.
+
+    Three of those four lines changed in M7.5b (#107), and all three changes
+    are departures from real PBR made deliberately because this renderer has
+    one directional light and no environment term:
+
+    * ambient no longer carries a (1 - metallic) factor. In real PBR a metal
+      has no diffuse lobe and its appearance comes entirely from what it
+      reflects; with nothing to reflect, metallic 1.0 rendered pure black off
+      the highlight. A metal's colour IS its reflectance, and ambient is the
+      only stand-in for environment light here, so the metal keeps it: a red
+      metal now reads dark red. Dielectrics are untouched, since the dropped
+      factor was 1.0 at metallic 0.
+    * roughness drives the ambient/diffuse balance (see the gain constants).
+    * shininess uses 256 ** (1 - roughness) instead of the spec's stated
+      Blinn-Phong equivalence 2 / roughness**4 - 2. That equivalence clamped
+      to _MAX_SHININESS for every roughness below 0.28, so the first third of
+      the slider did nothing; it is derived for a renderer that has an
+      environment term to carry the rest of the response, which this one does
+      not.
     """
     r, g, b = float(base_color[0]), float(base_color[1]), float(base_color[2])
     m = min(max(float(metallic), 0.0), 1.0)
     rough = min(max(float(roughness), 0.0), 1.0)
 
     kd = 1.0 - m
-    alpha_r = max(rough, 1e-3) ** 4
-    shininess = min(max(2.0 / alpha_r - 2.0, _MIN_SHININESS), _MAX_SHININESS)
+    # Both are exactly 1.0 at the default roughness 0.5.
+    ambient_scale = 1.0 + _ROUGH_AMBIENT_GAIN * (rough - 0.5)
+    diffuse_scale = 1.0 - _ROUGH_DIFFUSE_GAIN * (rough - 0.5)
+    ka = _AMBIENT_FACTOR * ambient_scale
+    shininess = _MAX_SHININESS ** (1.0 - rough)
 
     return PhongMaterial(
-        ambient=(r * _AMBIENT_FACTOR * kd, g * _AMBIENT_FACTOR * kd, b * _AMBIENT_FACTOR * kd),
-        diffuse=(r * kd, g * kd, b * kd),
+        ambient=(r * ka, g * ka, b * ka),
+        diffuse=(r * kd * diffuse_scale, g * kd * diffuse_scale, b * kd * diffuse_scale),
         specular=(
             _mix(_DIELECTRIC_F0, r, m),
             _mix(_DIELECTRIC_F0, g, m),

@@ -2,8 +2,14 @@
 
 from __future__ import annotations
 
+from itertools import pairwise
+
+import numpy as np
 import pytest
 from pluton.viewport.render_style import (
+    _DIELECTRIC_F0,
+    _MAX_SHININESS,
+    _MIN_SHININESS,
     BACK_DEFAULT_COLOR,
     FaceShading,
     FaceStyle,
@@ -46,16 +52,37 @@ def test_lower_roughness_gives_a_tighter_highlight():
     assert smooth.shininess > rough.shininess
 
 
-def test_shininess_is_clamped_at_both_ends():
+def test_shininess_stays_inside_its_declared_bounds():
+    # Renamed in M7.5b (#107): the values did not move, but the reason did.
+    # There is no clamp any more. 256 ** (1 - roughness) lands inside
+    # [_MIN_SHININESS, _MAX_SHININESS] by construction, so what this now
+    # guards is that the curve's own range still matches the constants the
+    # rest of the codebase reasons about (see test_phong_material_for.py).
+    # The dead zone the old clamp created is covered by
+    # test_shininess_spans_the_slider_with_no_dead_zone below.
     assert phong_material_for(RED, roughness=0.0001).shininess <= 256.0
     assert phong_material_for(RED, roughness=1.0).shininess >= 1.0
 
 
-def test_ambient_tracks_base_color_and_fades_with_metallic():
+def test_ambient_tracks_base_color_and_no_longer_fades_with_metallic():
+    # The expectation moved in M7.5b (#107), and it is the whole point of the
+    # fix, not a number nudged to make a suite green.
+    #
+    # This test used to assert `metal.ambient == (0, 0, 0)`, pinning
+    # `ambient = base * factor * (1 - metallic)`. That formula is right for
+    # real PBR -- a metal has no diffuse lobe, and its appearance comes from
+    # the environment it reflects -- but this renderer has one directional
+    # light and no environment term, so there was nothing left to carry the
+    # metal's colour and metallic 1.0 rendered pure black off the highlight.
+    # Ambient is the only stand-in for environment light available here, and a
+    # metal's colour IS its reflectance, so the metal keeps its ambient.
+    #
+    # Dielectrics are untouched: the factor that was dropped is 1.0 at
+    # metallic 0, so `dielectric.ambient` is bit-identical to v0.7.1's.
     dielectric = phong_material_for(RED, metallic=0.0)
     metal = phong_material_for(RED, metallic=1.0)
-    assert dielectric.ambient[0] > 0.0
-    assert metal.ambient == pytest.approx((0.0, 0.0, 0.0))
+    assert dielectric.ambient == pytest.approx(tuple(c * 0.55 for c in RED))
+    assert metal.ambient == pytest.approx(dielectric.ambient)
 
 
 def test_material_alpha_multiplies_into_the_resolved_alpha():
@@ -115,3 +142,212 @@ def test_the_back_default_is_distinct_from_the_front_default():
     # and distinguishable, not a near-identical shade
     delta = sum(abs(a - b) for a, b in zip(BACK_DEFAULT_COLOR, _DEFAULT_SWATCH_COLOR))
     assert delta > 0.2
+
+
+# --- M7.5b (#107): the extremes, asserted in RENDERED units ----------------
+#
+# The defect this section exists to kill shipped under ten passing tests,
+# every one of which restated the formula it was testing. Terms alone cannot
+# tell you whether a slider does anything: a dielectric's specular is pinned
+# at _DIELECTRIC_F0 = 0.04 == 10/255, so roughness could reshape the highlight
+# lobe as much as it liked and still never move a pixel by more than 10. The
+# tests below therefore shade the material and assert on the result.
+#
+# _shade transcribes viewport/shaders/phong.frag's main(), and the two agree
+# where it matters: sweeping roughness over the probe sphere gives a maximum
+# spread of 74/255 through this model and 74/255 through a real offscreen GL
+# render of the same scene (v0.7.2 report, section 4). The shader's own
+# structure -- that every uniform exists, is set, and is read -- is already
+# pinned by tests/test_two_sided_shading.py, so this transcription cannot
+# silently drift away from a shader that changed shape.
+
+_PROBE = (0.55, 0.35, 0.20)  # deliberately non-clipping: a delta is a real delta
+_ROUGH_SWEEP = (0.0, 0.05, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0)
+_METAL_SWEEP = (0.0, 0.25, 0.5, 0.75, 1.0)
+
+
+def _unit(v):
+    v = np.asarray(v, dtype=float)
+    return v / np.linalg.norm(v)
+
+
+def _shade(material, normal, view_dir):
+    """phong.frag main(), transcribed. Returns one RGB pixel in 0..255."""
+    from pluton.viewport.scene_renderer import _LIGHT_COLOR, _LIGHT_DIR
+
+    n, lv, v = _unit(normal), _unit(_LIGHT_DIR), _unit(view_dir)
+    r = lv - 2.0 * np.dot(lv, n) * n
+    diff = max(float(np.dot(n, -lv)), 0.0)
+    spec = max(float(np.dot(r, v)), 0.0) ** material.shininess
+    color = (
+        np.array(material.ambient)
+        + np.array(material.diffuse) * diff * np.array(_LIGHT_COLOR)
+        + np.array(material.specular) * spec * np.array(_LIGHT_COLOR)
+    )
+    return np.round(np.clip(color, 0.0, 1.0) * 255.0)
+
+
+def _rendered(material, samples=40):
+    """Every visible pixel of a lit sphere, as an (N, 3) array in 0..255.
+
+    A sphere rather than a quad because one flat face samples exactly one
+    dot(N, -L): the highlight lobe, the terminator and the shadow side all
+    have to be in frame for "what does this slider do" to be answerable.
+    """
+    cam = np.array([5.0, -5.5, 4.0])
+    centre = np.array([0.0, 0.0, 1.4])
+    normals = []
+    for i in range(samples):
+        z = -1.0 + 2.0 * (i + 0.5) / samples
+        rr = float(np.sqrt(max(0.0, 1.0 - z * z)))
+        for j in range(samples):
+            th = 2.0 * np.pi * j / samples
+            normals.append((rr * np.cos(th), rr * np.sin(th), z))
+    normals = np.array(normals)
+    view = cam - (centre + 1.2 * normals)
+    visible = (view * normals).sum(axis=1) > 0.0
+    return np.array(
+        [_shade(material, n, v) for n, v in zip(normals[visible], view[visible], strict=True)]
+    )
+
+
+def test_a_full_metal_is_not_black():
+    # THE reported symptom. Through the real renderer, v0.7.1's metallic 1.0
+    # measured min-per-channel [0 0 0]: every fragment outside the highlight
+    # lobe was literally black.
+    #
+    # Asserting on the DARKEST pixel, not the mean, is what kills it. A mean
+    # over a sphere that still carries a specular highlight is comfortably
+    # non-zero even when the entire body of the object is black, so a
+    # mean-based assertion would pass against the exact bug.
+    metal = _rendered(phong_material_for(_PROBE, metallic=1.0))
+    darkest = metal.min(axis=0)
+    assert (darkest >= 16).all(), f"metal bottoms out at {darkest}"
+    # And it is the metal's OWN colour down there, not a grey floor bolted on:
+    # the probe is orange, so the channels must stay ordered R > G > B.
+    assert darkest[0] > darkest[1] > darkest[2]
+
+
+def test_the_metallic_sweep_darkens_monotonically_without_reaching_black():
+    # Metals SHOULD read darker than dielectrics under one light -- v0.7.1 was
+    # right about the direction and wrong only about the floor. Kills a fix
+    # that buys "not black" by flattening the slider's response, trading one
+    # unusable extreme for a dead control.
+    means = [_rendered(phong_material_for(_PROBE, metallic=m)).mean() for m in _METAL_SWEEP]
+    assert means == sorted(means, reverse=True), means
+    assert means[0] - means[-1] > 20, "metallic must still visibly do something"
+    for m in _METAL_SWEEP:
+        assert _rendered(phong_material_for(_PROBE, metallic=m)).min() > 0
+
+
+def test_roughness_moves_more_than_the_whole_dielectric_specular_budget():
+    # v0.7.1's roughness changed only the highlight LOBE WIDTH. A dielectric's
+    # specular is _DIELECTRIC_F0 == 0.04 == 10/255, so 10/255 was a hard
+    # ceiling on how far roughness could move any pixel no matter what the
+    # lobe did -- and the reported measurement hit exactly 10, which was that
+    # ceiling rather than a coincidence.
+    #
+    # Any fix that still only reshapes the lobe is capped at the same 10 and
+    # fails here. The threshold is four times the ceiling and well under the
+    # 74/255 actually measured, so it guards the class of defect without
+    # pinning the tuning.
+    frames = np.stack([_rendered(phong_material_for(_PROBE, roughness=r)) for r in _ROUGH_SWEEP])
+    spread = frames.max(axis=0) - frames.min(axis=0)
+    ceiling = round(_DIELECTRIC_F0 * 255)  # == 10, v0.7.1's measured maximum
+    assert spread.max() > 4 * ceiling, f"roughness spread only {spread.max()}/255"
+
+
+def test_roughness_redistributes_light_instead_of_dimming_the_object():
+    # The cheap way to pass the previous test is to scale every term with
+    # roughness, which buys a big pixel delta by turning the slider into a
+    # brightness knob. Kills that: the MEAN over the probe must stay put while
+    # individual pixels move a long way, and the movement must carry opposite
+    # signs at the two ends of the tonal range.
+    smooth = _rendered(phong_material_for(_PROBE, roughness=0.0))
+    rough = _rendered(phong_material_for(_PROBE, roughness=1.0))
+    delta = rough - smooth
+
+    assert abs(delta.mean()) < 0.25 * np.abs(delta).max(), (
+        f"mean moved {delta.mean():.1f} against a max of {np.abs(delta).max():.0f}"
+    )
+    luminance = smooth.sum(axis=1)
+    darkest = luminance <= np.percentile(luminance, 25)
+    brightest = luminance >= np.percentile(luminance, 75)
+    assert delta[darkest].mean() > 10, "rough must lift the shadow side"
+    assert delta[brightest].mean() < -10, "rough must pull the lit side down"
+
+
+def test_the_default_dielectric_is_untouched_by_the_roughness_remap():
+    # The whole-document regression guard. Roughness defaults to 0.5, so this
+    # is what every unpainted back face and most painted faces resolve to; if
+    # it moved, every existing document would change appearance on upgrade.
+    # The remap is centred on 0.5 precisely so both scales are exactly 1.0
+    # here. Kills a remap centred anywhere else -- on 0.0, say, which is the
+    # natural thing to write and would restyle every model in existence.
+    m = phong_material_for(RED, metallic=0.0, roughness=0.5)
+    assert m.ambient == pytest.approx(tuple(c * 0.55 for c in RED))
+    assert m.diffuse == pytest.approx(RED)
+    assert m.specular == pytest.approx((_DIELECTRIC_F0,) * 3)
+
+
+def test_shininess_spans_the_slider_with_no_dead_zone():
+    # v0.7.1 used the spec's Blinn-Phong equivalence 2 / roughness**4 - 2,
+    # which clamps to _MAX_SHININESS for EVERY roughness below 0.28: the first
+    # 28% of the slider produced one identical value. `assert smooth > rough`
+    # on two far-apart samples passes happily against that, which is how it
+    # shipped. Sampling the whole slider and demanding STRICT monotonicity is
+    # what catches a flat region anywhere in it.
+    values = [phong_material_for(RED, roughness=i / 100.0).shininess for i in range(101)]
+    assert all(a > b for a, b in pairwise(values)), "shininess has a flat region"
+    assert values[0] == pytest.approx(_MAX_SHININESS)
+    assert values[-1] == pytest.approx(_MIN_SHININESS)
+    for roughness, expected in ((0.25, 64.0), (0.5, 16.0), (0.75, 4.0)):
+        assert phong_material_for(RED, roughness=roughness).shininess == pytest.approx(expected)
+
+
+# --- M7.5b (#107): the dim pass must not compound with translucency --------
+
+
+def _dimmed(material_alpha, *, xray=False, dim_alpha=0.35):
+    return resolve_face_pass(
+        RenderStyle(face_style=FaceStyle.SHADED, xray=xray),
+        dimmed=True,
+        bg=(0.1, 0.1, 0.1),
+        material=phong_material_for(RED),
+        dim_ambient=(0.3, 0.3, 0.31),
+        dim_diffuse=(0.4, 0.4, 0.42),
+        dim_alpha=dim_alpha,
+        material_alpha=material_alpha,
+    )
+
+
+def test_dimming_a_translucent_face_does_not_make_it_more_transparent():
+    # The reported symptom: `alpha = fu.alpha * dim_alpha` turned a 0.4
+    # material into an effective 0.14 once its group stopped being the active
+    # context -- very nearly invisible. Dimming says "not the thing you are
+    # editing"; it is not licensed to delete the geometry.
+    assert _dimmed(0.4).alpha == pytest.approx(0.35)
+    assert _dimmed(0.4).alpha > 0.4 * 0.35  # the old product, named explicitly
+
+
+def test_dimming_still_makes_an_opaque_face_recede():
+    # The other half, and the reason this is min() rather than "leave alpha
+    # alone whenever the material is translucent": an opaque face must still
+    # be pulled down to dim_alpha, or the dim pass stops dimming anything.
+    assert _dimmed(1.0).alpha == pytest.approx(0.35)
+    assert _dimmed(1.0).blend is True
+
+
+def test_dimming_never_makes_a_barely_visible_face_more_solid():
+    # Kills the lazy fix, `alpha = dim_alpha`, which throws the material's own
+    # opacity away: a deliberately ghostly 0.1 material would become three and
+    # a half times MORE opaque by being dimmed, which is backwards.
+    assert _dimmed(0.1).alpha == pytest.approx(0.1)
+
+
+def test_xray_and_dim_still_compose_through_the_cap():
+    # X-Ray's 0.35 sits exactly at the dim floor, so a translucent material
+    # under X-Ray lands below it and keeps its own lower value. Kills a fix
+    # that caps against dim_alpha BEFORE material_alpha and X-Ray are folded
+    # in, which would hand a translucent X-Ray face a flat 0.35.
+    assert _dimmed(0.5, xray=True).alpha == pytest.approx(0.35 * 0.5)

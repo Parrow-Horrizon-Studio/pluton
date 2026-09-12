@@ -120,7 +120,29 @@ def test_resolve_dim_only_matches_legacy_035_alpha():
     assert rp.depth_write is True
 
 
-def test_resolve_dim_and_xray_compose_alpha():
+def test_resolve_dim_and_xray_no_longer_multiply_into_near_invisibility():
+    # This test used to assert `alpha == XRAY_ALPHA * _DIM_ALPHA` == 0.1225,
+    # pinning the product that M7.5b (#107) replaced with a cap. It was not in
+    # the set of tests the fix was expected to move, so it is worth being
+    # explicit about why it did.
+    #
+    # The reported defect is about a translucent MATERIAL compounding with the
+    # dim pass (0.4 became an effective 0.14). X-Ray is the same situation
+    # arrived at from the other direction: XRAY_ALPHA is 0.35, which is
+    # already exactly the dim floor, so multiplying dropped dimmed X-Ray
+    # geometry to 0.1225 -- fainter than the defect being fixed. Under
+    # min(fu.alpha, dim_alpha) an already-transparent face is not made more
+    # transparent for also being dimmed, and that rule cannot be applied to
+    # translucent materials while exempting X-Ray: it is one line composing
+    # one alpha.
+    #
+    # The dim cue itself does not depend on this. _DIM_AMBIENT / _DIM_DIFFUSE
+    # still override both colour terms (asserted above in
+    # test_resolve_dim_only_matches_legacy_035_alpha), so dimmed X-Ray
+    # geometry still reads as "not the thing you are editing"; it simply stops
+    # doing so by becoming nearly invisible.
     rp = _resolve(RenderStyle(FaceStyle.SHADED, xray=True), dimmed=True)
-    assert rp.alpha == XRAY_ALPHA * _DIM_ALPHA
+    assert rp.alpha == XRAY_ALPHA
+    assert rp.alpha > XRAY_ALPHA * _DIM_ALPHA  # the old product, named explicitly
+    assert rp.ambient == _DIM_AMBIENT  # the dim cue still lands
     assert rp.depth_write is False

@@ -18,13 +18,22 @@ def test_dielectric_default_stays_consistent_with_the_renderer_hand_tuned_defaul
     After this task, `phong_material_for`'s specular/shininess are *derived*
     from metallic/roughness instead of being fixed constants, so that
     equality is gone by construction: a dielectric (metallic=0.0) at the
-    function's default roughness (0.5) now produces specular
-    `(_DIELECTRIC_F0,) * 3` == (0.04, 0.04, 0.04) and shininess 30.0, neither
-    of which matches the renderer's hand-tuned `_MATERIAL_SPECULAR`
-    (0.10, 0.10, 0.10) / `_MATERIAL_SHININESS` (16.0). That divergence is
-    intentional: M7.5a Task 6 keeps scene_renderer._DEFAULT_MATERIAL
-    hand-tuned and untouched for unpainted front faces, while painted
-    materials now go through the physically-motivated derivation.
+    function's default roughness (0.5) produces specular
+    `(_DIELECTRIC_F0,) * 3` == (0.04, 0.04, 0.04), which does not match the
+    renderer's hand-tuned `_MATERIAL_SPECULAR` (0.10, 0.10, 0.10). That
+    divergence is intentional: M7.5a Task 6 keeps
+    scene_renderer._DEFAULT_MATERIAL hand-tuned and untouched for unpainted
+    front faces, while painted materials go through the derivation.
+
+    The derived shininess at that same point was 30.0 when this docstring was
+    written, under `2 / roughness**4 - 2`. M7.5b (#107) replaced that curve
+    with `_MAX_SHININESS ** (1 - roughness)` -- the old one clamped flat for
+    every roughness below 0.28 -- and the new one happens to give exactly
+    16.0 at roughness 0.5, which IS `_MATERIAL_SHININESS`. That coincidence
+    is worth naming so nobody reads it as the constants having been re-tied
+    together: nothing enforces it, the two still come from different places,
+    and the assertion below is deliberately a range check rather than an
+    equality so it keeps holding either way.
 
     What still has to hold, and is worth guarding: the dielectric F0 this
     module uses is a physically conservative floor, strictly below the
