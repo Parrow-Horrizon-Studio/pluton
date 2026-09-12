@@ -239,12 +239,15 @@ def test_a_face_whose_loop_starts_on_a_split_edge_still_gets_uvs():
     # taking the normal from it would let one ordinary face stop the entire
     # document from rendering. face_triangle_buffer's own normals block is
     # correct for this face, so the projection reads it instead.
+    #
+    # Scene.face_normal raising on this face is a pre-existing defect with six
+    # interactive callers, tracked outside this milestone. It is deliberately
+    # NOT asserted here: pinning it would make this test fail the day the defect
+    # is fixed. What is asserted is the property that must hold either way — a
+    # geometrically ordinary face gets finite UVs.
     model = Model()
     scene = model.root.mesh
-    f = _split_edge_square(scene)
-
-    with pytest.raises(ValueError):
-        scene.face_normal(f)  # the trap; if this ever stops raising, say so
+    _split_edge_square(scene)
 
     _, normals = scene.face_triangle_buffer()
     assert np.allclose(normals[0], [0.0, 0.0, 1.0])

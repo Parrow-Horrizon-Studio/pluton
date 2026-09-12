@@ -97,3 +97,97 @@ def apply_placement(
         out = out @ rot.T
     out = out + np.array([float(offset_u), float(offset_v)])
     return out.astype(np.float32)
+
+
+# --- Batched siblings -------------------------------------------------------
+#
+# The three functions above are the reference implementation and their tests are
+# the specification; these do the same arithmetic one array at a time instead of
+# one face at a time. The renderer bakes UVs for every corner of every face on
+# every upload, where the per-face versions spent 94% of upload time in numpy
+# call overhead rather than arithmetic — ~9,600 calls on (3,) arrays, where one
+# call on an (N, 3) array costs almost nothing.
+#
+# tests/test_uv_projection.py pins the two paths against each other corner for
+# corner. Change one of these and you must change its scalar twin.
+
+
+def plane_bases(normals: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    """plane_basis for (N, 3) normals at once, returning (N, 3) u and v."""
+    n = np.asarray(normals, dtype=np.float64).reshape(-1, 3)
+    lengths = np.sqrt((n * n).sum(axis=1))
+    degenerate = lengths == 0.0
+    n = n / np.where(degenerate, 1.0, lengths)[:, None]
+
+    nx, ny, nz = n[:, 0], n[:, 1], n[:, 2]
+    # The same two seed cases, selected per row instead of per call.
+    near_z = np.abs(nz) < _AXIS_ALIGNED
+    u = np.empty_like(n)
+    u[:, 0] = np.where(near_z, -ny, 0.0)
+    u[:, 1] = np.where(near_z, nx, -nz)
+    u[:, 2] = np.where(near_z, 0.0, ny)
+    u_len = np.sqrt((u * u).sum(axis=1))
+    u = u / np.where(u_len == 0.0, 1.0, u_len)[:, None]
+    v = np.cross(n, u)
+
+    # A zero-length normal has no plane; the scalar version answers with the
+    # world XY basis, so this must too.
+    if degenerate.any():
+        u[degenerate] = (1.0, 0.0, 0.0)
+        v[degenerate] = (0.0, 1.0, 0.0)
+    return u, v
+
+
+def project_onto_bases(
+    positions: np.ndarray,
+    u_axes: np.ndarray,
+    v_axes: np.ndarray,
+    origins: np.ndarray,
+    texture_sizes: np.ndarray,
+) -> np.ndarray:
+    """project_corners' second half, per corner, with the bases already built.
+
+    Every argument is per CORNER: (N, 3) positions, (N, 3) u and v axes, (N, 3)
+    origins, (N, 2) texture sizes. The caller gathers a face's basis, centroid
+    and texture size onto that face's corners, which is what lets a whole
+    definition project in one call.
+    """
+    pts = np.asarray(positions, dtype=np.float64).reshape(-1, 3)
+    if pts.shape[0] == 0:
+        return np.zeros((0, 2), dtype=np.float32)
+    rel = pts - np.asarray(origins, dtype=np.float64).reshape(-1, 3)
+    sizes = np.asarray(texture_sizes, dtype=np.float64).reshape(-1, 2)
+    sizes = np.where(sizes == 0.0, 1.0, sizes)  # matches the scalar `or 1.0`
+    uvs = np.stack(
+        [
+            (rel * np.asarray(u_axes, dtype=np.float64)).sum(axis=1) / sizes[:, 0],
+            (rel * np.asarray(v_axes, dtype=np.float64)).sum(axis=1) / sizes[:, 1],
+        ],
+        axis=1,
+    )
+    return uvs.astype(np.float32)
+
+
+def apply_placements(
+    uvs: np.ndarray,
+    offsets: np.ndarray,
+    scales: np.ndarray,
+    rotations: np.ndarray,
+) -> np.ndarray:
+    """apply_placement per corner: (N, 2) offsets, (N,) scales and rotations.
+
+    Same contractual order — scale, then rotate, then offset. Rotation is
+    applied unconditionally rather than under the scalar's `if rotation:`,
+    which changes nothing: cos(0) and sin(0) are exactly 1.0 and 0.0, so a zero
+    rotation is the identity to the last bit.
+    """
+    out = np.asarray(uvs, dtype=np.float64).reshape(-1, 2)
+    if out.shape[0] == 0:
+        return np.zeros((0, 2), dtype=np.float32)
+    s = np.asarray(scales, dtype=np.float64).reshape(-1)
+    out = out / np.where(s == 0.0, 1.0, s)[:, None]
+    rot = np.asarray(rotations, dtype=np.float64).reshape(-1)
+    c, sn = np.cos(rot), np.sin(rot)
+    out = np.stack([out[:, 0] * c - out[:, 1] * sn, out[:, 0] * sn + out[:, 1] * c], axis=1)
+    out = out + np.asarray(offsets, dtype=np.float64).reshape(-1, 2)
+    return out.astype(np.float32)

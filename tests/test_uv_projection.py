@@ -4,7 +4,14 @@ from __future__ import annotations
 
 import numpy as np
 import pytest
-from pluton.viewport.uv_projection import apply_placement, plane_basis, project_corners
+from pluton.viewport.uv_projection import (
+    apply_placement,
+    apply_placements,
+    plane_bases,
+    plane_basis,
+    project_corners,
+    project_onto_bases,
+)
 
 _SQ = np.array(
     [[0.0, 0.0, 0.0], [2.0, 0.0, 0.0], [2.0, 2.0, 0.0], [0.0, 2.0, 0.0]], dtype=np.float64
@@ -140,6 +147,127 @@ def test_scale_is_applied_before_rotation_and_offset_last():
 def test_placement_returns_float32():
     out = apply_placement(np.zeros((3, 2), dtype=np.float32), 0.0, 0.0, 1.0, 0.0)
     assert out.dtype == np.float32
+
+
+# --- The batched siblings must agree with the scalar reference --------------
+#
+# The scalar trio above is the specification; the batched trio exists only
+# because the renderer bakes every corner of every face on every upload and the
+# per-face call overhead dominated it. These tests are what make that safe: if
+# the two paths ever disagree, the fast one is wrong by definition.
+
+
+def _varied_faces(seed=11):
+    """(normal, origin, texture_size, placement) cases spanning the awkward ones.
+
+    Deliberately includes both sides of the _AXIS_ALIGNED seed switch and its
+    boundary, unnormalised and negative normals, a zero-length normal, zero
+    texture extents (the scalar `or 1.0` fallback) and non-identity placements.
+    """
+    rng = np.random.default_rng(seed)
+    normals = [
+        [0.0, 0.0, 1.0],  # +Z, seed switch takes the X branch
+        [0.0, 0.0, -1.0],
+        [1.0, 0.0, 0.0],  # in-plane, takes the Z branch
+        [0.0, 1.0, 0.0],
+        [0.0, 0.0, 0.89],  # just below _AXIS_ALIGNED, unnormalised
+        [0.0, 0.0, 0.91],  # just above
+        [0.0, 0.6, 0.8],
+        [0.0, -0.6, -0.8],
+        [5.0, 0.0, 0.0],  # unnormalised
+        [-1.0, -2.0, -3.0],
+        [0.0, 0.0, 0.0],  # degenerate: no plane at all
+    ]
+    normals += [list(rng.normal(size=3)) for _ in range(40)]
+    sizes = [(1.0, 1.0), (0.5, 4.0), (3.0, 0.25), (0.0, 2.0), (2.0, 0.0), (0.0, 0.0)]
+    placements = [
+        (0.0, 0.0, 1.0, 0.0),  # identity
+        (0.25, -0.5, 1.0, 0.0),
+        (0.0, 0.0, 3.0, 0.0),
+        (0.0, 0.0, 1.0, 0.7),
+        (1.5, 2.5, 0.4, -2.1),
+        (0.0, 0.0, 0.0, 0.0),  # zero scale, the `or 1.0` fallback
+    ]
+    out = []
+    for i, n in enumerate(normals):
+        out.append(
+            (
+                np.asarray(n, dtype=np.float64),
+                rng.normal(scale=3.0, size=3),
+                sizes[i % len(sizes)],
+                placements[i % len(placements)],
+            )
+        )
+    return out
+
+
+def test_the_batched_basis_matches_the_scalar_basis_for_every_normal():
+    cases = _varied_faces()
+    normals = np.array([c[0] for c in cases])
+    bu, bv = plane_bases(normals)
+    for i, (n, _, _, _) in enumerate(cases):
+        su, sv = plane_basis(n)
+        np.testing.assert_allclose(bu[i], su, atol=1e-12, err_msg=f"u differs for {n}")
+        np.testing.assert_allclose(bv[i], sv, atol=1e-12, err_msg=f"v differs for {n}")
+
+
+def test_the_batched_projection_matches_the_scalar_one_corner_for_corner():
+    # Built exactly as the renderer builds it: each face contributes several
+    # corners, and the face's basis, origin and texture size are gathered onto
+    # them, so a mis-gather shows up here rather than on screen.
+    cases = _varied_faces()
+    rng = np.random.default_rng(5)
+
+    positions, origins, sizes, expected = [], [], [], []
+    for normal, origin, size, _ in cases:
+        corners = rng.normal(scale=2.0, size=(rng.integers(3, 9), 3))
+        positions.append(corners)
+        origins.append(np.repeat(origin[None, :], corners.shape[0], axis=0))
+        sizes.append(np.repeat(np.asarray(size)[None, :], corners.shape[0], axis=0))
+        expected.append(project_corners(corners, normal, origin, size))
+
+    normals_per_corner = np.concatenate(
+        [np.repeat(c[0][None, :], o.shape[0], axis=0) for c, o in zip(cases, origins, strict=True)]
+    )
+    u_axes, v_axes = plane_bases(normals_per_corner)
+    batched = project_onto_bases(
+        np.concatenate(positions),
+        u_axes,
+        v_axes,
+        np.concatenate(origins),
+        np.concatenate(sizes),
+    )
+
+    np.testing.assert_allclose(batched, np.concatenate(expected), rtol=0, atol=1e-6)
+    assert batched.dtype == np.float32
+
+
+def test_the_batched_placement_matches_the_scalar_one_row_for_row():
+    cases = _varied_faces(seed=3)
+    rng = np.random.default_rng(9)
+    uvs = rng.normal(scale=4.0, size=(len(cases), 2))
+
+    offsets = np.array([[p[0], p[1]] for _, _, _, p in cases])
+    scales = np.array([p[2] for _, _, _, p in cases])
+    rotations = np.array([p[3] for _, _, _, p in cases])
+
+    batched = apply_placements(uvs, offsets, scales, rotations)
+    for i, (_, _, _, p) in enumerate(cases):
+        one = apply_placement(uvs[i : i + 1], p[0], p[1], p[2], p[3])
+        np.testing.assert_allclose(batched[i], one[0], rtol=0, atol=1e-6)
+    assert batched.dtype == np.float32
+
+
+def test_the_batched_functions_answer_empty_input_like_the_scalar_ones():
+    assert project_onto_bases(
+        np.zeros((0, 3)), np.zeros((0, 3)), np.zeros((0, 3)), np.zeros((0, 3)), np.zeros((0, 2))
+    ).shape == (0, 2)
+    assert apply_placements(np.zeros((0, 2)), np.zeros((0, 2)), np.zeros(0), np.zeros(0)).shape == (
+        0,
+        2,
+    )
+    u, v = plane_bases(np.zeros((0, 3)))
+    assert u.shape == (0, 3) and v.shape == (0, 3)
 
 
 def test_the_module_imports_nothing_from_model_scene_qt_or_gl():

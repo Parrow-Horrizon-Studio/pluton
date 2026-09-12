@@ -12,12 +12,13 @@ import ctypes
 from collections.abc import Sequence
 from dataclasses import dataclass, field, replace
 from importlib.resources import files
+from typing import NamedTuple
 
 import numpy as np
 from OpenGL import GL
 
 from pluton.geometry.transforms import apply_mat, is_identity_transform
-from pluton.scene.scene import DEFAULT_PLACEMENT, Side
+from pluton.scene.scene import Side
 from pluton.viewport.camera import Camera
 from pluton.viewport.face_batches import BatchPlan, FaceBatch, plan_face_batches
 from pluton.viewport.render_style import (
@@ -35,7 +36,7 @@ from pluton.viewport.translucency import (
     triangle_centroids,
     triangle_order_to_vertex_order,
 )
-from pluton.viewport.uv_projection import apply_placement, project_corners
+from pluton.viewport.uv_projection import apply_placements, plane_bases, project_onto_bases
 
 
 def definition_is_dimmed(definition, model) -> bool:
@@ -318,6 +319,87 @@ def _face_corner_runs(face_ids: np.ndarray) -> list[tuple[int, int, int]]:
     ]
 
 
+class _FaceUvGeometry(NamedTuple):
+    """The half of the UV bake that does not depend on which side is baked.
+
+    The face walk, each face's plane basis and each face's centroid are the same
+    for the front and the back; only the texture_size and placement gathers
+    differ. Computing this once is what stops baking both sides costing twice
+    what baking one does.
+
+    `positions` and `origins` are per corner, and `counts` says how many corners
+    each entry of `face_ids` owns, which is how a per-face value is gathered onto
+    its corners.
+    """
+
+    face_ids: list[int]
+    counts: np.ndarray
+    positions: np.ndarray
+    origins: np.ndarray
+    u_axes: np.ndarray
+    v_axes: np.ndarray
+
+
+def _face_uv_geometry(scene, face_buffer=None) -> _FaceUvGeometry | None:
+    """Build the side-independent context, or None when there is nothing to bake."""
+    positions, normals = scene.face_triangle_buffer() if face_buffer is None else face_buffer
+    positions = np.asarray(positions, dtype=np.float64).reshape(-1, 3)
+    if positions.shape[0] == 0:
+        return None
+    normals = np.asarray(normals, dtype=np.float64).reshape(-1, 3)
+
+    runs = _face_corner_runs(scene.face_triangle_face_ids())
+    face_ids = [r[0] for r in runs]
+    counts = np.array([r[2] for r in runs], dtype=np.int64)
+
+    # The basis comes from the triangle buffer's normals, NOT from
+    # Scene.face_normal. face_normal takes the cross product of a face's first
+    # three loop vertices and raises when they are collinear — which is what
+    # splitting an edge leaves behind, on a face that triangulates and renders
+    # perfectly well. Its other callers are interactive tool code working on one
+    # picked face; this runs for every face of every upload, where a raise
+    # propagates out through paint() and blanks the whole viewport.
+    u_axes, v_axes = plane_bases(normals)
+
+    centers = np.array([scene.face_center(f) for f in face_ids], dtype=np.float64)
+    return _FaceUvGeometry(
+        face_ids=face_ids,
+        counts=counts,
+        positions=positions,
+        origins=np.repeat(centers, counts, axis=0),
+        u_axes=u_axes,
+        v_axes=v_axes,
+    )
+
+
+def _side_uvs(scene, materials, side: Side, geom: _FaceUvGeometry) -> np.ndarray:
+    """One side's (3T, 2) UVs from the shared geometry."""
+    if materials is None:
+        sizes = np.ones((geom.positions.shape[0], 2), dtype=np.float64)
+    else:
+        per_face = np.array(
+            [materials.get(scene.face_material(f, side)).texture_size for f in geom.face_ids],
+            dtype=np.float64,
+        )
+        sizes = np.repeat(per_face, geom.counts, axis=0)
+
+    uvs = project_onto_bases(geom.positions, geom.u_axes, geom.v_axes, geom.origins, sizes)
+
+    # The placement sidecars hold only adjusted faces, so a definition nobody has
+    # placed a texture on skips the gather entirely rather than reading the
+    # identity back for every face.
+    if not any(s is side for _, s in scene.faces_with_placement()):
+        return uvs
+
+    placements = [scene.face_placement(f, side) for f in geom.face_ids]
+    return apply_placements(
+        uvs,
+        np.repeat(np.array([(p.offset_u, p.offset_v) for p in placements]), geom.counts, axis=0),
+        np.repeat(np.array([p.scale for p in placements]), geom.counts),
+        np.repeat(np.array([p.rotation for p in placements]), geom.counts),
+    )
+
+
 def build_face_uvs(scene, model, side: Side = Side.FRONT, face_buffer=None) -> np.ndarray:
     """(3T, 2) per-corner UVs for one side of a definition's faces.
 
@@ -325,48 +407,27 @@ def build_face_uvs(scene, model, side: Side = Side.FRONT, face_buffer=None) -> n
     the result is aligned corner for corner with the position buffer. Faces with
     no texture still get UVs; they are simply never sampled.
 
-    `face_buffer` is an already-fetched (positions, normals) pair. _upload_definition
-    holds one and calls this once per side, so passing it avoids re-triangulating
-    the whole definition twice more.
+    `face_buffer` is an already-fetched (positions, normals) pair. Baking one
+    side at a time rebuilds the shared geometry each call; _upload_definition
+    needs both sides and uses build_face_uvs_both_sides instead.
     """
-    positions, normals = scene.face_triangle_buffer() if face_buffer is None else face_buffer
-    positions = np.asarray(positions, dtype=np.float64).reshape(-1, 3)
-    normals = np.asarray(normals, dtype=np.float64).reshape(-1, 3)
-    if positions.shape[0] == 0:
+    geom = _face_uv_geometry(scene, face_buffer)
+    if geom is None:
         return np.zeros((0, 2), dtype=np.float32)
+    return _side_uvs(scene, getattr(model, "materials", None), side, geom)
 
+
+def build_face_uvs_both_sides(scene, model, face_buffer=None) -> tuple[np.ndarray, np.ndarray]:
+    """(front, back) per-corner UVs, sharing one pass over the faces."""
+    geom = _face_uv_geometry(scene, face_buffer)
+    if geom is None:
+        empty = np.zeros((0, 2), dtype=np.float32)
+        return empty, empty
     materials = getattr(model, "materials", None)
-    out = np.zeros((positions.shape[0], 2), dtype=np.float32)
-
-    for f_id, first, count in _face_corner_runs(scene.face_triangle_face_ids()):
-        size = (1.0, 1.0)
-        if materials is not None:
-            size = materials.get(scene.face_material(f_id, side)).texture_size
-
-        # The normal comes from the triangle buffer, NOT from Scene.face_normal.
-        # face_normal takes the cross product of a face's first three loop
-        # vertices and raises when they are collinear — which is what splitting
-        # an edge leaves behind, on a face that triangulates and renders
-        # perfectly well. Its callers were all interactive tool code working on
-        # one picked face; this runs for every face of every upload, where a
-        # raise propagates out through paint() and blanks the whole viewport.
-        uvs = project_corners(
-            positions[first : first + count],
-            normals[first],
-            np.asarray(scene.face_center(f_id), dtype=np.float64),
-            size,
-        )
-        placement = scene.face_placement(f_id, side)
-        if placement != DEFAULT_PLACEMENT:
-            uvs = apply_placement(
-                uvs,
-                placement.offset_u,
-                placement.offset_v,
-                placement.scale,
-                placement.rotation,
-            )
-        out[first : first + count] = uvs
-    return out
+    return (
+        _side_uvs(scene, materials, Side.FRONT, geom),
+        _side_uvs(scene, materials, Side.BACK, geom),
+    )
 
 
 def uv_material_key(scene, model) -> tuple:
@@ -1407,8 +1468,7 @@ class SceneRenderer:
         face_buffer = scene.face_triangle_buffer()
         positions, normals = face_buffer
         if positions.shape[0] > 0:
-            front_uvs = build_face_uvs(scene, model, Side.FRONT, face_buffer)
-            back_uvs = build_face_uvs(scene, model, Side.BACK, face_buffer)
+            front_uvs, back_uvs = build_face_uvs_both_sides(scene, model, face_buffer)
             interleaved = np.concatenate([positions, normals, front_uvs, back_uvs], axis=1).astype(
                 np.float32
             )
