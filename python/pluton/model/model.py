@@ -6,6 +6,7 @@ from pluton.model.definition import Definition
 from pluton.model.instance import Instance
 from pluton.model.material import MaterialLibrary
 from pluton.model.tag import TagLibrary
+from pluton.model.texture import TextureLibrary
 
 
 class Model:
@@ -17,6 +18,7 @@ class Model:
         self.root = self.new_definition("Model", is_group=False)
         self.active_path: list[Instance] = []
         self.materials = MaterialLibrary()
+        self.textures = TextureLibrary()
         self.tags = TagLibrary()
         self.opening_definitions = {}  # M7b: (kind, w, h, depth) -> shared Component Definition
         self._next_annotation_id = 0  # M7d: model-wide unique annotation ids
@@ -224,6 +226,7 @@ class Model:
         self._next_def_id = other._next_def_id
         self._next_inst_id = other._next_inst_id
         self.materials = other.materials
+        self.textures = other.textures
         self.tags = other.tags
         self.opening_definitions = other.opening_definitions
         self._next_annotation_id = other._next_annotation_id

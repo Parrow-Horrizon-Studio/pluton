@@ -21,6 +21,8 @@ class Material:
     alpha: float = 1.0
     metallic: float = 0.0
     roughness: float = 0.5
+    texture_id: int | None = None
+    texture_size: tuple[float, float] = (1.0, 1.0)
 
     @property
     def is_translucent(self) -> bool:
@@ -118,22 +120,27 @@ class MaterialLibrary:
                 "alpha": m.alpha,
                 "metallic": m.metallic,
                 "roughness": m.roughness,
+                "texture_id": m.texture_id,
+                "texture_size": list(m.texture_size),
             }
             for m in self.materials()
         ]
 
     @classmethod
-    def from_records(cls, records: list[dict], next_id: int) -> MaterialLibrary:
+    def from_records(cls, records: list[dict], next_id: int | None = None) -> MaterialLibrary:
         """Rebuild authoritatively from saved records (no auto-seed).
 
         Accepts the schema <= 4 shape, which wrote "color" and carried no PBR
-        fields; those default to an opaque dielectric.
+        fields; those default to an opaque dielectric. Accepts the schema 5
+        shape, which carried no texture fields; those default to untextured.
         """
         lib = cls()  # seeds default + builtins, then we overwrite
         lib._materials = {}
         lib._order = []
         for r in records:
             color = r.get("base_color", r.get("color"))
+            texture_id = r.get("texture_id")
+            texture_size = r.get("texture_size", (1.0, 1.0))
             mat = Material(
                 int(r["id"]),
                 str(r["name"]),
@@ -141,9 +148,13 @@ class MaterialLibrary:
                 alpha=float(r.get("alpha", 1.0)),
                 metallic=float(r.get("metallic", 0.0)),
                 roughness=float(r.get("roughness", 0.5)),
+                texture_id=None if texture_id is None else int(texture_id),
+                texture_size=(float(texture_size[0]), float(texture_size[1])),
             )
             lib._materials[mat.id] = mat
             lib._order.append(mat.id)
         lib._default = lib._materials.get(cls.DEFAULT_ID, lib._default)
+        if next_id is None:
+            next_id = max((m.id for m in lib._materials.values()), default=-1) + 1
         lib._next_id = int(next_id)
         return lib
