@@ -139,6 +139,15 @@ class _GLRecorder:
         self.uniforms: dict[int, object] = {}
         self.active_unit: object = None
         self.bound: list[tuple[object, int]] = []
+        # Blending is enabled and then disabled again around each blended
+        # draw, so the interesting fact is whether it was EVER enabled, not
+        # what the flag reads at the end of the frame.
+        self.blend_enables = 0
+        self._consts: dict[str, int] = {}
+
+    def glEnable(self, cap):
+        if cap == self.GL_BLEND:
+            self.blend_enables += 1
 
     def glUniform1i(self, loc, value):
         self.uniforms[int(loc)] = int(value)
@@ -153,6 +162,11 @@ class _GLRecorder:
         self.bound.append((self.active_unit, int(tid)))
 
     def __getattr__(self, name):
+        # Names beginning GL_ resolve to stable ints rather than callables:
+        # render() ORs GL_COLOR_BUFFER_BIT with GL_DEPTH_BUFFER_BIT.
+        if name.startswith("GL_"):
+            return self._consts.setdefault(name, len(self._consts) + 1)
+
         def _call(*args, **kwargs):
             if name.startswith("glUniform") and args:
                 self.uniforms.setdefault(int(args[0]), None)
@@ -390,3 +404,82 @@ def test_an_opaque_textured_batch_still_draws_unblended():
     )
     assert front.blend is False
     assert front.depth_write is True
+
+
+# --- End to end through render() --------------------------------------------
+#
+# Everything above tests a seam. None of it would notice render() forgetting to
+# pass `textures` or `translucent_ids` through to the two functions that need
+# them — a wiring bug with no grep-visible symptom, in the one path that is
+# only exercised on a GPU.
+
+
+def _square(scene, z=0.0):
+    v = [
+        scene.add_vertex(np.array([0.0, 0.0, z], dtype=np.float32)),
+        scene.add_vertex(np.array([1.0, 0.0, z], dtype=np.float32)),
+        scene.add_vertex(np.array([1.0, 1.0, z], dtype=np.float32)),
+        scene.add_vertex(np.array([0.0, 1.0, z], dtype=np.float32)),
+    ]
+    for a, b in zip(v, v[1:] + v[:1], strict=True):
+        scene.add_edge(a, b)
+    return scene.add_face_from_loop(v)
+
+
+def _rendered(monkeypatch, *, transparent: bool, style: RenderStyle | None = None):
+    from pluton.model.model import Model
+    from pluton.viewport.camera import Camera
+    from pluton.viewport.scene_renderer import _LINE_UNIFORMS, SceneRenderer
+
+    recorder = _GLRecorder()
+    # A real GL id, because 0 is what "untextured" means downstream.
+    recorder.glGenTextures = lambda _n: 101
+    monkeypatch.setattr(sr, "GL", recorder)
+
+    model = Model()
+    face = _square(model.root.mesh)
+    tex = model.textures.add(
+        "t.png", _CUTOUT_PNG if transparent else _OPAQUE_PNG, "png", 1, 1, transparent
+    )
+    mat = model.materials.add_custom("Painted", (1.0, 1.0, 1.0))
+    model.materials.edit(mat.id, texture_id=tex.id)
+    model.root.mesh.set_face_material(face, mat.id)
+
+    renderer = SceneRenderer()
+    renderer._initialized = True
+    renderer._phong_program = 1
+    renderer._line_program = 2
+    renderer._phong_locs = {n: i for i, n in enumerate(_PHONG_UNIFORMS)}
+    renderer._line_locs = {n: i for i, n in enumerate(_LINE_UNIFORMS)}
+    renderer._texture_cache = sr.TextureCache(gl=recorder)
+    if style is not None:
+        renderer.set_render_style(style)
+    renderer.render(Camera(), model)
+    return renderer, recorder
+
+
+def test_render_carries_the_model_texture_all_the_way_to_the_draw(monkeypatch):
+    renderer, recorder = _rendered(monkeypatch, transparent=False)
+
+    locs = renderer._phong_locs
+    assert recorder.uniforms[locs["u_has_texture"]] == 1.0
+    assert (sr._TEXTURE_UNIT_ENUM[sr._TEXTURE_UNIT_FRONT], 101) in recorder.bound
+
+
+def test_render_does_not_texture_under_a_style_that_has_no_colour(monkeypatch):
+    renderer, recorder = _rendered(
+        monkeypatch, transparent=False, style=RenderStyle(face_style=FaceStyle.MONOCHROME)
+    )
+
+    assert recorder.uniforms[renderer._phong_locs["u_has_texture"]] == 0.0
+    assert 101 not in {tid for _, tid in recorder.bound}
+
+
+def test_render_blends_a_cutout_and_leaves_an_opaque_texture_unblended(monkeypatch):
+    # The end of the chain _translucent_ids starts: render() has to reach
+    # resolve_batch_sides with the set, or the cutout draws solid.
+    _, cutout_gl = _rendered(monkeypatch, transparent=True)
+    assert cutout_gl.blend_enables == 1
+
+    _, opaque_gl = _rendered(monkeypatch, transparent=False)
+    assert opaque_gl.blend_enables == 0
