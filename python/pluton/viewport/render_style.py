@@ -81,6 +81,7 @@ def face_uniforms(
     bg: tuple[float, float, float],
     material: PhongMaterial,
     xray: bool,
+    material_alpha: float = 1.0,
 ) -> FaceUniforms:
     """Map a shading mode to concrete phong material uniforms + alpha.
 
@@ -88,8 +89,11 @@ def face_uniforms(
     UNIFORM → material ambient/specular, but MONO_COLOR diffuse (Monochrome).
     FLAT_BG → unlit fill: ambient = bg, diffuse/specular = 0 (Hidden Line).
     X-Ray   → alpha = XRAY_ALPHA (else 1.0), orthogonal to shading.
+    material_alpha → the material's own opacity; multiplies into the result
+                      so a translucent material and X-Ray compose rather than
+                      one winning outright.
     """
-    alpha = XRAY_ALPHA if xray else 1.0
+    alpha = (XRAY_ALPHA if xray else 1.0) * float(material_alpha)
     if shading is FaceShading.LIT:
         return FaceUniforms(
             material.ambient, material.diffuse, material.specular, material.shininess, alpha
@@ -125,12 +129,16 @@ def resolve_face_pass(
     dim_ambient: tuple[float, float, float],
     dim_diffuse: tuple[float, float, float],
     dim_alpha: float,
+    material_alpha: float = 1.0,
 ) -> ResolvedFacePass:
     """Compose face style + X-Ray + the M4e dim pass into one face-pass result.
 
     Dim overrides ambient/diffuse to the desaturated dim colors (preserving the
     M4e look at the Shaded default) and multiplies alpha; X-Ray sets alpha to
     XRAY_ALPHA and turns depth writes off so geometry behind shows through.
+    A translucent material_alpha behaves like X-Ray for depth purposes: it
+    also stops writing depth, since blended geometry drawn back-to-front
+    should not occlude what is behind it.
     """
     desc = FACE_STYLE_TABLE[style.face_style]
     if not desc.draw_faces:
@@ -144,7 +152,9 @@ def resolve_face_pass(
             blend=False,
             depth_write=True,
         )
-    fu = face_uniforms(desc.shading, bg=bg, material=material, xray=style.xray)
+    fu = face_uniforms(
+        desc.shading, bg=bg, material=material, xray=style.xray, material_alpha=material_alpha
+    )
     if dimmed:
         ambient, diffuse, alpha = dim_ambient, dim_diffuse, fu.alpha * dim_alpha
     else:
@@ -157,31 +167,66 @@ def resolve_face_pass(
         shininess=fu.shininess,
         alpha=alpha,
         blend=(alpha < 1.0),
-        depth_write=(not style.xray),
+        depth_write=(not style.xray and float(material_alpha) >= 1.0),
     )
 
 
-# --- M5b: painted-material -> phong uniforms -------------------------------
-# These mirror scene_renderer._MATERIAL_SPECULAR / _MATERIAL_SHININESS so a
-# painted face gets the same highlight character as the default look; only the
-# hue varies. Duplicated here (not imported) to keep render_style import-free
-# of the GL renderer. A guard test asserts they stay in sync.
+# --- M5b/M7.5a: painted-material -> phong uniforms --------------------------
+# phong_material_for approximates a PBR (base_color/metallic/roughness) input
+# with Blinn-Phong terms, so painted faces respond to every editable field
+# instead of only hue. Duplicated math (not imported) to keep render_style
+# import-free of the GL renderer and of pluton.model. Unpainted front faces
+# keep using scene_renderer._DEFAULT_MATERIAL directly, unchanged, so its
+# hand-tuned specular/shininess no longer need to match this derivation (see
+# test_phong_material_for.py's guard for the one case that still ties them
+# together).
 _AMBIENT_FACTOR = 0.55
-_DEFAULT_SPECULAR = (0.10, 0.10, 0.10)
-_DEFAULT_SHININESS = 16.0
+_DIELECTRIC_F0 = 0.04  # normal-incidence reflectance of a non-metal
+_MIN_SHININESS = 1.0
+_MAX_SHININESS = 256.0
+
+# The unpainted back-face colour. A renderer constant rather than a library
+# entry (spec D3), so it never appears as a swatch; its only job is to make a
+# reversed face obvious.
+BACK_DEFAULT_COLOR = (0.45, 0.50, 0.58)
 
 
-def phong_material_for(color: tuple[float, float, float]) -> PhongMaterial:
-    """Map a painted base RGB to phong uniforms.
+def _mix(a: float, b: float, t: float) -> float:
+    return a * (1.0 - t) + b * t
 
-    diffuse = color; ambient = color * _AMBIENT_FACTOR; specular/shininess are
-    the shared defaults. Does NOT reproduce _DEFAULT_MATERIAL (whose terms are
-    hand-tuned); unpainted faces keep using _DEFAULT_MATERIAL directly.
+
+def phong_material_for(
+    base_color: tuple[float, float, float],
+    *,
+    metallic: float = 0.0,
+    roughness: float = 0.5,
+) -> PhongMaterial:
+    """Approximate a PBR material with Blinn-Phong terms.
+
+    diffuse  = base_color * (1 - metallic)      metals have no diffuse lobe
+    specular = mix(0.04, base_color, metallic)  dielectric F0, tinted for metals
+    shininess = clamp(2 / roughness**4 - 2)     the standard Blinn-Phong
+                                                 to roughness equivalence
+    ambient  = base_color * _AMBIENT_FACTOR * (1 - metallic)
+
+    An approximation, not real PBR: M12's renderer will not match it pixel for
+    pixel. What it buys is that every editable field changes what you see.
     """
-    r, g, b = float(color[0]), float(color[1]), float(color[2])
+    r, g, b = float(base_color[0]), float(base_color[1]), float(base_color[2])
+    m = min(max(float(metallic), 0.0), 1.0)
+    rough = min(max(float(roughness), 0.0), 1.0)
+
+    kd = 1.0 - m
+    alpha_r = max(rough, 1e-3) ** 4
+    shininess = min(max(2.0 / alpha_r - 2.0, _MIN_SHININESS), _MAX_SHININESS)
+
     return PhongMaterial(
-        ambient=(r * _AMBIENT_FACTOR, g * _AMBIENT_FACTOR, b * _AMBIENT_FACTOR),
-        diffuse=(r, g, b),
-        specular=_DEFAULT_SPECULAR,
-        shininess=_DEFAULT_SHININESS,
+        ambient=(r * _AMBIENT_FACTOR * kd, g * _AMBIENT_FACTOR * kd, b * _AMBIENT_FACTOR * kd),
+        diffuse=(r * kd, g * kd, b * kd),
+        specular=(
+            _mix(_DIELECTRIC_F0, r, m),
+            _mix(_DIELECTRIC_F0, g, m),
+            _mix(_DIELECTRIC_F0, b, m),
+        ),
+        shininess=shininess,
     )
