@@ -690,3 +690,43 @@ def test_edit_color_is_a_noop_without_an_injected_command_stack(qtbot, monkeypat
     page._on_edit_color()  # no command_stack injected -> must not raise or mutate
 
     assert lib.get(walls.id).color == before
+
+
+def test_the_dim_pass_still_dims_under_a_tag_colour():
+    # M7.5b (#107 item 4). scene_renderer's resolve_tag_color docstring claims
+    # "the dim pass still dims", but nothing asserted it: every other seam test
+    # in this file passes dimmed=False. The behaviour genuinely changed during
+    # M7.5a's final fix wave -- the old post-resolution patch let the tag colour
+    # win over the dim colours, and resolving FROM the tag colour instead means
+    # _DIM_DIFFUSE/_DIM_AMBIENT correctly take precedence again.
+    #
+    # Red-probed against two opposite mutations, both of which it kills:
+    #   - render_style dropping the dim override (`ambient, diffuse =
+    #     fu.ambient, fu.diffuse`) lets the tag colour win, and the
+    #     _DIM_AMBIENT/_DIM_DIFFUSE assertions fail.
+    #   - resolve_batch_sides ignoring its tag_color argument resolves from the
+    #     painted materials instead, and the specular assertion fails.
+    # Note the second mutation has to be in resolve_batch_sides itself, not in
+    # resolve_tag_color: this test passes tag_color directly, so stubbing the
+    # resolver never reaches it.
+    from pluton.model.material import MaterialLibrary
+    from pluton.viewport.render_style import phong_material_for
+    from pluton.viewport.scene_renderer import _DIM_AMBIENT, _DIM_DIFFUSE
+
+    lib = MaterialLibrary()
+    gold = lib.add_custom("Gold", (0.9, 0.75, 0.2))
+    lib.edit(gold.id, metallic=1.0)
+    blue = lib.add_custom("Blue", (0.1, 0.1, 0.8))
+    color = (0.2, 0.55, 0.9)
+
+    front, back = resolve_batch_sides(
+        _batch(gold.id, blue.id), lib, RenderStyle(), dimmed=True, tag_color=color
+    )
+
+    for side in (front, back):
+        # Dim owns the colour terms it overrides.
+        assert side.ambient == pytest.approx(_DIM_AMBIENT)
+        assert side.diffuse == pytest.approx(_DIM_DIFFUSE)
+        # But the tag still drives what dim does not override, so the batch was
+        # resolved FROM the tag colour rather than from either material.
+        assert side.specular == pytest.approx(phong_material_for(color).specular)
