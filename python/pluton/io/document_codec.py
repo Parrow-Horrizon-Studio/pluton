@@ -223,15 +223,34 @@ def model_from_dict(data: dict) -> Model:
 
 
 def render_style_to_dict(style: RenderStyle) -> dict:
-    """Serialize the document's render style (face style name + X-Ray)."""
-    return {"face_style": style.face_style.name, "xray": bool(style.xray)}
+    """Serialize the document's render style (face style, X-Ray, Color-by-Tag).
+
+    Every field of RenderStyle belongs here: a display mode the user turned on
+    and then saved must be on again when the document reopens. color_by_tag
+    (M7.5a) was missed on its first pass, so a document saved in the mode came
+    back with it off.
+    """
+    return {
+        "face_style": style.face_style.name,
+        "xray": bool(style.xray),
+        "color_by_tag": bool(style.color_by_tag),
+    }
 
 
 def render_style_from_dict(d: dict | None) -> RenderStyle:
-    """Rebuild a RenderStyle; missing/empty data yields the default (SHADED)."""
+    """Rebuild a RenderStyle; missing/empty data yields the default (SHADED).
+
+    Each optional key is read with a default, so a schema-5 file written before
+    color_by_tag was persisted (and every older file) still loads, with the
+    mode off.
+    """
     if not d:
         return RenderStyle()
-    return RenderStyle(face_style=FaceStyle[d["face_style"]], xray=bool(d.get("xray", False)))
+    return RenderStyle(
+        face_style=FaceStyle[d["face_style"]],
+        xray=bool(d.get("xray", False)),
+        color_by_tag=bool(d.get("color_by_tag", False)),
+    )
 
 
 @dataclass(frozen=True)

@@ -64,3 +64,22 @@ def _hidden_roof_tags():
     lib = _tags()
     lib.set_visible(2, False)
     return lib
+
+
+def test_capture_and_apply_carry_color_by_tag():
+    # The final-review finding's second consequence: a Scene recalled via
+    # apply_tags_and_style left color_by_tag at whatever it currently was, so
+    # a Scene captured in the mode did not reproduce it -- and a Scene
+    # captured OUT of it did not turn it back off. Both directions asserted.
+    tags = _tags()
+
+    on = capture_view(0, "On", Camera(), tags, RenderStyle(color_by_tag=True))
+    assert on.color_by_tag is True
+    live = RenderStyle(color_by_tag=False)
+    apply_tags_and_style(on, tags, live)
+    assert live.color_by_tag is True
+
+    off = capture_view(1, "Off", Camera(), tags, RenderStyle(color_by_tag=False))
+    assert off.color_by_tag is False
+    apply_tags_and_style(off, tags, live)
+    assert live.color_by_tag is False

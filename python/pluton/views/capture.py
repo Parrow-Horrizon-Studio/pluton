@@ -22,6 +22,7 @@ def capture_view(view_id, name, camera, tag_library, render_style) -> SavedView:
         tag_visibility=tag_visibility,
         face_style=render_style.face_style.name,
         xray=bool(render_style.xray),
+        color_by_tag=bool(render_style.color_by_tag),
     )
 
 
@@ -32,6 +33,10 @@ def apply_tags_and_style(view, tag_library, render_style) -> None:
         tag_library.set_visible(int(tid), bool(visible))
     render_style.face_style = FaceStyle[view.face_style]
     render_style.xray = bool(view.xray)
+    # Every RenderStyle field the SavedView carries is restored, not just the
+    # two the Scene shipped with: leaving color_by_tag alone would let a Scene
+    # recall reproduce the camera and the tags but not the display mode.
+    render_style.color_by_tag = bool(view.color_by_tag)
 
 
 def apply_view(view, camera, tag_library, render_style) -> None:

@@ -22,3 +22,10 @@ class SavedView:
     tag_visibility: dict  # dict[int, bool] — {tag_id: visible} at capture time
     face_style: str  # FaceStyle member name, e.g. "SHADED"
     xray: bool
+    # M7.5a. Defaulted (and therefore last) so a record written before the
+    # Color-by-Tag mode existed rebuilds without it, and so the many positional
+    # SavedView(...) constructions elsewhere keep working. A Scene's whole job
+    # is reproducing a view, so every RenderStyle field has to be captured here
+    # or recalling the Scene silently leaves that one at whatever it happens to
+    # be now.
+    color_by_tag: bool = False

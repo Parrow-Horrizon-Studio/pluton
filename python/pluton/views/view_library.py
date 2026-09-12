@@ -89,6 +89,7 @@ class ViewLibrary:
                     "tag_visibility": {str(k): bool(vis) for k, vis in v.tag_visibility.items()},
                     "face_style": str(v.face_style),
                     "xray": bool(v.xray),
+                    "color_by_tag": bool(v.color_by_tag),
                 }
             )
         return records
@@ -107,6 +108,9 @@ class ViewLibrary:
                     },
                     face_style=str(r["face_style"]),
                     xray=bool(r["xray"]),
+                    # Tolerant: a Scene saved before M7.5a carries no such key
+                    # and must still load, with the mode off.
+                    color_by_tag=bool(r.get("color_by_tag", False)),
                 )
             )
         lib._next_id = int(next_id)

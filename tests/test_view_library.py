@@ -72,3 +72,37 @@ def test_records_round_trip_preserves_order_and_next_id():
     assert [v.name for v in rebuilt.views()] == ["A", "B"]
     assert rebuilt.get(0).tag_visibility == {0: False}   # keys back to int
     assert rebuilt.next_id == 4
+
+
+def test_color_by_tag_round_trips_through_records():
+    # A Scene's job is reproducing a view, so every RenderStyle field it
+    # captures has to survive persistence. color_by_tag was written nowhere
+    # (the final-review finding), so a Scene saved in the mode came back
+    # without it.
+    cam = CameraState(position=(0.0, 0.0, 0.0), target=(0.0, 0.0, 0.0),
+                      up=(0.0, 0.0, 1.0), fov_y_deg=45.0)
+    lib = ViewLibrary()
+    lib.add(SavedView(0, "Tagged", cam, {}, "SHADED", False, True))
+
+    records = lib.to_records()
+    assert records[0]["color_by_tag"] is True
+
+    rebuilt = ViewLibrary.from_records(records, lib.next_id)
+    assert rebuilt.get(0).color_by_tag is True
+
+
+def test_a_record_without_color_by_tag_still_loads():
+    # Every Scene written before M7.5a lacks the key and must still open.
+    records = [
+        {
+            "id": 0,
+            "name": "Old",
+            "camera": {"position": [0.0, 0.0, 0.0], "target": [0.0, 0.0, 0.0],
+                       "up": [0.0, 0.0, 1.0], "fov_y_deg": 45.0},
+            "tag_visibility": {},
+            "face_style": "SHADED",
+            "xray": False,
+        }
+    ]
+    lib = ViewLibrary.from_records(records, 1)
+    assert lib.get(0).color_by_tag is False

@@ -183,13 +183,44 @@ def test_document_dict_round_trips_scenes_and_style():
     data = document_to_dict(model, Camera(), DocumentSettings(), style)
     assert data["scenes"]["items"][0]["name"] == "Front"
     assert data["scenes"]["items"][0]["tag_visibility"] == {"1": False}
-    assert data["style"] == {"face_style": "MONOCHROME", "xray": True}
+    assert data["style"] == {"face_style": "MONOCHROME", "xray": True, "color_by_tag": False}
 
     loaded = document_from_dict(data)
     assert [v.name for v in loaded.model.views.views()] == ["Front"]
     assert loaded.model.views.get(0).tag_visibility == {1: False}
     assert loaded.style.face_style is FaceStyle.MONOCHROME
     assert loaded.style.xray is True
+
+
+def test_color_by_tag_survives_a_document_round_trip():
+    # The final-review finding: render_style_to_dict wrote only face_style and
+    # xray, so a document saved with Color-by-Tag on reopened with it off. The
+    # assertion is on the LOADED style, not on the dict, so it fails for a
+    # writer that emits the key and a reader that ignores it too.
+    from pluton.document import DocumentSettings
+    from pluton.io.document_codec import document_from_dict, document_to_dict
+    from pluton.model.model import Model
+    from pluton.viewport.camera import Camera
+    from pluton.viewport.render_style import FaceStyle, RenderStyle
+
+    style = RenderStyle(face_style=FaceStyle.HIDDEN_LINE, xray=True, color_by_tag=True)
+    data = document_to_dict(Model(), Camera(), DocumentSettings(), style)
+
+    loaded = document_from_dict(data)
+    assert loaded.style == style
+
+
+def test_a_style_block_without_color_by_tag_still_loads():
+    # Schema 5 already carries the key's absence: every .pluton written before
+    # this fix has a "style" block with only face_style and xray. Those files
+    # must open, with the mode off rather than a KeyError.
+    from pluton.io.document_codec import render_style_from_dict
+    from pluton.viewport.render_style import FaceStyle
+
+    style = render_style_from_dict({"face_style": "WIREFRAME", "xray": True})
+    assert style.face_style is FaceStyle.WIREFRAME
+    assert style.xray is True
+    assert style.color_by_tag is False
 
 
 def test_document_from_dict_without_scenes_or_style_uses_defaults():
