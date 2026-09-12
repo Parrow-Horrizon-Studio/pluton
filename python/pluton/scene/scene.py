@@ -52,27 +52,48 @@ def _project_loop_to_2d_for_earcut(positions_3d: np.ndarray) -> np.ndarray:
 
     Returns an (N, 2) float32 array suitable for mapbox_earcut. The projection
     plane is the one perpendicular to the largest component of the polygon's
-    geometric normal (cross product of the first two boundary edges):
-      - normal mostly +Z → XY projection
-      - normal mostly +X → YZ projection
-      - normal mostly +Y → XZ projection
-    Without this, vertical faces collapse to collinear points in XY and earcut
-    returns zero triangles.
+    normal (Newell's method over the whole loop, so a reflex first corner
+    cannot flip the estimate the way a single edge cross product can). Without
+    this, vertical faces collapse to collinear points in XY and earcut returns
+    zero triangles.
+
+    The SIGN of that dominant component decides the ORDER of the axis pair, and
+    it matters as much as the choice of plane. Earcut emits triangles wound the
+    same way as the 2D ring it is handed, and those indices are fed straight to
+    the renderer; if the projection mirrors the loop, every triangle of that
+    face comes back wound backwards relative to the face's own normal. Only a
+    right-handed pair (u, v) — one where u x v points along the normal —
+    preserves the loop's orientation:
+
+        +Z -> (x, y)    -Z -> (y, x)
+        +X -> (y, z)    -X -> (z, y)
+        +Y -> (z, x)    -Y -> (x, z)
+
+    Picking the pair from abs(n) instead mirrors three of those six cases, which
+    is what made three of a box's six faces render with their back material
+    (fixed in v0.7.1; invisible before M7.5a gave the two sides distinct looks).
     """
     if positions_3d.shape[0] < 3:
         return positions_3d[:, :2].astype(np.float32)
-    p0 = positions_3d[0]
-    p1 = positions_3d[1]
-    p2 = positions_3d[2]
-    e1 = p1 - p0
-    e2 = p2 - p0
-    n = np.cross(e1, e2)
-    ax, ay, az = abs(float(n[0])), abs(float(n[1])), abs(float(n[2]))
+    # Newell's method: sum over every loop edge, robust to concave corners.
+    p = positions_3d.astype(np.float64)
+    q = np.roll(p, -1, axis=0)
+    n = np.array(
+        [
+            float(np.sum((p[:, 1] - q[:, 1]) * (p[:, 2] + q[:, 2]))),
+            float(np.sum((p[:, 2] - q[:, 2]) * (p[:, 0] + q[:, 0]))),
+            float(np.sum((p[:, 0] - q[:, 0]) * (p[:, 1] + q[:, 1]))),
+        ]
+    )
+    nx, ny, nz = float(n[0]), float(n[1]), float(n[2])
+    ax, ay, az = abs(nx), abs(ny), abs(nz)
     if az >= ax and az >= ay:
-        return positions_3d[:, :2].astype(np.float32)  # XY
-    if ax >= ay:
-        return np.stack([positions_3d[:, 1], positions_3d[:, 2]], axis=1).astype(np.float32)  # YZ
-    return np.stack([positions_3d[:, 0], positions_3d[:, 2]], axis=1).astype(np.float32)  # XZ
+        u, v = (0, 1) if nz >= 0.0 else (1, 0)  # +Z -> (x, y) / -Z -> (y, x)
+    elif ax >= ay:
+        u, v = (1, 2) if nx >= 0.0 else (2, 1)  # +X -> (y, z) / -X -> (z, y)
+    else:
+        u, v = (2, 0) if ny >= 0.0 else (0, 2)  # +Y -> (z, x) / -Y -> (x, z)
+    return np.stack([positions_3d[:, u], positions_3d[:, v]], axis=1).astype(np.float32)
 
 
 class Scene:
