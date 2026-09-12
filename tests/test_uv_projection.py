@@ -24,14 +24,29 @@ def test_the_basis_is_orthonormal_and_perpendicular_to_the_normal():
         assert float(np.dot(v, nn)) == pytest.approx(0.0, abs=1e-9)
 
 
-def test_the_basis_does_not_depend_on_vertex_order():
-    # The reason this module derives the basis from the NORMAL rather than from
-    # the first edge. An edge-derived basis spins the texture whenever an
-    # unrelated edit changes which vertex a loop starts at.
+def test_the_basis_is_deterministic_for_a_given_normal():
+    # plane_basis takes no vertex argument, so this only pins purity/
+    # determinism: same normal in, same basis out. The actual guarantee that
+    # the basis does not depend on vertex order comes from the function's
+    # signature (no vertex list to leak through) and is exercised end to end,
+    # at the project_corners level, by
+    # test_rotating_the_corner_list_does_not_move_the_uvs below.
     u1, v1 = plane_basis(_UP)
     u2, v2 = plane_basis(_UP.copy())
     assert np.allclose(u1, u2)
     assert np.allclose(v1, v2)
+
+
+def test_rotating_the_corner_list_does_not_move_the_uvs():
+    # The invariant test_the_basis_is_deterministic_for_a_given_normal cannot
+    # reach: an edge-derived basis would give each physical corner a different
+    # UV depending on where the loop starts. Rolling the corner list must not
+    # move any physical corner's UV, because the basis comes from the normal
+    # alone, never from positions[0] or positions[1].
+    rolled = np.roll(_SQ, 1, axis=0)
+    original_uvs = project_corners(_SQ, _UP, _CENTRE, (1.0, 1.0))
+    rolled_uvs = project_corners(rolled, _UP, _CENTRE, (1.0, 1.0))
+    np.testing.assert_allclose(rolled_uvs, np.roll(original_uvs, 1, axis=0), atol=1e-6)
 
 
 def test_a_unit_texture_on_a_two_unit_square_tiles_twice():
