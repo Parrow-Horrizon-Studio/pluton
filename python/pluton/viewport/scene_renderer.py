@@ -23,6 +23,8 @@ from pluton.viewport.camera import Camera
 from pluton.viewport.face_batches import BatchPlan, FaceBatch, plan_face_batches
 from pluton.viewport.render_style import (
     BACK_DEFAULT_COLOR,
+    FACE_STYLE_TABLE,
+    FaceShading,
     PhongMaterial,
     RenderStyle,
     ResolvedFacePass,
@@ -30,6 +32,7 @@ from pluton.viewport.render_style import (
     resolve_face_pass,
 )
 from pluton.viewport.snap_engine import SnapKind
+from pluton.viewport.texture_cache import TextureCache
 from pluton.viewport.translucency import (
     order_back_to_front,
     transform_points,
@@ -178,6 +181,31 @@ _PHONG_UNIFORMS = (
     "u_material_specular_back",
     "u_material_shininess_back",
     "u_alpha_back",
+    # M7.5b Task 6 — the material's image, per side. The samplers carry a unit
+    # index and are set once after linking (_bind_sampler_units); the two flags
+    # are per-batch draw state.
+    "u_texture",
+    "u_texture_back",
+    "u_has_texture",
+    "u_has_texture_back",
+)
+# The subset of _PHONG_UNIFORMS that is program state rather than per-draw
+# state. tests/test_two_sided_shading.py exempts exactly these from its
+# "every cached uniform is written during a face draw" guard, and
+# tests/test_textured_shading.py guards them at their own link-time setter.
+_PHONG_LINK_TIME_UNIFORMS = ("u_texture", "u_texture_back")
+
+# Two texture units, because both sides of a face are shaded in one draw call
+# and each side can carry its own image. One unit would make the back silently
+# sample the front's texture -- a bug that looks perfectly correct from the
+# front. The GL enums are derived once at import: the draw path must not do
+# arithmetic on a GL constant, since a recording stand-in for the GL module
+# (used by several renderer tests) supplies callables, not ints.
+_TEXTURE_UNIT_FRONT = 0
+_TEXTURE_UNIT_BACK = 1
+_TEXTURE_UNIT_ENUM = (
+    GL.GL_TEXTURE0 + _TEXTURE_UNIT_FRONT,
+    GL.GL_TEXTURE0 + _TEXTURE_UNIT_BACK,
 )
 _LINE_UNIFORMS = ("u_view", "u_projection")
 _GHOST_FILL_UNIFORMS = ("u_view", "u_projection", "u_color")
@@ -484,11 +512,54 @@ def uv_key_still_matches(key: tuple, model) -> bool:
     return True
 
 
-def _translucent_ids(materials) -> frozenset[int]:
-    """Ids of every translucent material in the library (empty when None)."""
+def _translucent_ids(materials, textures) -> frozenset[int]:
+    """Ids of every material that must draw in the sorted translucent pass.
+
+    Two ways in, not one. The material's own alpha is the M7.5a rule. M7.5b
+    adds a second: a texture with transparent texels. A cutout PNG on an
+    alpha-1.0 material is fully opaque by the first test and still belongs in
+    the second pass -- drawn opaque it writes depth through its own holes and
+    shows the background colour instead of what is behind it.
+
+    `textures` is positional and has no default on purpose: a caller that
+    forgot it would quietly drop every cutout back into the opaque pass, which
+    looks like nothing happened. Passing None is still allowed and means the
+    model has no texture library, so nothing can enter by the second route.
+    """
     if materials is None:
         return frozenset()
-    return frozenset(m.id for m in materials.materials() if m.is_translucent)
+    ids: set[int] = set()
+    for m in materials.materials():
+        if m.is_translucent:
+            ids.add(m.id)
+            continue
+        if m.texture_id is None or textures is None:
+            continue
+        tex = textures.get(m.texture_id)
+        if tex is not None and tex.has_transparency:
+            ids.add(m.id)
+    return frozenset(ids)
+
+
+def textures_visible(style: RenderStyle, *, tag_color: tuple | None) -> bool:
+    """Does this style show material textures?
+
+    A texture is part of a material's own colour contribution, so it applies
+    exactly where that colour applies. Hidden Line fills with the background
+    colour and Monochrome with MONO_COLOR, both deliberately discarding the
+    painted colour; Color-by-Tag replaces the material outright before
+    resolution. Multiplying any of those by a texel would put the image back
+    into a mode whose entire point is that it has none -- and Hidden Line's
+    flat fill would come out modulated by the image rather than flat.
+
+    Deliberately NOT consulted by _translucent_ids: the opaque/translucent
+    partition is baked into the vertex buffer, so making it style-dependent
+    would re-upload every textured definition on every style toggle. A cutout
+    under one of these styles therefore still draws in the sorted pass, but
+    with nothing sampled its alpha stays 1.0 and it fills solid, which is what
+    the style asks for.
+    """
+    return tag_color is None and FACE_STYLE_TABLE[style.face_style].shading is FaceShading.LIT
 
 
 def _material_terms(materials, mid: int, side: Side) -> tuple[PhongMaterial, float]:
@@ -517,6 +588,7 @@ def resolve_batch_sides(
     *,
     dimmed: bool,
     tag_color: tuple[float, float, float] | None = None,
+    translucent_ids: frozenset[int] = frozenset(),
 ) -> tuple[ResolvedFacePass, ResolvedFacePass]:
     """Resolve one batch into its front and back face passes.
 
@@ -541,6 +613,14 @@ def resolve_batch_sides(
     Each side keeps its OWN alpha. Alpha is not a colour: a translucent
     material under Color-by-Tag must still blend and still sort into the
     translucent pass, so opacity is deliberately not bypassed.
+
+    `translucent_ids` is the same set the buffer partition was built from (see
+    _translucent_ids). It is needed here because a CUTOUT texture is
+    translucent in a way no argument below can see: the material's own alpha is
+    1.0, so resolve_face_pass would leave blending off, the fragment shader's
+    sampled alpha would be written into a buffer that ignores it, and the holes
+    would come out solid. Defaulting to the empty set means "nothing is
+    translucent", which is what a caller with no material library has.
     """
     front_mat, front_alpha = _material_terms(materials, batch.front_material_id, Side.FRONT)
     back_mat, back_alpha = _material_terms(materials, batch.back_material_id, Side.BACK)
@@ -562,8 +642,14 @@ def resolve_batch_sides(
 
     front = _resolve(front_mat, front_alpha)
     back = _resolve(back_mat, back_alpha)
-    blend = front.blend or back.blend
-    depth_write = front.depth_write and back.depth_write
+    # Joins the same batch-wide or/and combine as the per-side flags: a
+    # material whose texture carries transparency is in translucent_ids but has
+    # alpha 1.0, so neither resolved side asked to blend.
+    sorted_pass = (
+        batch.front_material_id in translucent_ids or batch.back_material_id in translucent_ids
+    )
+    blend = front.blend or back.blend or sorted_pass
+    depth_write = front.depth_write and back.depth_write and not sorted_pass
     return (
         replace(front, blend=blend, depth_write=depth_write),
         replace(back, blend=blend, depth_write=depth_write),
@@ -943,6 +1029,10 @@ class SceneRenderer:
         # Per-definition GL buffer cache (M4e Task 11): keyed by id(definition).
         # Each entry is a _DefBuffers holding face/edge VAO+VBO+count.
         self._def_buffers: dict[int, _DefBuffers] = {}
+        # M7.5b Task 6: GL texture objects keyed by the model's texture id.
+        # Constructed here rather than in initialize_gl because it makes no GL
+        # call until something is actually uploaded.
+        self._texture_cache = TextureCache()
 
         # Tool overlay buffers (rebuilt every frame)
         self._overlay_line_vao: int = 0
@@ -990,6 +1080,7 @@ class SceneRenderer:
         # in the per-frame draw path is pure waste.
         self._phong_locs = _cache_uniform_locations(self._phong_program, _PHONG_UNIFORMS)
         self._line_locs = _cache_uniform_locations(self._line_program, _LINE_UNIFORMS)
+        self._bind_sampler_units()
 
         self._ghost_fill_program = _link_program(
             _load_shader_source("ghost_fill.vert"),
@@ -1005,6 +1096,18 @@ class SceneRenderer:
         self._init_ghost_fill_buffers()
 
         self._initialized = True
+
+    def _bind_sampler_units(self) -> None:
+        """Point each phong sampler at its own texture unit.
+
+        A sampler's value is program state, not per-draw state, so this is done
+        once after linking. Both samplers default to unit 0, so skipping it
+        makes the back side sample the FRONT's texture with no error anywhere.
+        """
+        GL.glUseProgram(self._phong_program)
+        GL.glUniform1i(self._phong_locs["u_texture"], _TEXTURE_UNIT_FRONT)
+        GL.glUniform1i(self._phong_locs["u_texture_back"], _TEXTURE_UNIT_BACK)
+        GL.glUseProgram(0)
 
     def resize(self, w: int, h: int) -> None:
         self._viewport_w = int(w)
@@ -1050,7 +1153,8 @@ class SceneRenderer:
             # only run here in the render path (not from an arbitrary caller).
             self.evict_unreachable(model)
             materials = getattr(model, "materials", None)
-            translucent_ids = _translucent_ids(materials)
+            textures = getattr(model, "textures", None)
+            translucent_ids = _translucent_ids(materials, textures)
             # Task 11: traverse_visible_tagged is traverse_visible() plus the
             # tag of the Instance that placed each occurrence, so `visible`
             # entries are (definition, world, tag_id) triples. The tag rides
@@ -1079,6 +1183,7 @@ class SceneRenderer:
                 # while the tag belongs to the Instance that placed THIS
                 # occurrence -- hence tag_id comes from the traversal entry.
                 tag_color = resolve_tag_color(tag_id, model.tags, self._render_style)
+                show_textures = textures_visible(self._render_style, tag_color=tag_color)
                 for batch in buf.plan.opaque:
                     front, back = resolve_batch_sides(
                         batch,
@@ -1086,10 +1191,14 @@ class SceneRenderer:
                         self._render_style,
                         dimmed=dimmed,
                         tag_color=tag_color,
+                        translucent_ids=translucent_ids,
                     )
                     # draw_faces comes from the face style alone, so it is the
                     # same on both sides; front is representative.
                     if front.draw_faces and batch.count > 0:
+                        front_tex, back_tex = self._batch_textures(
+                            materials, textures, batch, show_textures=show_textures
+                        )
                         self._draw_definition_faces(
                             buf,
                             view,
@@ -1100,6 +1209,8 @@ class SceneRenderer:
                             back=back,
                             first=batch.first,
                             count=batch.count,
+                            front_texture=front_tex,
+                            back_texture=back_tex,
                         )
                 # Edges stay in pass 1 — they are opaque.
                 if buf.edge_count > 0:
@@ -1131,6 +1242,7 @@ class SceneRenderer:
                 model_mat = world.astype(np.float32)
                 dimmed = definition_is_dimmed(definition, model)
                 tag_color = resolve_tag_color(tag_id, model.tags, self._render_style)
+                show_textures = textures_visible(self._render_style, tag_color=tag_color)
                 for batch in buf.translucent_draw_batches:
                     front, back = resolve_batch_sides(
                         batch,
@@ -1138,8 +1250,12 @@ class SceneRenderer:
                         self._render_style,
                         dimmed=dimmed,
                         tag_color=tag_color,
+                        translucent_ids=translucent_ids,
                     )
                     if front.draw_faces and batch.count > 0:
+                        front_tex, back_tex = self._batch_textures(
+                            materials, textures, batch, show_textures=show_textures
+                        )
                         self._draw_definition_faces(
                             buf,
                             view,
@@ -1150,6 +1266,8 @@ class SceneRenderer:
                             back=back,
                             first=batch.first,
                             count=batch.count,
+                            front_texture=front_tex,
+                            back_texture=back_tex,
                         )
 
             # 4.5 Selection highlight (persistent, drawn on top of geometry).
@@ -1507,6 +1625,43 @@ class SceneRenderer:
 
         return buf
 
+    def _texture_for_material(self, materials, textures, mid: int) -> int | None:
+        """The GL texture for one side's material, or None to draw untextured.
+
+        Every step here is allowed to come up empty and none of them is an
+        error: material 0 is the unpainted Default, a plain material has
+        texture_id None, and TextureLibrary.get returns None for an id pointing
+        at nothing -- deliberately unlike MaterialLibrary.get, because spec 1.8
+        requires a document referencing a missing container entry to open with
+        that material UNTEXTURED rather than being refused or shown a
+        placeholder image. TextureCache.texture_for returns None on the same
+        terms for bytes that will not decode.
+        """
+        if mid == 0 or materials is None or textures is None:
+            return None
+        tid = materials.get(mid).texture_id
+        if tid is None:
+            return None
+        tex = textures.get(tid)
+        if tex is None:
+            return None
+        return self._texture_cache.texture_for(tex)
+
+    def _batch_textures(
+        self, materials, textures, batch: FaceBatch, *, show_textures: bool
+    ) -> tuple[int | None, int | None]:
+        """The (front, back) GL textures for one batch.
+
+        A batch keys on the (front_material, back_material) pair and a texture
+        belongs to a material, so one batch has exactly one of each.
+        """
+        if not show_textures:
+            return (None, None)
+        return (
+            self._texture_for_material(materials, textures, batch.front_material_id),
+            self._texture_for_material(materials, textures, batch.back_material_id),
+        )
+
     def _draw_definition_faces(
         self,
         buf: _DefBuffers,
@@ -1519,6 +1674,8 @@ class SceneRenderer:
         back: ResolvedFacePass,
         first: int = 0,
         count: int | None = None,
+        front_texture: int | None = None,
+        back_texture: int | None = None,
     ) -> None:
         """Draw a definition's faces using resolved face-passes (style + dim + X-Ray).
 
@@ -1530,6 +1687,11 @@ class SceneRenderer:
         pass and X-Ray both arrive here pre-composed as a reduced alpha. State
         (blend, depth mask) is restored after the draw — see the M4e Task-15
         blend-leak fix for why this hygiene is mandatory.
+
+        ``front_texture`` / ``back_texture`` are GL texture ids, or None for an
+        untextured side. None binds 0 AND clears the side's u_has_texture flag:
+        the flag is what actually turns sampling off, since a GLSL sampler
+        always reads whatever object sits in its unit.
         """
         GL.glUseProgram(self._phong_program)
         locs = self._phong_locs
@@ -1549,6 +1711,17 @@ class SceneRenderer:
         _set_vec3(locs["u_material_specular_back"], back.specular)
         _set_float(locs["u_material_shininess_back"], back.shininess)
         _set_float(locs["u_alpha_back"], back.alpha)
+
+        _set_float(locs["u_has_texture"], 1.0 if front_texture else 0.0)
+        _set_float(locs["u_has_texture_back"], 1.0 if back_texture else 0.0)
+        GL.glActiveTexture(_TEXTURE_UNIT_ENUM[_TEXTURE_UNIT_BACK])
+        GL.glBindTexture(GL.GL_TEXTURE_2D, back_texture or 0)
+        # The front is bound LAST so unit 0 is the active unit when this
+        # returns. Anything that binds a texture without selecting a unit first
+        # — TextureCache's own upload included — would otherwise land in unit 1
+        # and leave the back side reading a stale object.
+        GL.glActiveTexture(_TEXTURE_UNIT_ENUM[_TEXTURE_UNIT_FRONT])
+        GL.glBindTexture(GL.GL_TEXTURE_2D, front_texture or 0)
 
         if front.blend:
             GL.glEnable(GL.GL_BLEND)

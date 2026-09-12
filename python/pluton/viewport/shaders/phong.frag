@@ -2,6 +2,8 @@
 
 in vec3 v_world_pos;
 in vec3 v_world_normal;
+in vec2 v_uv;
+in vec2 v_uv_back;
 out vec4 frag_color;
 
 uniform vec3 u_camera_pos;
@@ -27,6 +29,15 @@ uniform vec3  u_material_specular_back;
 uniform float u_material_shininess_back;
 uniform float u_alpha_back;
 
+// M7.5b — the material's image, one sampler per side on its own texture unit.
+// A sampler cannot be left "unbound" in GLSL: it always reads whatever texture
+// object sits in its unit. u_has_texture is therefore what makes an untextured
+// material untextured, rather than a bound-or-not test the shader cannot make.
+uniform sampler2D u_texture;
+uniform sampler2D u_texture_back;
+uniform float u_has_texture;
+uniform float u_has_texture_back;
+
 void main() {
     bool front = gl_FrontFacing;
 
@@ -42,6 +53,23 @@ void main() {
     vec3  m_specular  = front ? u_material_specular  : u_material_specular_back;
     float m_shininess = front ? u_material_shininess : u_material_shininess_back;
     float m_alpha     = front ? u_alpha              : u_alpha_back;
+
+    // The image TINTS the material rather than replacing it (spec D5), so a
+    // white material shows the texture unchanged and a coloured one colourises
+    // it. Its alpha multiplies the material's, which is what makes a cutout
+    // PNG see-through. Ambient is tinted too, so an unlit or dimly lit part of
+    // a textured face still shows the image rather than the flat colour.
+    //
+    // The UV SET is picked by gl_FrontFacing just like the uniform sets above:
+    // front and back placements are independent (spec D7, 1.4) and both sides
+    // are shaded in this one pass.
+    float has_tex = front ? u_has_texture : u_has_texture_back;
+    if (has_tex > 0.5) {
+        vec4 texel = front ? texture(u_texture, v_uv) : texture(u_texture_back, v_uv_back);
+        m_ambient *= texel.rgb;
+        m_diffuse *= texel.rgb;
+        m_alpha   *= texel.a;
+    }
 
     // Convention: `u_light_dir` is the direction the light *travels* (incident
     // ray pointing INTO the surface). So `L` is the incident ray, `-L` points

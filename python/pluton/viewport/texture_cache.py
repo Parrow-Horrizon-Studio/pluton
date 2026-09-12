@@ -66,6 +66,11 @@ class TextureCache:
     def __init__(self, gl=_GL) -> None:
         self._gl = gl
         self._ids: dict[int, int] = {}
+        # Ids whose bytes did not decode. Remembered, not just returned: since
+        # M7.5b Task 6 this method is called per batch per frame from the draw
+        # path, and without this a texture that can never decode would be run
+        # through a full image decode on every one of those calls for ever.
+        self._failed: set[int] = set()
 
     def texture_for(self, texture) -> int | None:
         """The GL texture id for this record, uploading it once, or None.
@@ -77,8 +82,11 @@ class TextureCache:
         existing = self._ids.get(texture.id)
         if existing is not None:
             return existing
+        if texture.id in self._failed:
+            return None
         img = decode_image(texture.data)
         if img is None:
+            self._failed.add(texture.id)
             return None
         gl = self._gl
         tid = int(gl.glGenTextures(1))
@@ -104,7 +112,12 @@ class TextureCache:
         return tid
 
     def invalidate(self, tid: int) -> None:
-        """Drop one cached upload, so the next use re-uploads."""
+        """Drop one cached upload, so the next use re-uploads.
+
+        Clears a remembered decode failure too: re-importing an image edits the
+        record in place, so repaired bytes would otherwise never be retried.
+        """
+        self._failed.discard(tid)
         gl_id = self._ids.pop(tid, None)
         if gl_id is not None:
             self._gl.glDeleteTextures([gl_id])
@@ -113,3 +126,4 @@ class TextureCache:
         for gl_id in self._ids.values():
             self._gl.glDeleteTextures([gl_id])
         self._ids.clear()
+        self._failed.clear()

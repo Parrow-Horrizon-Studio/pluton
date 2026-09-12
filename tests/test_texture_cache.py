@@ -7,6 +7,7 @@ import zlib
 
 import numpy as np
 from pluton.model.texture import TextureLibrary
+from pluton.viewport import texture_cache
 from pluton.viewport.texture_cache import TextureCache, decode_image, sniff_format
 
 
@@ -144,3 +145,43 @@ def test_release_all_deletes_every_uploaded_texture():
     deleted = {i for c in gl.calls if c[0] == "delete" for i in c[1]}
     assert {a, b} <= deleted
     assert cache.texture_for(tex) != a  # re-uploads after release
+
+
+def test_a_decode_failure_is_remembered_rather_than_retried(monkeypatch):
+    """M7.5b Task 6 put texture_for on the per-frame draw path.
+
+    Before that, re-decoding undecodable bytes on every call was harmless dead
+    cost. Now it is a full image decode per batch per frame, for ever, for a
+    texture that will never succeed.
+    """
+    lib = TextureLibrary()
+    tex = lib.add("junk.png", b"not an image at all", "png", 4, 4, False)
+    cache = TextureCache(gl=_RecordingGL())
+
+    calls = []
+    real = texture_cache.decode_image
+
+    def counting(data):
+        calls.append(data)
+        return real(data)
+
+    monkeypatch.setattr(texture_cache, "decode_image", counting)
+
+    assert cache.texture_for(tex) is None
+    assert cache.texture_for(tex) is None
+    assert cache.texture_for(tex) is None
+    assert len(calls) == 1
+
+
+def test_invalidating_a_failed_texture_lets_it_decode_again(monkeypatch):
+    # Re-importing the image edits the record in place, so the remembered
+    # failure has to be dropped by the same call that drops a successful
+    # upload, or the repaired bytes would never be tried.
+    lib = TextureLibrary()
+    tex = lib.add("junk.png", b"not an image at all", "png", 4, 4, False)
+    cache = TextureCache(gl=_RecordingGL())
+    assert cache.texture_for(tex) is None
+
+    cache.invalidate(tex.id)
+    fixed = lib.edit(tex.id, data=_OPAQUE)
+    assert cache.texture_for(fixed) is not None

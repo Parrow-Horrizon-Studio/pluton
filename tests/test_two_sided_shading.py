@@ -213,7 +213,16 @@ def test_a_face_draw_sets_every_cached_phong_uniform(monkeypatch):
         count=3,
     )
 
+    # M7.5b Task 6 exemption: the two sampler uniforms carry a texture-unit
+    # index, which is program state rather than per-draw state, so they are set
+    # once after linking instead. They are not left unguarded — the link-time
+    # setter has its own test in tests/test_textured_shading.py
+    # (test_linking_points_each_sampler_at_its_own_unit). Nothing else may join
+    # this exemption without the same treatment.
+    exempt = {renderer._phong_locs[n] for n in sr._PHONG_LINK_TIME_UNIFORMS}
     missing = {
-        name for name, loc in renderer._phong_locs.items() if loc not in recorder.written
+        name
+        for name, loc in renderer._phong_locs.items()
+        if loc not in recorder.written and loc not in exempt
     }
     assert not missing, f"uniforms never set during a face draw: {sorted(missing)}"
