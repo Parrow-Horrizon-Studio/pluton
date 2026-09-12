@@ -176,7 +176,9 @@ class MainWindow(QMainWindow):
         # lambda `set_active_material=self._materials_page.set_active` captures
         # a live reference.
         self._active_material_id = self._model.materials.DEFAULT_ID
-        self._materials_page = MaterialsPage(self._model.materials, self)
+        self._materials_page = MaterialsPage(
+            self._model.materials, self, command_stack=self._command_stack, model=self._model
+        )
         self._materials_page.active_material_changed.connect(self._on_active_material_changed)
 
         # Tags page. Not referenced by the ToolContext (tag assignment uses the
