@@ -84,6 +84,10 @@ def test_a_translucent_side_makes_the_whole_batch_blend():
     assert back.blend is True
     assert front.depth_write is False
     assert back.depth_write is False
+    # The opaque front must keep its own alpha; only blend/depth_write are
+    # shared batch-wide (correction 4). A resolver that smeared the
+    # batch-combined alpha into both sides would fail this.
+    assert front.alpha == 1.0
 
 
 def test_an_all_opaque_batch_writes_depth():
@@ -136,7 +140,9 @@ def test_every_phong_shader_uniform_has_a_cached_location():
 def test_every_fragment_uniform_is_read_in_main():
     body = _frag_main_body()
     for name in _declared_uniforms("phong.frag"):
-        assert name in body, f"{name} is declared but never read; GL will optimize it out"
+        assert re.search(rf"\b{re.escape(name)}\b", body), (
+            f"{name} is declared but never read; GL will optimize it out"
+        )
 
 
 def test_the_fragment_shader_declares_a_back_uniform_set():
@@ -154,7 +160,9 @@ def test_the_fragment_shader_flips_the_normal_for_back_facing_fragments():
     """
     body = _frag_main_body()
     assert "gl_FrontFacing" in body
-    assert re.search(r"N\s*=\s*-\s*N\s*;", body), "back-facing normal is never flipped"
+    assert re.search(r"if\s*\(\s*!\s*front\s*\)\s*N\s*=\s*-\s*N\s*;", body), (
+        "back-facing normal is never flipped"
+    )
 
 
 class _GLRecorder:

@@ -262,9 +262,8 @@ def resolve_batch_sides(
     """
     front_mat, front_alpha = _material_terms(materials, batch.front_material_id, Side.FRONT)
     back_mat, back_alpha = _material_terms(materials, batch.back_material_id, Side.BACK)
-    batch_alpha = min(front_alpha, back_alpha)
 
-    def _resolve(mat: PhongMaterial) -> ResolvedFacePass:
+    def _resolve(mat: PhongMaterial, alpha: float) -> ResolvedFacePass:
         return resolve_face_pass(
             render_style,
             dimmed=dimmed,
@@ -273,10 +272,17 @@ def resolve_batch_sides(
             dim_ambient=_DIM_AMBIENT,
             dim_diffuse=_DIM_DIFFUSE,
             dim_alpha=_DIM_ALPHA_BLEND,
-            material_alpha=batch_alpha,
+            material_alpha=alpha,
         )
 
-    return _resolve(front_mat), _resolve(back_mat)
+    front = _resolve(front_mat, front_alpha)
+    back = _resolve(back_mat, back_alpha)
+    blend = front.blend or back.blend
+    depth_write = front.depth_write and back.depth_write
+    return (
+        replace(front, blend=blend, depth_write=depth_write),
+        replace(back, blend=blend, depth_write=depth_write),
+    )
 
 
 def _load_shader_source(name: str) -> str:
