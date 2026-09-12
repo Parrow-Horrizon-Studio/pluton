@@ -6,7 +6,7 @@ Pluton is a long-horizon project inspired by Blender's development model, intend
 
 ## Status
 
-**Alpha, v0.6.0.** Phase 2 (Modeling App) is complete: you can draw, push/pull, transform,
+**Alpha, v0.7.0.** Phase 2 (Modeling App) is complete: you can draw, push/pull, transform,
 organize, paint, annotate, save, and import/export real models. v0.4.0 gave it the surface of a
 real application: seven dockable toolbars over an original icon set, per-tool cursors,
 right-click context menus, and a layout that persists between runs. v0.5.0
@@ -15,7 +15,13 @@ docks and the three floating tool-option bars with a single Outliner and Propert
 model hierarchy with per-instance visibility and rename, above five icon tabs (Tool Settings,
 Entity Info, Material, Tags, Scenes). v0.6.0 ([M7.4](docs/2026-05-16-pluton-design.md)) added
 the Offset and Follow Me tools and four parametric primitives (box, cylinder, cone, sphere),
-built on a sweep layer shared with Push/Pull. Still missing: the rest of
+built on a sweep layer shared with Push/Pull. v0.7.0
+([M7.5a](docs/2026-09-08-M7.5a-materials-design.md)) reworked materials into a PBR-shaped
+model (base colour, alpha, metallic, roughness) approximated in Phong, gave every face
+independent front and back materials with a distinct back default, added translucent
+materials drawn in a sorted second pass, made material add, edit and delete undoable from a
+real editor, added drag-to-paint, and gave tags a per-tag colour with a Color-by-Tag view
+mode. Still missing: textures and UV mapping (M7.5b), the rest of
 [Phase 2.5 (Parity & Polish)](docs/2026-05-16-pluton-design.md) (v0.4 to v0.8), and installers.
 Run it from source.
 
@@ -39,9 +45,12 @@ Tags (layers) with per-tag visibility.
 to a wall face and shares one Component per identical opening, parametric Gable/Hip/Shed
 Roofs, and persistent Dimension and Text annotations that live per editing context.
 
-**Presentation** — solid-color materials with a Paint tool and per-material draw batching;
-four face styles (Wireframe / Hidden Line / Monochrome / Shaded) plus an X-Ray toggle; and
-Scenes — saved camera + tag visibility + style, recalled with an animated camera tween.
+**Presentation**: PBR-shaped materials (base colour, alpha, metallic, roughness) approximated
+in Phong, with independent front and back materials per face, translucent materials drawn in a
+sorted second pass, and an undoable Materials editor with drag-to-paint; four face styles
+(Wireframe / Hidden Line / Monochrome / Shaded), an X-Ray toggle, and a Color-by-Tag mode with
+per-tag colour; and Scenes, saved camera + tag visibility + style, recalled with an animated
+camera tween.
 
 **File I/O** — a versioned native `.pluton` format (zip container, atomic writes, component
 sharing preserved by identity), plus OBJ and glTF/GLB import and export. glTF goes through
