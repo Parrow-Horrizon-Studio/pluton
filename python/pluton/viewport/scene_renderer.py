@@ -19,8 +19,9 @@ from OpenGL import GL
 from pluton.geometry.transforms import apply_mat, is_identity_transform
 from pluton.scene.scene import Side
 from pluton.viewport.camera import Camera
-from pluton.viewport.face_batches import plan_face_batches
+from pluton.viewport.face_batches import BatchPlan, FaceBatch, plan_face_batches
 from pluton.viewport.render_style import (
+    BACK_DEFAULT_COLOR,
     PhongMaterial,
     RenderStyle,
     ResolvedFacePass,
@@ -158,9 +159,22 @@ _PHONG_UNIFORMS = (
     "u_material_specular",
     "u_material_shininess",
     "u_alpha",
+    # M7.5a Task 6 — the back side's material set, selected in the fragment
+    # shader by gl_FrontFacing. Must stay in lockstep with phong.frag's
+    # declarations; tests/test_two_sided_shading.py asserts the two agree.
+    "u_material_ambient_back",
+    "u_material_diffuse_back",
+    "u_material_specular_back",
+    "u_material_shininess_back",
+    "u_alpha_back",
 )
 _LINE_UNIFORMS = ("u_view", "u_projection")
 _GHOST_FILL_UNIFORMS = ("u_view", "u_projection", "u_color")
+
+
+def _empty_batch_plan() -> BatchPlan:
+    """The plan for a definition with no triangles."""
+    return plan_face_batches([], [])
 
 
 @dataclass
@@ -173,7 +187,10 @@ class _DefBuffers:
     edge_vao: int = 0
     edge_vbo: int = 0
     edge_count: int = 0  # number of line-segment vertices
-    batches: list = field(default_factory=list)  # list[FaceBatch], one per (front, back) pair
+    # The batch plan the face VBO was uploaded under: its vertex_order is
+    # already baked into the buffer, so `opaque` / `translucent` /
+    # `translucent_first` index straight into it.
+    plan: BatchPlan = field(default_factory=_empty_batch_plan)
 
     def release(self) -> None:
         """Delete this definition's GL objects. Guarded so a zero handle
@@ -181,7 +198,7 @@ class _DefBuffers:
         reaches a GL call — safe to call without a current context in that
         case, and correct GL hygiene in all cases.
 
-        FaceBatch entries in `batches` are metadata slices (front_material_id,
+        The FaceBatch entries in `plan` are metadata slices (front_material_id,
         back_material_id, first, count) into face_vbo — they hold no GL
         handles of their own, so there is nothing per-batch to release.
         """
@@ -193,6 +210,73 @@ class _DefBuffers:
             GL.glDeleteVertexArrays(1, [self.edge_vao])
         if self.edge_vbo:
             GL.glDeleteBuffers(1, [self.edge_vbo])
+
+
+# --- M7.5a Task 6: two-sided material resolution ----------------------------
+#
+# Module-level and GL-free on purpose: the resolution logic is where the
+# per-side behaviour actually lives, and the fragment shader it feeds cannot
+# be unit-tested. Keeping this importable without a GL context or a
+# QApplication is what makes the shading testable at all.
+
+
+def _translucent_ids(materials) -> frozenset[int]:
+    """Ids of every translucent material in the library (empty when None)."""
+    if materials is None:
+        return frozenset()
+    return frozenset(m.id for m in materials.materials() if m.is_translucent)
+
+
+def _material_terms(materials, mid: int, side: Side) -> tuple[PhongMaterial, float]:
+    """(PhongMaterial, alpha) for one side's material id.
+
+    An unpainted FRONT keeps using the hand-tuned _DEFAULT_MATERIAL exactly as
+    before, so unpainted front faces look unchanged. An unpainted BACK is new:
+    it resolves to the distinct blue-grey BACK_DEFAULT_COLOR (spec D3) so a
+    reversed face is obvious on screen.
+    """
+    if mid != 0 and materials is not None:
+        m = materials.get(mid)
+        return (
+            phong_material_for(m.base_color, metallic=m.metallic, roughness=m.roughness),
+            m.alpha,
+        )
+    if side is Side.BACK:
+        return phong_material_for(BACK_DEFAULT_COLOR), 1.0
+    return _DEFAULT_MATERIAL, 1.0
+
+
+def resolve_batch_sides(
+    batch: FaceBatch,
+    materials,
+    render_style: RenderStyle,
+    *,
+    dimmed: bool,
+) -> tuple[ResolvedFacePass, ResolvedFacePass]:
+    """Resolve one batch into its front and back face passes.
+
+    blend and depth_write are per-batch rather than per-side (correction 4):
+    both sides of a face reach the shader in one draw call, and blending and
+    the depth mask are draw-call state, so a batch blends if EITHER side is
+    translucent and both returned passes carry the same flags.
+    """
+    front_mat, front_alpha = _material_terms(materials, batch.front_material_id, Side.FRONT)
+    back_mat, back_alpha = _material_terms(materials, batch.back_material_id, Side.BACK)
+    batch_alpha = min(front_alpha, back_alpha)
+
+    def _resolve(mat: PhongMaterial) -> ResolvedFacePass:
+        return resolve_face_pass(
+            render_style,
+            dimmed=dimmed,
+            bg=_BG_COLOR[:3],
+            material=mat,
+            dim_ambient=_DIM_AMBIENT,
+            dim_diffuse=_DIM_DIFFUSE,
+            dim_alpha=_DIM_ALPHA_BLEND,
+            material_alpha=batch_alpha,
+        )
+
+    return _resolve(front_mat), _resolve(back_mat)
 
 
 def _load_shader_source(name: str) -> str:
@@ -520,7 +604,7 @@ class SceneRenderer:
             for definition, world in model.traverse_visible():
                 buf = self._def_buffers.get(id(definition))
                 if buf is None or definition.mesh.dirty:
-                    buf = self._upload_definition(definition)
+                    buf = self._upload_definition(definition, model)
                     definition.mesh.mark_clean()
                     self._def_buffers[id(definition)] = buf
                 model_mat = world.astype(np.float32)
@@ -528,29 +612,23 @@ class SceneRenderer:
                 # At root (active_path is empty), nothing is dimmed.
                 dimmed = definition_is_dimmed(definition, model)
                 materials = getattr(model, "materials", None)
-                for batch in buf.batches:
-                    # Shading is still front-only until Task 6 (two-sided shading).
-                    if batch.front_material_id != 0 and materials is not None:
-                        mat = phong_material_for(materials.get(batch.front_material_id).base_color)
-                    else:
-                        mat = _DEFAULT_MATERIAL
-                    resolved = resolve_face_pass(
-                        self._render_style,
-                        dimmed=dimmed,
-                        bg=_BG_COLOR[:3],
-                        material=mat,
-                        dim_ambient=_DIM_AMBIENT,
-                        dim_diffuse=_DIM_DIFFUSE,
-                        dim_alpha=_DIM_ALPHA_BLEND,
+                # Still one traversal: opaque and translucent batches draw in
+                # the same pass. Task 7 splits them and depth-sorts the second.
+                for batch in buf.plan.opaque + buf.plan.translucent:
+                    front, back = resolve_batch_sides(
+                        batch, materials, self._render_style, dimmed=dimmed
                     )
-                    if resolved.draw_faces and batch.count > 0:
+                    # draw_faces comes from the face style alone, so it is the
+                    # same on both sides; front is representative.
+                    if front.draw_faces and batch.count > 0:
                         self._draw_definition_faces(
                             buf,
                             view,
                             projection,
                             camera.position,
                             model_mat,
-                            resolved=resolved,
+                            front=front,
+                            back=back,
                             first=batch.first,
                             count=batch.count,
                         )
@@ -760,13 +838,19 @@ class SceneRenderer:
         GL.glBindVertexArray(0)
         GL.glUseProgram(0)
 
-    def _upload_definition(self, definition) -> _DefBuffers:
+    def _upload_definition(self, definition, model) -> _DefBuffers:
         """Build or update GL buffers for a single definition's mesh.
 
         Looks up (or allocates) a _DefBuffers entry for this definition,
         uploads fresh geometry data, and returns the updated _DefBuffers.
         The caller is responsible for calling definition.mesh.mark_clean()
         and storing the result back into self._def_buffers[id(definition)].
+
+        `model` supplies the material library, which the batch planner needs
+        in order to classify a batch as translucent. Required rather than
+        optional: a missing library would silently classify every batch as
+        opaque, which Task 7's translucent pass would then draw in the wrong
+        pass.
         """
         # Re-use existing GL objects if we already have them; allocate if not.
         buf = self._def_buffers.get(id(definition))
@@ -782,18 +866,19 @@ class SceneRenderer:
             # Group triangles by (front, back) material so each pair draws as one
             # contiguous batch. No translucent pass yet (Task 7), so every batch
             # — opaque and translucent alike — is drawn in today's single pass.
-            front_mats = scene.face_triangle_materials()
+            front_mats = scene.face_triangle_materials(Side.FRONT)
             back_mats = scene.face_triangle_materials(Side.BACK)
-            plan = plan_face_batches(front_mats, back_mats)
+            translucent = _translucent_ids(getattr(model, "materials", None))
+            plan = plan_face_batches(front_mats, back_mats, translucent)
             interleaved = interleaved[plan.vertex_order]
             data = np.ascontiguousarray(interleaved)
             GL.glBindBuffer(GL.GL_ARRAY_BUFFER, buf.face_vbo)
             GL.glBufferData(GL.GL_ARRAY_BUFFER, data.nbytes, data, GL.GL_DYNAMIC_DRAW)
             buf.face_count = int(positions.shape[0])
-            buf.batches = plan.opaque + plan.translucent
+            buf.plan = plan
         else:
             buf.face_count = 0
-            buf.batches = []
+            buf.plan = _empty_batch_plan()
 
         # Edges: (2*E, 3) positions — pack constant color per vertex so the
         # line shader's attribute 1 (in_color) is always satisfied.
@@ -818,16 +903,20 @@ class SceneRenderer:
         camera_pos: np.ndarray,
         model_mat: np.ndarray,
         *,
-        resolved: ResolvedFacePass,
+        front: ResolvedFacePass,
+        back: ResolvedFacePass,
         first: int = 0,
         count: int | None = None,
     ) -> None:
-        """Draw a definition's faces using a resolved face-pass (style + dim + X-Ray).
+        """Draw a definition's faces using resolved face-passes (style + dim + X-Ray).
 
-        ``resolved`` carries the material uniforms, alpha, and whether to blend /
-        write depth. X-Ray turns depth writes off so geometry behind shows through;
-        the dim pass and X-Ray both arrive here pre-composed as a reduced alpha.
-        State (blend, depth mask) is restored after the draw — see the M4e Task-15
+        ``front`` and ``back`` carry the two sides' material uniforms and alphas;
+        the fragment shader selects between them with gl_FrontFacing. Blend and
+        depth-mask state is draw-call state rather than per-side, so it is taken
+        from ``front`` — resolve_batch_sides gives both sides the same flags.
+        X-Ray turns depth writes off so geometry behind shows through; the dim
+        pass and X-Ray both arrive here pre-composed as a reduced alpha. State
+        (blend, depth mask) is restored after the draw — see the M4e Task-15
         blend-leak fix for why this hygiene is mandatory.
         """
         GL.glUseProgram(self._phong_program)
@@ -838,16 +927,21 @@ class SceneRenderer:
         _set_vec3(locs["u_camera_pos"], camera_pos)
         _set_vec3(locs["u_light_dir"], _LIGHT_DIR)
         _set_vec3(locs["u_light_color"], _LIGHT_COLOR)
-        _set_vec3(locs["u_material_ambient"], resolved.ambient)
-        _set_vec3(locs["u_material_diffuse"], resolved.diffuse)
-        _set_vec3(locs["u_material_specular"], resolved.specular)
-        _set_float(locs["u_material_shininess"], resolved.shininess)
-        _set_float(locs["u_alpha"], resolved.alpha)
+        _set_vec3(locs["u_material_ambient"], front.ambient)
+        _set_vec3(locs["u_material_diffuse"], front.diffuse)
+        _set_vec3(locs["u_material_specular"], front.specular)
+        _set_float(locs["u_material_shininess"], front.shininess)
+        _set_float(locs["u_alpha"], front.alpha)
+        _set_vec3(locs["u_material_ambient_back"], back.ambient)
+        _set_vec3(locs["u_material_diffuse_back"], back.diffuse)
+        _set_vec3(locs["u_material_specular_back"], back.specular)
+        _set_float(locs["u_material_shininess_back"], back.shininess)
+        _set_float(locs["u_alpha_back"], back.alpha)
 
-        if resolved.blend:
+        if front.blend:
             GL.glEnable(GL.GL_BLEND)
             GL.glBlendFunc(GL.GL_SRC_ALPHA, GL.GL_ONE_MINUS_SRC_ALPHA)
-        if not resolved.depth_write:
+        if not front.depth_write:
             GL.glDepthMask(GL.GL_FALSE)
 
         GL.glBindVertexArray(buf.face_vao)
@@ -855,9 +949,9 @@ class SceneRenderer:
         GL.glBindVertexArray(0)
         GL.glUseProgram(0)
 
-        if not resolved.depth_write:
+        if not front.depth_write:
             GL.glDepthMask(GL.GL_TRUE)
-        if resolved.blend:
+        if front.blend:
             GL.glDisable(GL.GL_BLEND)
 
     def _draw_definition_edges(
