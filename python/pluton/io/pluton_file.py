@@ -19,7 +19,7 @@ from pluton.io.document_codec import (
 )
 from pluton.io.errors import PlutonFormatError, PlutonVersionError
 
-SCHEMA_VERSION = 4  # M7.3: instance "name" + "hidden"
+SCHEMA_VERSION = 5  # M7.5a: two-sided face materials, PBR materials, tag color
 _MANIFEST = "manifest.json"
 _DOCUMENT = "document.json"
 

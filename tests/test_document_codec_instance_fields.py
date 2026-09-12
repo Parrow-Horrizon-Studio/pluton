@@ -18,8 +18,13 @@ def _square(model):
     scene.add_face_from_loop(v)
 
 
-def test_schema_version_is_four():
-    assert SCHEMA_VERSION == 4
+def test_schema_version_is_at_least_four():
+    # Pinned to 4 by M7.3; M7.5a (Task 12) bumped it again to 5. This file's
+    # concern is instance name/hidden (schema 3 -> 4), not the exact current
+    # value, so assert the floor rather than re-pinning a number that isn't
+    # this test's story. The exact current value is pinned in
+    # tests/test_schema_v5_migration.py::test_schema_version_is_five.
+    assert SCHEMA_VERSION >= 4
 
 
 def test_name_and_hidden_survive_a_round_trip(model_factory, group_factory):

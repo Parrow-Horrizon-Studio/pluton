@@ -20,7 +20,7 @@ from pluton.model.instance import Instance
 from pluton.model.material import MaterialLibrary
 from pluton.model.model import Model
 from pluton.model.tag import TagLibrary
-from pluton.scene.scene import Scene
+from pluton.scene.scene import Scene, Side
 from pluton.units import Units, units_from_dict, units_to_dict
 from pluton.viewport.render_style import FaceStyle, RenderStyle
 
@@ -39,13 +39,23 @@ def geometry_to_dict(scene: Scene) -> dict:
 
     faces: list[list[int]] = []
     face_materials: dict[str, int] = {}
+    face_materials_back: dict[str, int] = {}
     for face_index, f in enumerate(scene.faces_iter()):
         faces.append([idmap[vid] for vid in f.loop_vertex_ids])
-        mat = scene.face_material(f.id)
-        if mat != _DEFAULT_MATERIAL_ID:
-            face_materials[str(face_index)] = int(mat)
+        front = scene.face_material(f.id, Side.FRONT)
+        if front != _DEFAULT_MATERIAL_ID:
+            face_materials[str(face_index)] = int(front)
+        back = scene.face_material(f.id, Side.BACK)
+        if back != _DEFAULT_MATERIAL_ID:
+            face_materials_back[str(face_index)] = int(back)
 
-    return {"vertices": vertices, "edges": edges, "faces": faces, "face_materials": face_materials}
+    return {
+        "vertices": vertices,
+        "edges": edges,
+        "faces": faces,
+        "face_materials": face_materials,
+        "face_materials_back": face_materials_back,
+    }
 
 
 def geometry_from_dict(scene: Scene, data: dict) -> None:
@@ -67,11 +77,15 @@ def geometry_from_dict(scene: Scene, data: dict) -> None:
     for loop in data["faces"]:
         new_fids.append(scene.add_face_from_loop([_vid(int(i)) for i in loop]))
 
-    for face_index_str, mat in data.get("face_materials", {}).items():
-        fi = int(face_index_str)
-        if not (0 <= fi < len(new_fids)):
-            raise PlutonFormatError(f"face index {fi} out of range (0..{len(new_fids) - 1})")
-        scene.set_face_material(new_fids[fi], int(mat))
+    def _apply_face_materials(materials: dict, side: Side) -> None:
+        for face_index_str, mat in materials.items():
+            fi = int(face_index_str)
+            if not (0 <= fi < len(new_fids)):
+                raise PlutonFormatError(f"face index {fi} out of range (0..{len(new_fids) - 1})")
+            scene.set_face_material(new_fids[fi], int(mat), side)
+
+    _apply_face_materials(data.get("face_materials", {}), Side.FRONT)
+    _apply_face_materials(data.get("face_materials_back", {}), Side.BACK)
 
 
 def annotation_to_dict(ann: Dimension | Label) -> dict:
