@@ -162,6 +162,93 @@ def test_the_stroke_paints_the_side_it_is_given(main_window_with_square):
     assert scene.face_material(f, Side.FRONT) == 0  # discriminating
 
 
+def test_clicking_from_either_side_paints_that_side_and_only_that_side():
+    """The spec's §3 trap, closed: front and back asserted as distinct slots,
+    from cameras on both sides of one face.
+
+    The final review found `PaintTool._resolve_side` could be replaced wholesale
+    with `return Side.FRONT` and every test in test_paint_tool.py and
+    test_paint_stroke.py still passed (14/14). The stroke tests call
+    `_paint_during_stroke(f, side, mid)` directly, so `_resolve_side` was never
+    on the path, and the one test that does call it asserts FRONT, which the
+    mutant returns anyway.
+
+    This drives the real entry point, `on_mouse_press`, with a real Camera, a
+    real Scene and the real picker, once from +Z and once from -Z. Anything
+    that ignores the ray (a constant side, or a side read from the normal
+    alone) paints the same slot twice and leaves the other at Default.
+    """
+    from pluton.model.material import MaterialLibrary
+    from pluton.scene.scene import Scene
+    from pluton.tools.paint_tool import PaintTool
+    from pluton.tools.tool import ToolContext
+    from pluton.viewport.camera import Camera
+    from PySide6.QtCore import QPointF, Qt
+
+    class _Event:
+        def position(self):
+            return QPointF(50.0, 50.0)
+
+        def modifiers(self):
+            return Qt.KeyboardModifier.NoModifier
+
+    class _Stack:
+        def __init__(self):
+            self.pushed = []
+
+        def push_executed(self, cmd, target):
+            self.pushed.append(cmd)
+
+    scene = Scene()
+    corners = [
+        scene.add_vertex(np.array([0.0, 0.0, 0.0], dtype=np.float32)),
+        scene.add_vertex(np.array([1.0, 0.0, 0.0], dtype=np.float32)),
+        scene.add_vertex(np.array([1.0, 1.0, 0.0], dtype=np.float32)),
+        scene.add_vertex(np.array([0.0, 1.0, 0.0], dtype=np.float32)),
+    ]
+    f = scene.add_face_from_loop(corners)
+    assert tuple(scene.face_normal(f)) == (0.0, 0.0, 1.0)  # +Z: front faces up
+
+    lib = MaterialLibrary()
+    red = lib.add_custom("Red", (0.8, 0.1, 0.1))
+    blue = lib.add_custom("Blue", (0.1, 0.1, 0.8))
+    stack = _Stack()
+
+    def camera_at(z):
+        # up is +Y, not +Z: looking straight down the Z axis makes a +Z up
+        # vector parallel to the view direction and the view matrix degenerate.
+        return Camera(
+            position=np.array([0.5, 0.5, z], dtype=np.float32),
+            target=np.array([0.5, 0.5, 0.0], dtype=np.float32),
+            up=np.array([0.0, 1.0, 0.0], dtype=np.float32),
+        )
+
+    def click_from(z, material):
+        tool = PaintTool()
+        tool.activate(
+            ToolContext(
+                scene=scene,
+                command_stack=stack,
+                camera=camera_at(z),
+                widget_size_provider=lambda: (100, 100),
+                model=None,
+                active_material_provider=lambda: material,
+            )
+        )
+        tool.on_mouse_press(_Event(), snap=None)
+        tool.on_mouse_release(_Event(), snap=None)
+
+    click_from(+3.0, red)  # above the face: the FRONT is what you see
+    assert scene.face_material(f, Side.FRONT) == red.id
+    assert scene.face_material(f, Side.BACK) == 0, "painting the front must not touch the back"
+
+    click_from(-3.0, blue)  # below the same face: the BACK
+    assert scene.face_material(f, Side.BACK) == blue.id
+    assert scene.face_material(f, Side.FRONT) == red.id, "the front must survive a back paint"
+
+    assert len(stack.pushed) == 2  # two clicks, two undoable strokes
+
+
 def test_side_for_ray_reads_the_normal_direction():
     from pluton.tools.paint_tool import side_for_ray
 
