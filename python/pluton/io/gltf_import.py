@@ -264,7 +264,7 @@ def _ensure_gltf_materials(materials, model) -> list:
     """Material id per glTF material index (None for default/unpainted). Real
     materials deduped by (name, color); add_custom otherwise."""
     result: list = []
-    existing = {(m.name, tuple(m.color)): m for m in model.materials.materials()}
+    existing = {(m.name, tuple(m.base_color)): m for m in model.materials.materials()}
     for gm in materials:
         if _is_default_material(gm):
             result.append(None)

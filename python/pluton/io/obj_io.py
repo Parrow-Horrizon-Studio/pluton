@@ -61,7 +61,7 @@ def model_to_objdoc(model) -> ObjDocument:
             if mat_id != default_id:
                 mat = model.materials.get(mat_id)
                 mname = sanitize_material_name(mat.name)
-                materials[mname] = mat.color
+                materials[mname] = mat.base_color
                 faces.append(ObjFace(loop, mname))
             else:
                 faces.append(ObjFace(loop, None))
@@ -140,7 +140,7 @@ def _ensure_materials(materials, model) -> dict:
     existing = {m.name: m for m in model.materials.materials()}
     for name, color in materials.items():
         m = existing.get(name)
-        if m is not None and tuple(m.color) == tuple(color):
+        if m is not None and tuple(m.base_color) == tuple(color):
             name_to_id[name] = m.id
         else:
             new = model.materials.add_custom(name, color)

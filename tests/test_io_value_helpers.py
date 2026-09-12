@@ -9,8 +9,8 @@ def test_material_library_roundtrip_preserves_customs_and_next_id():
     custom = lib.add_custom("My Teal", (0.1, 0.6, 0.6))
     records, nid = lib.to_records(), lib.next_id
     rebuilt = MaterialLibrary.from_records(records, nid)
-    assert [(m.id, m.name, m.color) for m in rebuilt.materials()] == \
-           [(m.id, m.name, m.color) for m in lib.materials()]
+    assert [(m.id, m.name, m.base_color) for m in rebuilt.materials()] == \
+           [(m.id, m.name, m.base_color) for m in lib.materials()]
     assert rebuilt.next_id == nid
     assert rebuilt.get(custom.id).name == "My Teal"
     # Default sentinel still resolves after rebuild.

@@ -59,7 +59,7 @@ def model_to_gltf(model) -> GltfAsset:
             return None
         if mid not in mat_index:
             m = model.materials.get(mid)
-            mat_index[mid] = asset.add_material(m.name, m.color)
+            mat_index[mid] = asset.add_material(m.name, m.base_color)
         return mat_index[mid]
 
     def mesh_for(defn):
