@@ -17,6 +17,7 @@ import numpy as np
 from OpenGL import GL
 
 from pluton.geometry.transforms import apply_mat, is_identity_transform
+from pluton.scene.scene import Side
 from pluton.viewport.camera import Camera
 from pluton.viewport.face_batches import plan_face_batches
 from pluton.viewport.render_style import (
@@ -172,7 +173,7 @@ class _DefBuffers:
     edge_vao: int = 0
     edge_vbo: int = 0
     edge_count: int = 0  # number of line-segment vertices
-    batches: list = field(default_factory=list)  # list[FaceBatch], one per material
+    batches: list = field(default_factory=list)  # list[FaceBatch], one per (front, back) pair
 
     def release(self) -> None:
         """Delete this definition's GL objects. Guarded so a zero handle
@@ -180,9 +181,9 @@ class _DefBuffers:
         reaches a GL call — safe to call without a current context in that
         case, and correct GL hygiene in all cases.
 
-        FaceBatch entries in `batches` are metadata slices (material_id,
-        first, count) into face_vbo — they hold no GL handles of their own,
-        so there is nothing per-batch to release.
+        FaceBatch entries in `batches` are metadata slices (front_material_id,
+        back_material_id, first, count) into face_vbo — they hold no GL
+        handles of their own, so there is nothing per-batch to release.
         """
         if self.face_vao:
             GL.glDeleteVertexArrays(1, [self.face_vao])
@@ -528,8 +529,9 @@ class SceneRenderer:
                 dimmed = definition_is_dimmed(definition, model)
                 materials = getattr(model, "materials", None)
                 for batch in buf.batches:
-                    if batch.material_id != 0 and materials is not None:
-                        mat = phong_material_for(materials.get(batch.material_id).base_color)
+                    # Shading is still front-only until Task 6 (two-sided shading).
+                    if batch.front_material_id != 0 and materials is not None:
+                        mat = phong_material_for(materials.get(batch.front_material_id).base_color)
                     else:
                         mat = _DEFAULT_MATERIAL
                     resolved = resolve_face_pass(
@@ -777,15 +779,18 @@ class SceneRenderer:
         positions, normals = scene.face_triangle_buffer()
         if positions.shape[0] > 0:
             interleaved = np.concatenate([positions, normals], axis=1).astype(np.float32)
-            # Group triangles by material so each material draws as one contiguous batch.
-            tri_mats = scene.face_triangle_materials()
-            vertex_order, batches = plan_face_batches(tri_mats)
-            interleaved = interleaved[vertex_order]
+            # Group triangles by (front, back) material so each pair draws as one
+            # contiguous batch. No translucent pass yet (Task 7), so every batch
+            # — opaque and translucent alike — is drawn in today's single pass.
+            front_mats = scene.face_triangle_materials()
+            back_mats = scene.face_triangle_materials(Side.BACK)
+            plan = plan_face_batches(front_mats, back_mats)
+            interleaved = interleaved[plan.vertex_order]
             data = np.ascontiguousarray(interleaved)
             GL.glBindBuffer(GL.GL_ARRAY_BUFFER, buf.face_vbo)
             GL.glBufferData(GL.GL_ARRAY_BUFFER, data.nbytes, data, GL.GL_DYNAMIC_DRAW)
             buf.face_count = int(positions.shape[0])
-            buf.batches = batches
+            buf.batches = plan.opaque + plan.translucent
         else:
             buf.face_count = 0
             buf.batches = []
