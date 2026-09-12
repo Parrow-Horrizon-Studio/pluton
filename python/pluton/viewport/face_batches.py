@@ -71,6 +71,15 @@ def plan_face_batches(
     if t == 0:
         return BatchPlan(np.zeros(0, dtype=np.int64), [], [], 0)
 
+    id_limit = 1 << _ID_BITS
+    for name, ids in (("front_ids", front), ("back_ids", back)):
+        invalid = ids[(ids < 0) | (ids >= id_limit)]
+        if invalid.size:
+            raise ValueError(
+                f"{name} contains material id {int(invalid[0])}, "
+                f"which is out of range: must be in [0, {id_limit})"
+            )
+
     if translucent_mids:
         tl = np.fromiter(translucent_mids, dtype=np.int64, count=len(translucent_mids))
         is_tl = np.isin(front, tl) | np.isin(back, tl)

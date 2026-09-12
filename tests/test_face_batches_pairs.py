@@ -85,6 +85,42 @@ def test_mismatched_side_lengths_are_rejected():
         plan_face_batches([1, 2], [1])
 
 
+def test_a_front_id_at_the_2_20_limit_is_rejected():
+    # 2**20 is one past the documented safe boundary (2**20 - 1, pinned
+    # above): at this value the id's bits collide into the translucency
+    # flag's bit during packing. The guard must reject it loudly rather
+    # than silently corrupting the sort key.
+    import pytest
+
+    limit = 1 << 20
+    with pytest.raises(ValueError):
+        plan_face_batches([limit], [0])
+
+
+def test_a_back_id_at_the_2_20_limit_is_rejected():
+    # Same as above but in back_ids, so a guard that only checks front_ids
+    # (a plausible half-fix) is caught.
+    import pytest
+
+    limit = 1 << 20
+    with pytest.raises(ValueError):
+        plan_face_batches([0], [limit])
+
+
+def test_a_negative_front_id_is_rejected():
+    import pytest
+
+    with pytest.raises(ValueError):
+        plan_face_batches([-1], [0])
+
+
+def test_a_negative_back_id_is_rejected():
+    import pytest
+
+    with pytest.raises(ValueError):
+        plan_face_batches([0], [-1])
+
+
 def test_vertex_order_actually_agrees_with_the_batches_and_the_suffix():
     # Regression for the review finding on Task 4: the other tests read
     # plan.translucent_first and plan.translucent/opaque but never check that
