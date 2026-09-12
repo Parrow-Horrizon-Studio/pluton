@@ -79,9 +79,82 @@ def test_the_delete_confirmation_is_told_the_affected_count(main_window_with_squ
 
 def test_the_default_material_cannot_be_deleted(main_window):
     page = main_window._materials_page
-    page.set_library(main_window._model.materials)
+    lib = main_window._model.materials
+    page.set_library(lib)
     page.set_active(0)
     assert page._can_delete_active() is False
+
+    # End-to-end, not just the predicate: a mutant that dropped the guard from
+    # _delete_active() itself would sail past the assertion above.
+    before = [m.id for m in lib.materials()]
+    depth = len(main_window._command_stack._undo)
+    calls = []
+
+    page._delete_active(confirm=lambda count: calls.append(count) or True)
+
+    assert calls == [], "must not even ask before refusing the Default"
+    assert [m.id for m in lib.materials()] == before
+    assert len(main_window._command_stack._undo) == depth, "nothing may be pushed"
+
+
+def test_undo_through_the_menu_path_refreshes_the_swatch_grid(main_window):
+    """Ctrl+Z routes through MainWindow._on_undo, not CommandStack.undo() --
+    and the Materials page must come back in sync with the rewound library."""
+    win = main_window
+    page = win._materials_page
+    lib = win._model.materials
+    page.set_library(lib)
+    before = len(page._buttons)
+
+    page._add_material("Glass", (0.5, 0.6, 0.7))
+    assert len(page._buttons) == before + 1
+
+    win._on_undo()
+
+    assert len(lib.materials()) == before
+    assert len(page._buttons) == before, "swatch grid still shows the undone material"
+
+
+def test_undo_through_the_menu_path_refreshes_the_editor_fields(main_window):
+    win = main_window
+    lib = win._model.materials
+    m = lib.add_custom("Glass", (0.5, 0.6, 0.7))
+    page = win._materials_page
+    page.set_library(lib)
+    page.set_active(m.id)
+
+    page._apply_edit(name="Frosted")
+    assert page._name_edit.text() == "Frosted"
+
+    win._on_undo()
+
+    assert lib.get(m.id).name == "Glass"
+    assert page._name_edit.text() == "Glass", "editor still shows the pre-undo name"
+
+
+def test_picking_the_same_colour_pushes_no_undo_entry(main_window, monkeypatch):
+    from PySide6.QtGui import QColor
+
+    from pluton.ui import materials_page as materials_page_module
+
+    win = main_window
+    lib = win._model.materials
+    m = lib.add_custom("Glass", (0.5, 0.6, 0.7))
+    page = win._materials_page
+    page.set_library(lib)
+    page.set_active(m.id)
+    depth = len(win._command_stack._undo)
+
+    r, g, b = (round(c * 255) for c in lib.get(m.id).base_color)
+    monkeypatch.setattr(
+        materials_page_module.QColorDialog,
+        "getColor",
+        staticmethod(lambda *a, **k: QColor(r, g, b)),
+    )
+
+    page._on_edit_color()
+
+    assert len(win._command_stack._undo) == depth, "an unchanged colour is not an edit"
 
 
 @pytest.mark.parametrize("field,value", [("metallic", 0.9), ("roughness", 0.1)])

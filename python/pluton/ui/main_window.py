@@ -1313,6 +1313,10 @@ class MainWindow(QMainWindow):
         self._rebuild_tool_context()
         self._refresh_breadcrumb()
         self._scenes_page.refresh()
+        # Material add / edit / delete became undoable in M7.5a Task 9, so the
+        # swatch grid and editor can now go stale behind an undo the same way
+        # the Scenes list can.
+        self._materials_page.refresh()
 
     def _prune_selection(self) -> None:
         """Keep only selected entities still live in the active context (#46)."""

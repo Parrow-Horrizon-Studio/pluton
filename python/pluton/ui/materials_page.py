@@ -173,6 +173,26 @@ class MaterialsPage(QWidget):
         self._rebuild_swatches()
         self._sync_editor()
 
+    def refresh(self) -> None:
+        """Rebuild swatches + editor from the current library (same library).
+
+        Called after every undo/redo: material add / edit / delete are all
+        undoable (M7.5a Task 9), so rewinding the stack can change the
+        library under a page that would otherwise keep painting the
+        pre-undo state. If the active material is gone (an undone Add), fall
+        back to Default rather than leaving `_active_id` dangling --
+        MaterialLibrary.get() would silently resolve it to Default anyway.
+        """
+        dropped = not any(m.id == self._active_id for m in self._library.materials())
+        if dropped:
+            self._active_id = MaterialLibrary.DEFAULT_ID
+        self._rebuild_swatches()
+        self._sync_editor()
+        if dropped:
+            # Tell MainWindow too: it caches the active material id for the
+            # Paint tool, which would otherwise keep painting the dead one.
+            self.active_material_changed.emit(self._library.get(self._active_id))
+
     @property
     def active_material_id(self) -> int:
         return self._active_id
@@ -228,24 +248,27 @@ class MaterialsPage(QWidget):
     def _delete_active(self, confirm=None) -> None:
         """Delete the active material through the command stack.
 
-        `confirm` lets tests supply a stub instead of a modal QMessageBox.
-        DeleteMaterialCommand snapshots the affected faces at construction,
-        below, and that snapshot is what do() acts on -- so nothing may
-        mutate the scene between constructing `cmd` and calling do(). The
-        `ask(...)` call in between is a modal QMessageBox.question by
-        default: it blocks this widget's event loop for user input only,
-        the same way any modal dialog blocks the rest of the application,
-        so no paint gesture can land on the canvas while it is open.
+        `confirm` must be SYNCHRONOUS: it has to block until the user has
+        answered and return a bool, the way the default modal
+        QMessageBox.question does. It is called between constructing `cmd`
+        (which snapshots the affected faces model-wide, so `affected_count`
+        can be quoted) and executing it. A non-blocking `confirm` that
+        returned to the event loop in between would let a paint gesture land
+        on the canvas mid-decision. That contract is enforced rather than
+        merely documented: DeleteMaterialCommand.do() re-snapshots before it
+        mutates, so the geometry it clears is always the geometry as it
+        actually is -- only the quoted count could go stale.
+
+        `confirm` also lets tests supply a stub instead of a modal dialog.
         """
         mid = self.active_material_id
         if not self._can_delete_active() or self._command_stack is None or self._model is None:
             return
-        scene = self._current_scene()
-        cmd = DeleteMaterialCommand(self._library, mid, scene)
+        cmd = DeleteMaterialCommand(self._library, mid, self._model)
         ask = confirm if confirm is not None else self._confirm_delete
         if not ask(cmd.affected_count):
             return
-        self._command_stack.execute(cmd, scene)
+        self._command_stack.execute(cmd, self._model)
         self.set_active(MaterialLibrary.DEFAULT_ID)
         self._rebuild_swatches()
         self.library_changed.emit()
@@ -281,7 +304,15 @@ class MaterialsPage(QWidget):
         qc = QColorDialog.getColor(QColor(r, g, b), self)
         if not qc.isValid():
             return
-        self._apply_edit(base_color=(qc.redF(), qc.greenF(), qc.blueF()))
+        picked = (qc.redF(), qc.greenF(), qc.blueF())
+        # Re-picking the colour the dialog opened on is not an edit; issuing
+        # a command for it would push a no-op undo entry. Compare on the
+        # round-tripped 8-bit values the dialog actually offers, not on the
+        # stored floats, which carry precision the picker cannot express.
+        # (Matches the guard _on_name_committed already has.)
+        if tuple(round(c * 255) for c in picked) == (r, g, b):
+            return
+        self._apply_edit(base_color=picked)
 
     def _on_alpha_changed(self, value: float) -> None:
         if self._syncing:
