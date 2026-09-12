@@ -42,6 +42,29 @@ def test_translucent_triangles_form_a_contiguous_suffix():
     assert covered == list(range(plan.translucent_first, n_vertices))
 
 
+def test_a_low_numbered_translucent_id_still_sorts_to_the_suffix():
+    # The final-review finding on Task 4: every other fixture in this file (and
+    # in test_face_batches.py) gives its translucent materials ids numerically
+    # ABOVE every opaque id, so sorting by (front, back) alone already puts
+    # them last. Dropping the translucency term from the sort key therefore
+    # broke the contiguous-suffix property outright and all 21 tests still
+    # passed.
+    #
+    # Here the translucent id (1) is BELOW the opaque ids (5), so a key of
+    # (front, back) alone sorts the translucent triangle FIRST and
+    # translucent_first collapses to 0. Only a key that leads with
+    # translucency puts it at the end.
+    plan = plan_face_batches([5, 1, 5], [0, 0, 0], frozenset({1}))
+
+    assert plan.translucent_first == 6  # the two opaque triangles come first
+    assert len(plan.translucent) == 1
+    assert plan.translucent[0].first == 6
+    assert plan.translucent[0].front_material_id == 1
+    # And the permutation agrees: the suffix really holds triangle 1.
+    assert plan.vertex_order[6:].tolist() == [3, 4, 5]
+    assert all(b.first < 6 for b in plan.opaque)
+
+
 def test_a_translucent_back_makes_the_whole_face_translucent():
     # Spec D5. The front is opaque; the back is not; the face goes translucent.
     plan = plan_face_batches([1], [9], frozenset({9}))
