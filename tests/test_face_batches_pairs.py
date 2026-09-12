@@ -83,3 +83,68 @@ def test_mismatched_side_lengths_are_rejected():
 
     with pytest.raises(ValueError):
         plan_face_batches([1, 2], [1])
+
+
+def test_vertex_order_actually_agrees_with_the_batches_and_the_suffix():
+    # Regression for the review finding on Task 4: the other tests read
+    # plan.translucent_first and plan.translucent/opaque but never check that
+    # plan.vertex_order actually produces those ranges. An implementation
+    # that computed the batches correctly but returned an unrelated (even
+    # identity) vertex_order would pass every other test in this file.
+    #
+    # 6 triangles, 4 distinct (front, back) pairs, translucent triangles
+    # interleaved with opaque ones in the input (not already a suffix):
+    #   tri 0: (1, 0) opaque       tri 3: (1, 0) opaque
+    #   tri 1: (9, 0) translucent  tri 4: (2, 9) translucent
+    #   tri 2: (2, 0) opaque       tri 5: (2, 0) opaque
+    front_ids = [1, 9, 2, 1, 2, 2]
+    back_ids = [0, 0, 0, 0, 9, 0]
+    translucent_mids = frozenset({9})
+    pairs = list(zip(front_ids, back_ids, strict=True))
+    translucent_tris = {i for i, (f, b) in enumerate(pairs) if f in translucent_mids or b in translucent_mids}
+    assert len({(f, b) for f, b in pairs}) >= 3
+    assert len(pairs) >= 4
+    assert translucent_tris == {1, 4}  # confirms they're interleaved, not a suffix already
+
+    plan = plan_face_batches(front_ids, back_ids, translucent_mids)
+
+    # Real per-vertex data: an affine encoding of the original vertex index,
+    # deliberately not equal to the index itself, so a test bug that just
+    # compared indices to indices can't accidentally pass.
+    T = len(front_ids)
+    verts = np.arange(3 * T, dtype=np.int64) * 100 + 7
+
+    def origin_triangle(value: int) -> int:
+        return int((value - 7) // 100) // 3
+
+    reordered = verts[plan.vertex_order]
+
+    # (3) the suffix contains exactly the translucent triangles' vertices.
+    suffix = reordered[plan.translucent_first :]
+    assert suffix.shape[0] == len(translucent_tris) * 3
+    assert {origin_triangle(v) for v in suffix.tolist()} == translucent_tris
+
+    # (4) every batch's range, read through vertex_order, agrees with the
+    # (front, back) pair of the triangles that actually live there. This is
+    # the assertion that ties vertex_order to the batch lists.
+    for batch in plan.opaque + plan.translucent:
+        segment = reordered[batch.first : batch.first + batch.count]
+        for value in segment.tolist():
+            assert pairs[origin_triangle(value)] == (batch.front_material_id, batch.back_material_id)
+
+
+def test_material_ids_up_to_the_2_20_minus_1_boundary_sort_correctly():
+    # face_batches.py packs (is_translucent, front, back) into one int64 sort
+    # key with _ID_BITS = 20 bits per side. This pins the documented limit:
+    # a material id up to 2**20 - 1 must sort and batch correctly. (An id at
+    # or above 2**20 is a known latent bug, not covered here — see the Task 4
+    # fix report.)
+    near_limit = (1 << 20) - 1
+    plan = plan_face_batches([near_limit, 5], [0, 0])
+    assert len(plan.opaque) == 2
+    by_pair = {(b.front_material_id, b.back_material_id): b for b in plan.opaque}
+    assert set(by_pair) == {(near_limit, 0), (5, 0)}
+    assert by_pair[(5, 0)].count == 3
+    assert by_pair[(near_limit, 0)].count == 3
+    # the smaller id must sort first
+    assert by_pair[(5, 0)].first < by_pair[(near_limit, 0)].first
