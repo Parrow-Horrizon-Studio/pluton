@@ -271,6 +271,13 @@ class MainWindow(QMainWindow):
         # incidental one. visibility_changed is already wired to update above.
         self._materials_page.library_changed.connect(self._viewport.update)
         self._tags_page.library_changed.connect(self._viewport.update)
+        # M7.5b final review, item 1: the very same hazard one row down. A
+        # texture-placement edit from the Properties spin boxes moves the image
+        # on a face that is on screen right now, and the command stack's own
+        # listeners only mark dirty, retitle and rebuild the Outliner -- so the
+        # panel the spec calls "the primary mechanism" (design line 172) has to
+        # ask for the repaint too, exactly as the two library pages above do.
+        self._properties_dock.placement_changed.connect(self._on_placement_committed)
 
         # NOW we can build the ToolContext that includes the viewport refs.
         self._rebuild_tool_context()
@@ -499,7 +506,10 @@ class MainWindow(QMainWindow):
             # fields don't go stale when the drag lands on the currently
             # selected face -- _refresh_entity_info is the same single call
             # site every other placement-touching action already uses.
-            on_placement_committed=self._refresh_entity_info,
+            # Final review, item 1: the repaint is now asked for explicitly
+            # rather than relying on the mouse-release handler that happens to
+            # follow a drag -- see _on_placement_drag_committed.
+            on_placement_committed=self._on_placement_drag_committed,
         )
 
     def _rebuild_tool_context(self) -> None:
@@ -1354,6 +1364,29 @@ class MainWindow(QMainWindow):
         )
         self._command_stack.execute(composite, self._model.active_scene)
         self._viewport.update()
+
+    # --- texture placement (M7.5b) ----------------------------------------
+
+    def _on_placement_committed(self) -> None:
+        """A face's texture placement just changed through the command stack.
+
+        Repaint only. The panel resynced its own fields before it emitted, and
+        the stack's change listeners already marked the document dirty, so the
+        one thing nothing else does is put the moved image on screen.
+        """
+        self._viewport.update()
+
+    def _on_placement_drag_committed(self) -> None:
+        """Task 12's Shift-drag committed a placement (ToolContext hook).
+
+        The drag also has to repopulate the Properties fields, which the
+        numeric path does for itself. The repaint is asked for explicitly here
+        even though a mouse release repaints anyway: relying on that made the
+        drag work and the numeric path look broken, which is precisely the
+        asymmetry this call removes.
+        """
+        self._refresh_entity_info()
+        self._on_placement_committed()
 
     def _on_after_undo_redo(self) -> None:
         """Called by CommandStack listeners after every successful undo or redo."""

@@ -277,3 +277,115 @@ def test_setting_a_spin_box_value_directly_drives_the_command(main_window):
     assert placement.offset_u == 0.0
     assert placement.offset_v == 0.0
     assert placement.rotation == 0.0
+
+
+# --- the viewport repaint (M7.5b final review, item 1) ----------------------
+#
+# These assert on ViewportWidget.update being CALLED, not on the scene having
+# changed. A test of the second kind passes against the broken code these
+# exist for: SetFacePlacementCommand always updated scene.face_placement
+# correctly, and the only thing missing was anything asking for a repaint --
+# so the spec's "primary mechanism" (design line 172) moved the texture and
+# the screen went on showing the old one until an unrelated event repainted.
+# MainWindow routes the repaint through a slot that looks self._viewport up at
+# call time, which is what lets these patch it.
+
+
+def _count_repaints(win, monkeypatch):
+    calls: list[int] = []
+    monkeypatch.setattr(win._viewport, "update", lambda: calls.append(1))
+    return calls
+
+
+def _selected_square(win):
+    scene = win._model.active_context.mesh
+    f = _square(scene)
+    win._selection.replace(faces=[f])
+    win._refresh_selection_status()
+    return scene, f
+
+
+def test_nudging_a_placement_spin_box_repaints_the_viewport(main_window, monkeypatch):
+    win = main_window
+    scene, f = _selected_square(win)
+    calls = _count_repaints(win, monkeypatch)
+
+    win._properties_dock._offset_u_spin.setValue(0.25)
+
+    assert scene.face_placement(f).offset_u == pytest.approx(0.25)
+    assert calls, "the numeric placement edit never asked the viewport to repaint"
+
+
+def test_every_placement_field_repaints_the_viewport(main_window, monkeypatch):
+    # One assertion per field, so a wiring attached to a single spin box's
+    # signal instead of to the shared commit path is caught.
+    win = main_window
+    _, _ = _selected_square(win)
+    panel = win._properties_dock
+    calls = _count_repaints(win, monkeypatch)
+
+    for spin, value in (
+        (panel._offset_u_spin, 0.25),
+        (panel._offset_v_spin, 0.5),
+        (panel._scale_spin, 2.0),
+        (panel._rotation_spin, 30.0),
+    ):
+        before = len(calls)
+        spin.setValue(value)
+        assert len(calls) > before, f"{spin} committed without a repaint"
+
+
+def test_flipping_the_side_control_does_not_repaint(main_window, monkeypatch):
+    # The discriminating half: a fix that repainted from set_placement_target
+    # (or emitted unconditionally) would repaint on every selection change and
+    # on a side flip, neither of which changes a single pixel. Both would pass
+    # the two tests above.
+    win = main_window
+    _, _ = _selected_square(win)
+    calls = _count_repaints(win, monkeypatch)
+
+    win._properties_dock._side_combo.setCurrentIndex(1)  # Back
+
+    assert calls == [], "flipping Front/Back issues no command and must not repaint"
+
+
+def test_an_untargeted_placement_edit_does_not_repaint(main_window, monkeypatch):
+    # _apply_placement returns early with no face targeted, pushing no command;
+    # emitting there would repaint for a scene change that never happened.
+    win = main_window
+    win._properties_dock.set_placement_target(None)
+    calls = _count_repaints(win, monkeypatch)
+
+    win._properties_dock._apply_placement(TexturePlacement(offset_u=0.5))
+
+    assert calls == []
+
+
+def test_a_committed_placement_drag_repaints_the_viewport(main_window, monkeypatch):
+    # Task 12's drag repaints incidentally, because a mouse release repaints
+    # anyway. Driven here without any mouse event, so the repaint has to come
+    # from the commit path itself -- the asymmetry that made the fallback look
+    # healthy while the primary mechanism looked broken.
+    win = main_window
+    scene, f = _selected_square(win)
+    calls = _count_repaints(win, monkeypatch)
+
+    tool = win._paint_tool
+    tool.begin_placement_drag(f, Side.FRONT)
+    tool.update_placement_drag(du=0.6, dv=0.0)
+    tool.end_placement_drag()
+
+    assert scene.face_placement(f).offset_u == pytest.approx(0.6)
+    assert calls, "the committed drag never asked the viewport to repaint"
+
+
+def test_a_drag_that_moves_nothing_does_not_repaint(main_window, monkeypatch):
+    win = main_window
+    _, f = _selected_square(win)
+    calls = _count_repaints(win, monkeypatch)
+
+    tool = win._paint_tool
+    tool.begin_placement_drag(f, Side.FRONT)
+    tool.end_placement_drag()
+
+    assert calls == []

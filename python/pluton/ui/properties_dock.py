@@ -43,6 +43,16 @@ class PropertiesDock(QDockWidget):
 
     tab_changed = Signal(str)
 
+    # M7.5b final review, item 1: a placement edit made HERE just landed on the
+    # command stack. Neither of the stack's own change listeners
+    # (_rebuild_outliner, _on_document_changed) repaints, and ViewportWidget
+    # has no subscription of its own, so without this the spin boxes -- "the primary
+    # mechanism" of design line 172 -- changed the scene and the screen kept
+    # showing the old texture until some unrelated event happened to repaint.
+    # Same shape as MaterialsPage/TagsPage.library_changed, which MainWindow
+    # already wires to self._viewport.update for exactly this hazard.
+    placement_changed = Signal()
+
     # QMainWindow.saveState() silently drops docks without an object name.
     # This is a persistence key: never rename it, or saved layouts silently
     # lose this dock's state.
@@ -307,6 +317,12 @@ class PropertiesDock(QDockWidget):
         # setting the identity CLEARS the entry (scene.set_face_placement),
         # so the fields must reflect that, not just echo what was passed in.
         self.set_placement_target(self._target_face_id, self._target_side)
+        # Emitted only on the path that actually executed a command -- the
+        # early return above is a genuine no-op and must not make the viewport
+        # repaint. Flipping the Front/Back combo issues no command either
+        # (_on_side_changed only repopulates the fields), so it deliberately
+        # does not emit: it changes which side the panel EDITS, never the scene.
+        self.placement_changed.emit()
 
     # --- outliner --------------------------------------------------------
     def outliner(self) -> QWidget | None:
