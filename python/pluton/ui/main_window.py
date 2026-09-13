@@ -136,7 +136,8 @@ class MainWindow(QMainWindow):
         self._tool_manager.register(ArcTool())
         self._tool_manager.register(SelectTool())
         self._tool_manager.register(EraserTool())
-        self._tool_manager.register(PaintTool())
+        self._paint_tool = PaintTool()
+        self._tool_manager.register(self._paint_tool)
         self._tool_manager.register(MoveTool())
         self._tool_manager.register(RotateTool())
         self._tool_manager.register(ScaleTool())
@@ -509,6 +510,14 @@ class MainWindow(QMainWindow):
         if active is not None:
             active.deactivate()
             active.activate(ctx)
+        if active is not self._paint_tool:
+            # M7.5b Task 12: PaintTool.begin_placement_drag/update/end are
+            # exercised directly (e.g. by tests reaching `_paint_tool`)
+            # without Paint necessarily being the tool the user has armed,
+            # so keep its scene/model refs fresh on every rebuild too --
+            # mirrors what ToolManager._arm already does the moment Paint
+            # truly becomes active.
+            self._paint_tool.activate(ctx)
 
     # --- Slots -----------------------------------------------------------
 
