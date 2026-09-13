@@ -381,12 +381,17 @@ def _face_uv_geometry(scene, face_buffer=None) -> _FaceUvGeometry | None:
     counts = np.array([r[2] for r in runs], dtype=np.int64)
 
     # The basis comes from the triangle buffer's normals, NOT from
-    # Scene.face_normal. face_normal takes the cross product of a face's first
-    # three loop vertices and raises when they are collinear — which is what
-    # splitting an edge leaves behind, on a face that triangulates and renders
-    # perfectly well. Its other callers are interactive tool code working on one
-    # picked face; this runs for every face of every upload, where a raise
-    # propagates out through paint() and blanks the whole viewport.
+    # Scene.face_normal. This runs for every face of every upload, and
+    # face_normal is a per-face Python routine that walks the loop and can
+    # raise; anything it raises propagates out through paint() and blanks the
+    # whole viewport, so one face would cost the entire document. The buffer's
+    # normals block is already computed, already correct, and already here.
+    #
+    # face_normal used to raise on a merely awkward loop — first three vertices
+    # collinear, which is what splitting an edge leaves behind — which made this
+    # urgent. That defect is fixed (issue #110: it uses Newell's method over the
+    # whole loop now, and only a zero-area face raises). The reason above does
+    # not depend on that and still stands: keep reading the buffer.
     u_axes, v_axes = plane_bases(normals)
 
     centers = np.array([scene.face_center(f) for f in face_ids], dtype=np.float64)

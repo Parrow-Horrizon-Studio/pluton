@@ -77,6 +77,107 @@ def _setup_push_pull():
     return tool, scene, f, camera, command_stack
 
 
+def _setup_push_pull_split_edge_square():
+    """`_setup_push_pull`, but the face carries a mid-edge vertex at loop[0].
+
+    Same unit square in the XY plane, same winding, same +Z normal, same pick
+    ray — the only difference is the extra collinear vertex at (0.5, 0, 0)
+    sitting second in the loop, which makes the first three loop vertices
+    collinear. That is what an edge split leaves behind (issue #110).
+    """
+    from pluton.commands import CommandStack
+    from pluton.scene import Scene
+    from pluton.tools.push_pull_tool import PushPullTool
+    from pluton.tools.tool import ToolContext
+
+    scene = Scene()
+    loop = [
+        scene.add_vertex(np.array([x, y, 0.0], dtype=np.float32))
+        for x, y in [(0.0, 0.0), (0.5, 0.0), (1.0, 0.0), (1.0, 1.0), (0.0, 1.0)]
+    ]
+    f = scene.add_face_from_loop(loop)
+
+    camera = MagicMock()
+    camera.ray_from_screen.return_value = (
+        np.array([0.5, 0.5, 5.0], dtype=np.float32),
+        np.array([0.0, 0.0, -1.0], dtype=np.float32),
+    )
+
+    command_stack = CommandStack()
+    tool = PushPullTool()
+    tool.activate(
+        ToolContext(
+            scene=scene,
+            command_stack=command_stack,
+            camera=camera,
+            widget_size_provider=lambda: (800, 600),
+        )
+    )
+    return tool, scene, f, camera, command_stack
+
+
+class TestPushPullOnASplitEdgeFace:
+    """Issue #110 at the level the user meets it, not the level it was fixed at.
+
+    Scene.face_normal used to raise on a face whose first three loop vertices
+    are collinear, and PushPullTool arms itself by calling it, so picking an
+    edge-split face and dragging raised a ValueError straight out of the tool.
+
+    These assert the SYMPTOM — the tool works, and extrudes the way the face
+    points — rather than a property of the normal helper. They are the only
+    tests in the change that cover the tool path rather than the numeric one.
+    """
+
+    def _drag_and_commit(self, tool, camera):
+        tool.on_mouse_move(_make_move(), snap=None)
+        tool.on_mouse_press(_make_press(), snap=None)  # arm: calls face_normal
+        camera.ray_from_screen.return_value = (
+            np.array([-3.0, 0.5, 2.0], dtype=np.float32),
+            np.array([1.0, 0.0, 0.0], dtype=np.float32),
+        )
+        tool.on_mouse_move(_make_move(), snap=None)
+        tool.on_mouse_press(_make_press(), snap=None)  # commit
+
+    def test_push_pull_extrudes_a_split_edge_face_OUTWARD(self):
+        # The direction is the whole point. Asserting only "it did not raise"
+        # would pass just as happily if the normal came back negated, and a
+        # push/pull that extrudes INWARD would be a worse bug than the raise
+        # this replaced. The face's normal is +Z, so the solid must occupy
+        # z in [0, +2] — never [0, -2].
+        tool, scene, _source_f, camera, _stack = _setup_push_pull_split_edge_square()
+        self._drag_and_commit(tool, camera)
+
+        zs = [float(scene.vertex(v.id).position[2]) for v in scene.vertices_iter()]
+        assert max(zs) == pytest.approx(2.0, abs=1e-5)
+        assert min(zs) == pytest.approx(0.0, abs=1e-5)
+
+    def test_the_split_edge_face_extrudes_the_same_way_as_a_plain_square(self):
+        # Same geometry, same winding, one extra collinear vertex. The extra
+        # vertex must not change the direction, only the side-face count.
+        def top_z(scene):
+            return max(float(scene.vertex(v.id).position[2]) for v in scene.vertices_iter())
+
+        plain_tool, plain_scene, _f, plain_cam, _s = _setup_push_pull()
+        self._drag_and_commit(plain_tool, plain_cam)
+
+        split_tool, split_scene, _f2, split_cam, _s2 = _setup_push_pull_split_edge_square()
+        self._drag_and_commit(split_tool, split_cam)
+
+        assert top_z(split_scene) == pytest.approx(top_z(plain_scene), abs=1e-5)
+
+    def test_the_resulting_top_face_still_points_plus_z(self):
+        tool, scene, _source_f, camera, _stack = _setup_push_pull_split_edge_square()
+        self._drag_and_commit(tool, camera)
+
+        tops = [
+            f.id
+            for f in scene.faces_iter()
+            if float(np.dot(scene.face_normal(f.id), [0.0, 0.0, 1.0])) > 0.5
+        ]
+        assert len(tops) == 1
+        np.testing.assert_allclose(scene.face_normal(tops[0]), [0.0, 0.0, 1.0], atol=1e-5)
+
+
 class TestPushPullCommit:
     def test_commit_a_rectangle_produces_5_new_faces_8_new_edges_4_new_verts(self):
         tool, scene, source_f, camera, cmd_stack = _setup_push_pull()

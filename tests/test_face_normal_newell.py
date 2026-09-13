@@ -84,10 +84,13 @@ def _square_in_plane(orientation):
     }[orientation]
 
 
-# A concave (L-shaped) polygon wound CCW in XY. Its first corner (0,0) is
-# convex, so the OLD estimate succeeds and points +Z — which is what makes it
-# usable in the equivalence test. The reflex corner at (1,1) is the one a
-# first-three estimate would have got wrong had the loop started there.
+# A concave (L-shaped) polygon wound CCW in XY, with its reflex corner at
+# (1,1), index 3. As written, index 1 holds a convex vertex, so the OLD
+# estimate succeeds and points +Z — which is what makes it usable in the
+# equivalence test. `cross(p1-p0, p2-p0)` is twice the signed area of triangle
+# (p0, p1, p2), i.e. the ear test at p1, so it is a reflex vertex at INDEX 1
+# that flips it, not one at the start. np.roll(_L_SHAPE, -2) puts it there;
+# see test_the_reflex_at_index_1_case_is_where_newell_beats_the_old_estimate.
 _L_SHAPE = [
     (0.0, 0.0, 0.0),
     (2.0, 0.0, 0.0),
@@ -190,6 +193,37 @@ def test_the_normal_of_a_split_edge_face_matches_its_unsplit_square():
         np.asarray(plain.face_normal(f_plain), dtype=np.float64),
         atol=1e-6,
     )
+
+
+def test_the_reflex_at_index_1_case_is_where_newell_beats_the_old_estimate():
+    # Every case above pins AGREEMENT. This one pins the IMPROVEMENT: a face
+    # where the two intentionally differ, and the new answer is the right one.
+    #
+    # cross(p1-p0, p2-p0) is twice the signed area of triangle (p0, p1, p2) —
+    # the ear test at p1 — so a REFLEX vertex at index 1 makes it point the
+    # opposite way to the polygon's own normal. A loop merely starting at the
+    # reflex corner does not do it; the vertex has to land at index 1.
+    # np.roll(-2) puts the L's reflex corner (1,1) there, which is exactly the
+    # construction tests/test_face_triangulation_winding.py uses for the same
+    # class of bug on the earcut side.
+    #
+    # Without this test, an implementation that merely stopped raising on
+    # collinear starts — while keeping the old sign — would pass the whole
+    # file.
+    points = np.roll(np.asarray(_L_SHAPE, dtype=np.float64), -2, axis=0)
+    assert tuple(points[1]) == (1.0, 1.0, 0.0), "roll must land the reflex vertex at index 1"
+
+    scene, f_id = _face_from_points(points)
+
+    old = _first_three_normal(scene, f_id)
+    np.testing.assert_allclose(old, [0.0, 0.0, -1.0], atol=1e-9)
+
+    new = np.asarray(scene.face_normal(f_id), dtype=np.float64)
+    np.testing.assert_allclose(new, [0.0, 0.0, 1.0], atol=1e-6)
+
+    # Stated as the property, not just two literals: they must be opposed, and
+    # the winding is unchanged from _L_SHAPE, whose normal is +Z.
+    assert float(np.dot(new, old)) < -_PARALLEL
 
 
 def test_a_genuinely_degenerate_zero_area_face_still_raises():

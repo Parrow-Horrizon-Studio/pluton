@@ -77,10 +77,12 @@ def _newell_normal(positions_3d: np.ndarray) -> np.ndarray:
     - A loop whose first three vertices are collinear — the exact shape an edge
       split leaves behind — still yields a normal, because no single corner is
       privileged. A `p1-p0 x p2-p0` estimate returns a zero vector there.
-    - A loop starting at a REFLEX corner yields the right SIGN. That single
-      corner's cross product points the opposite way to the polygon's own
-      normal; the sum cannot, since the convex corners outweigh the reflex ones
-      by exactly the polygon's area.
+    - A loop whose REFLEX corner lands at index 1 yields the right SIGN.
+      `cross(p1 - p0, p2 - p0)` is twice the signed area of the triangle
+      (p0, p1, p2), which is the ear test at p1 — so it is a reflex vertex
+      sitting at index 1, not at the loop's start, that points it the opposite
+      way to the polygon's own normal. The sum cannot go wrong that way: the
+      convex corners outweigh the reflex ones by exactly the polygon's area.
 
     Direction matches `np.cross(p1 - p0, p2 - p0)` for every loop on which that
     estimate is valid: right-handed, so a CCW loop viewed from +Z gives +Z.
@@ -334,13 +336,14 @@ class Scene:
     def face_normal(self, f_id: int) -> np.ndarray:
         """Unit geometric normal of the planar face, via Newell's method.
 
-        Summed over the whole boundary loop rather than estimated from the
-        first three vertices, so a loop that merely STARTS awkwardly — three
-        collinear vertices, which is what an edge split leaves behind, or a
-        reflex first corner, which would flip the sign — is handled. The
-        direction is unchanged from the old first-three estimate wherever that
-        estimate was valid; six interactive tools push, offset and paint along
-        it, so the sign is contractual (see tests/test_face_normal_newell.py).
+        Summed over the whole boundary loop rather than estimated from its
+        first three vertices, so a loop that is merely ORDERED awkwardly is
+        handled: three collinear vertices at the start, which is what an edge
+        split leaves behind and which used to raise, or a reflex vertex at
+        index 1, which used to flip the sign. The direction is unchanged from
+        the old first-three estimate wherever that estimate was valid; six
+        interactive tools push, offset and paint along it, so the sign is
+        contractual (see tests/test_face_normal_newell.py).
 
         Raises on a loop with fewer than 3 vertices, and on a genuinely
         degenerate face — one of zero area, where the Newell sum really is
