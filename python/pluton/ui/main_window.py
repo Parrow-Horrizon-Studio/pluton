@@ -1327,6 +1327,10 @@ class MainWindow(QMainWindow):
         # swatch grid and editor can now go stale behind an undo the same way
         # the Scenes list can.
         self._materials_page.refresh()
+        # M7.5b Task 9: undoing a texture import removes the Texture record
+        # (AddTextureCommand.undo) -- reconcile the renderer's GL cache so it
+        # does not keep that upload alive until the whole document closes.
+        self._viewport.scene_renderer.evict_stale_textures(self._model.textures)
         # Tag colour became undoable in M7.5a Task 11 -- same staleness risk.
         self._tags_page.refresh()
 
@@ -1640,6 +1644,12 @@ class MainWindow(QMainWindow):
         """Adopt a (model, camera, units, render style) into the live window, in place."""
         from dataclasses import replace
 
+        # M7.5b Task 9: the incoming Model's TextureLibrary restarts id
+        # numbering from 1, same as every other document's -- so without
+        # this, the renderer's GL texture cache (keyed by that same int)
+        # would hand the new document's material the PREVIOUS document's
+        # texture the first time it is drawn, not merely leak it.
+        self._viewport.scene_renderer.release_all_textures()
         self._model.load_from(model)
         self._materials_page.set_library(self._model.materials)
         self._tags_page.set_library(self._model.tags)

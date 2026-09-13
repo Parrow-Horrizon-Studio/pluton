@@ -1352,6 +1352,33 @@ class SceneRenderer:
             buf = self._def_buffers.pop(key)
             buf.release()
 
+    def evict_stale_textures(self, textures) -> None:
+        """Drop cached GL uploads for texture ids no longer in `textures`.
+
+        M7.5b Task 9: an undone import (AddTextureCommand.undo) or a deleted
+        texture (DeleteTextureCommand) removes a Texture record from the
+        model's TextureLibrary, but leaves whatever this cache uploaded for
+        that id sitting around until release_all() -- normally document
+        close. Reconciling here, the same way evict_unreachable() reconciles
+        `_def_buffers` against the model, frees it promptly instead of
+        letting a long session of import/undo cycles accumulate orphaned GL
+        textures.
+        """
+        live = {t.id for t in textures.textures()}
+        for tid in self._texture_cache.cached_ids() - live:
+            self._texture_cache.invalidate(tid)
+
+    def release_all_textures(self) -> None:
+        """Free every cached GL texture upload (model close: New / Open).
+
+        Without this, a new or reloaded Model's TextureLibrary restarts its
+        id numbering from 1 -- the same ids the PREVIOUS document's textures
+        used -- so texture_for() would happily hand back the old document's
+        GL texture for the new document's id 1 (wrong image bound, not just a
+        leak) until this cache was cleared.
+        """
+        self._texture_cache.release_all()
+
     # --- Init helpers -----------------------------------------------------
 
     def _init_grid_buffers(self) -> None:

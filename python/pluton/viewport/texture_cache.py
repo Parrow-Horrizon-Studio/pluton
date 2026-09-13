@@ -111,6 +111,16 @@ class TextureCache:
         self._ids[texture.id] = tid
         return tid
 
+    def cached_ids(self) -> frozenset[int]:
+        """Every texture id holding a live GL upload or a remembered decode
+        failure -- i.e. every id `invalidate` or `release_all` would affect.
+
+        Read-only introspection for a caller that wants to reconcile this
+        cache against a TextureLibrary's current contents (M7.5b Task 9)
+        without reaching into the private `_ids` / `_failed` sets directly.
+        """
+        return frozenset(self._ids) | frozenset(self._failed)
+
     def invalidate(self, tid: int) -> None:
         """Drop one cached upload, so the next use re-uploads.
 

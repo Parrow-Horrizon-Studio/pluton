@@ -13,11 +13,14 @@ M5b swatch-only page did.
 
 from __future__ import annotations
 
-from PySide6.QtCore import Signal
-from PySide6.QtGui import QColor
+from pathlib import Path
+
+from PySide6.QtCore import QSize, Signal
+from PySide6.QtGui import QColor, QIcon, QPixmap
 from PySide6.QtWidgets import (
     QColorDialog,
     QDoubleSpinBox,
+    QFileDialog,
     QFormLayout,
     QGridLayout,
     QLineEdit,
@@ -27,14 +30,19 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from pluton.commands.command import CompositeCommand
 from pluton.commands.material_commands import (
     AddMaterialCommand,
+    AddTextureCommand,
     DeleteMaterialCommand,
     EditMaterialCommand,
+    SetMaterialTextureCommand,
 )
 from pluton.model.material import MaterialLibrary
+from pluton.viewport.texture_cache import decode_image, sniff_format
 
 _COLUMNS = 4
+_SWATCH_ICON_SIZE = QSize(30, 22)  # inset from _swatch_style's 36x28 min size
 
 
 def _swatch_style(color: tuple[float, float, float], alpha: float, active: bool) -> str:
@@ -110,6 +118,20 @@ class MaterialsPage(QWidget):
         self._roughness_spin = self._make_unit_spin(container, self._on_roughness_changed)
         form.addRow("Roughness", self._roughness_spin)
 
+        self._texture_btn = QPushButton("Texture…", container)
+        self._texture_btn.clicked.connect(lambda: self._choose_texture())
+        form.addRow(self._texture_btn)
+
+        self._clear_texture_btn = QPushButton("Clear Texture", container)
+        self._clear_texture_btn.clicked.connect(lambda: self._clear_texture())
+        form.addRow(self._clear_texture_btn)
+
+        self._texture_width_spin = self._make_size_spin(container, self._on_texture_size_changed)
+        form.addRow("Texture width", self._texture_width_spin)
+
+        self._texture_height_spin = self._make_size_spin(container, self._on_texture_size_changed)
+        form.addRow("Texture height", self._texture_height_spin)
+
         self._delete_btn = QPushButton("Delete Material", container)
         self._delete_btn.clicked.connect(lambda: self._delete_active())
         form.addRow(self._delete_btn)
@@ -121,6 +143,17 @@ class MaterialsPage(QWidget):
         spin.setRange(0.0, 1.0)
         spin.setSingleStep(0.05)
         spin.setDecimals(2)
+        spin.valueChanged.connect(on_changed)
+        return spin
+
+    def _make_size_spin(self, container: QWidget, on_changed) -> QDoubleSpinBox:
+        """A spin box for texture_size, in model units -- unlike the 0..1
+        unit spins above, real-world texture dimensions can be any positive
+        size."""
+        spin = QDoubleSpinBox(container)
+        spin.setRange(0.01, 1000.0)
+        spin.setSingleStep(0.1)
+        spin.setDecimals(3)
         spin.valueChanged.connect(on_changed)
         return spin
 
@@ -136,7 +169,7 @@ class MaterialsPage(QWidget):
         for idx, mat in enumerate(self._library.materials()):
             btn = QPushButton(self)
             btn.setToolTip(mat.name)
-            btn.setStyleSheet(_swatch_style(mat.base_color, mat.alpha, mat.id == self._active_id))
+            self._apply_swatch_appearance(btn, mat)
             btn.clicked.connect(lambda _checked=False, mid=mat.id: self._on_pick(mid))
             self._grid.addWidget(btn, idx // _COLUMNS, idx % _COLUMNS)
             self._buttons[mat.id] = btn
@@ -144,7 +177,38 @@ class MaterialsPage(QWidget):
     def _restyle(self) -> None:
         for mid, btn in self._buttons.items():
             mat = self._library.get(mid)
-            btn.setStyleSheet(_swatch_style(mat.base_color, mat.alpha, mid == self._active_id))
+            self._apply_swatch_appearance(btn, mat)
+
+    def _apply_swatch_appearance(self, btn: QPushButton, mat) -> None:
+        style, icon = self._swatch_appearance(mat)
+        btn.setStyleSheet(style)
+        btn.setIcon(icon if icon is not None else QIcon())
+        btn.setIconSize(_SWATCH_ICON_SIZE)
+
+    def _swatch_appearance(self, mat) -> tuple[str, QIcon | None]:
+        """The (stylesheet, icon) pair a swatch button should show for `mat`.
+
+        Kept as one method the tests can call directly (M7.5b Task 9) so a
+        textured material can be asserted to look different from a plain one.
+        Qt style sheets have no reliable way to alpha-composite an arbitrary
+        image UNDER a tint colour, so the texture is carried as a QIcon
+        instead of a `background-image` -- the tint + border still come from
+        `_swatch_style`, unchanged from M7.5a.
+        """
+        style = _swatch_style(mat.base_color, mat.alpha, mat.id == self._active_id)
+        icon = self._texture_icon(mat.texture_id)
+        return style, icon
+
+    def _texture_icon(self, texture_id: int | None) -> QIcon | None:
+        if texture_id is None or self._model is None:
+            return None
+        tex = self._model.textures.get(texture_id)
+        if tex is None:
+            return None
+        pixmap = QPixmap()
+        if not pixmap.loadFromData(tex.data):
+            return None
+        return QIcon(pixmap)
 
     def _on_pick(self, material_id: int) -> None:
         self._active_id = material_id
@@ -212,9 +276,12 @@ class MaterialsPage(QWidget):
             self._alpha_spin.setValue(mat.alpha)
             self._metallic_spin.setValue(mat.metallic)
             self._roughness_spin.setValue(mat.roughness)
+            self._texture_width_spin.setValue(mat.texture_size[0])
+            self._texture_height_spin.setValue(mat.texture_size[1])
         finally:
             self._syncing = False
         self._delete_btn.setEnabled(self._can_delete_active())
+        self._clear_texture_btn.setEnabled(mat.texture_id is not None)
 
     def _current_scene(self):
         return None if self._model is None else self._model.active_scene
@@ -288,6 +355,92 @@ class MaterialsPage(QWidget):
         )
         return result == QMessageBox.StandardButton.Yes
 
+    def _choose_texture(self, chooser=None, on_error=None) -> None:
+        """Import an image and point the active material at it, as one undo step.
+
+        `chooser` and `on_error` are seams so a test never opens a real modal.
+        Decode happens BEFORE any command is built, so a corrupt file leaves
+        the document untouched (spec 1.8).
+        """
+        mid = self.active_material_id
+        if mid is None or self._command_stack is None or self._model is None:
+            return
+        pick = chooser if chooser is not None else self._ask_for_image
+        path = pick()
+        if not path:
+            return
+
+        report = on_error if on_error is not None else self._report_error
+        try:
+            data = Path(path).read_bytes()
+        except OSError as exc:
+            report(f"Could not read {path}: {exc}")
+            return
+
+        fmt = sniff_format(data)
+        img = decode_image(data) if fmt else None
+        if img is None:
+            report(f"{Path(path).name} is not a readable PNG or JPEG image.")
+            return
+
+        add = AddTextureCommand(
+            self._model.textures,
+            Path(path).name,
+            data,
+            fmt,
+            img.width,
+            img.height,
+            img.has_transparency,
+        )
+        scene = self._current_scene()
+        add.do(scene)
+        assign = SetMaterialTextureCommand(self._library, mid, add.texture_id)
+        assign.do(scene)
+        self._command_stack.push_executed(
+            CompositeCommand(name="Set Texture", children=[add, assign]), scene
+        )
+        self._rebuild_swatches()
+        self._sync_editor()
+        self.library_changed.emit()
+
+    def _ask_for_image(self) -> str | None:
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Choose Texture", "", "Images (*.png *.jpg *.jpeg)"
+        )
+        return path or None
+
+    def _report_error(self, message: str) -> None:
+        QMessageBox.warning(self, "Texture", message)
+
+    def _clear_texture(self) -> None:
+        """Clear the active material's texture through the command stack.
+
+        Only the material's pointer is cleared -- the Texture asset itself is
+        kept in the library (spec D11): undoing this must be able to restore
+        the image, and a delete-the-asset action is a separate, destructive
+        operation (DeleteTextureCommand) with its own confirmation.
+        """
+        mid = self.active_material_id
+        if mid is None or self._command_stack is None:
+            return
+        cmd = SetMaterialTextureCommand(self._library, mid, None)
+        self._command_stack.execute(cmd, self._current_scene())
+        self._rebuild_swatches()
+        self._sync_editor()
+        self.library_changed.emit()
+
+    def _apply_texture_size(self, width: float, height: float) -> None:
+        """Edit the active material's real-world texture size through the stack."""
+        mid = self.active_material_id
+        if mid is None or self._command_stack is None:
+            return
+        mat = self._library.get(mid)
+        cmd = SetMaterialTextureCommand(self._library, mid, mat.texture_id, (width, height))
+        self._command_stack.execute(cmd, self._current_scene())
+        self._rebuild_swatches()
+        self._sync_editor()
+        self.library_changed.emit()
+
     # --- editor: signal handlers (thin wrappers over the seams above) ------
 
     def _on_name_committed(self) -> None:
@@ -328,3 +481,10 @@ class MaterialsPage(QWidget):
         if self._syncing:
             return
         self._apply_edit(roughness=value)
+
+    def _on_texture_size_changed(self, _value: float) -> None:
+        if self._syncing:
+            return
+        self._apply_texture_size(
+            self._texture_width_spin.value(), self._texture_height_spin.value()
+        )
