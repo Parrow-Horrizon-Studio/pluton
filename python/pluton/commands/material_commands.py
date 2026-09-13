@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from pluton.commands.command import Command
-from pluton.scene.scene import Side
+from pluton.scene.scene import Side, TexturePlacement
 
 _DEFAULT_MATERIAL_ID = 0  # == MaterialLibrary.DEFAULT_ID (the unpainted sentinel)
 
@@ -171,3 +171,127 @@ class DeleteMaterialCommand(Command):
         self._lib.restore(self._record, self._index)
         for definition, f_id, side in self._affected:
             definition.mesh.set_face_material(f_id, self._mid, side)
+
+
+class AddTextureCommand(Command):
+    """Add an image asset to the texture library."""
+
+    name = "Add Texture"
+
+    def __init__(
+        self,
+        library,
+        name: str,
+        data: bytes,
+        image_format: str,
+        width: int,
+        height: int,
+        has_transparency: bool,
+    ) -> None:
+        self._lib = library
+        self._args = (name, data, image_format, width, height, has_transparency)
+        self._record = None
+
+    @property
+    def texture_id(self) -> int | None:
+        """The id this command created; None before do()."""
+        return None if self._record is None else self._record.id
+
+    def do(self, scene) -> None:
+        if self._record is None:
+            self._record = self._lib.add(*self._args)
+        else:
+            # Redo must reuse the SAME id, or every material pointing at the
+            # old one is left dangling.
+            self._lib.restore(self._record, len(self._lib.textures()))
+
+    def undo(self, scene) -> None:
+        self._record = self._lib.remove(self._record.id)
+
+
+class SetMaterialTextureCommand(Command):
+    """Point a material at a texture, or clear it, with its real-world size."""
+
+    name = "Set Material Texture"
+
+    def __init__(
+        self,
+        materials,
+        material_id: int,
+        texture_id: int | None,
+        texture_size: tuple[float, float] | None = None,
+    ) -> None:
+        self._materials = materials
+        self._mid = material_id
+        self._new = (texture_id, texture_size)
+        before = materials.get(material_id)
+        self._before = (before.texture_id, before.texture_size)
+
+    def do(self, scene) -> None:
+        tid, size = self._new
+        fields = {"texture_id": tid}
+        if size is not None:
+            fields["texture_size"] = size
+        elif tid is None:
+            fields["texture_size"] = (1.0, 1.0)
+        self._materials.edit(self._mid, **fields)
+
+    def undo(self, scene) -> None:
+        tid, size = self._before
+        self._materials.edit(self._mid, texture_id=tid, texture_size=size)
+
+
+class DeleteTextureCommand(Command):
+    """Remove a texture and clear every material that referenced it.
+
+    References live on materials, not faces, so the scan is over the whole
+    MaterialLibrary. M7.5a's DeleteMaterialCommand originally scanned a single
+    Scene and left dangling ids elsewhere that survived save and load; this is
+    the same hazard one level up.
+    """
+
+    name = "Delete Texture"
+
+    def __init__(self, textures, materials, texture_id: int) -> None:
+        self._textures = textures
+        self._materials = materials
+        self._tid = texture_id
+        self._affected = [m.id for m in materials.materials() if m.texture_id == texture_id]
+        self._record = None
+        self._index = -1
+
+    @property
+    def affected_material_count(self) -> int:
+        """How many materials lose their texture. Readable before do()."""
+        return len(self._affected)
+
+    def do(self, scene) -> None:
+        self._index = self._textures.index_of(self._tid)
+        self._record = self._textures.remove(self._tid)
+        for mid in self._affected:
+            self._materials.edit(mid, texture_id=None)
+
+    def undo(self, scene) -> None:
+        self._textures.restore(self._record, self._index)
+        for mid in self._affected:
+            self._materials.edit(mid, texture_id=self._tid)
+
+
+class SetFacePlacementCommand(Command):
+    """Adjust one face side's texture placement."""
+
+    name = "Set Face Texture Placement"
+
+    def __init__(self, face_id: int, placement: TexturePlacement, side: Side = Side.FRONT) -> None:
+        self._fid = face_id
+        self._side = side
+        self._new = placement
+        self._before: TexturePlacement | None = None
+
+    def do(self, scene) -> None:
+        if self._before is None:
+            self._before = scene.face_placement(self._fid, self._side)
+        scene.set_face_placement(self._fid, self._new, self._side)
+
+    def undo(self, scene) -> None:
+        scene.set_face_placement(self._fid, self._before, self._side)
