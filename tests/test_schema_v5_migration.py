@@ -57,9 +57,11 @@ def test_unpainted_backs_are_not_written():
 
 
 def test_schema_version_is_five():
+    # M7.5b bumped SCHEMA_VERSION to 6 (texture blobs + placement); this pin
+    # necessarily tracks whatever is current, same as every prior bump.
     from pluton.io.pluton_file import SCHEMA_VERSION
 
-    assert SCHEMA_VERSION == 5
+    assert SCHEMA_VERSION == 6
 
 
 def test_a_v4_geometry_payload_is_unchanged_except_for_the_new_key():
@@ -68,6 +70,11 @@ def test_a_v4_geometry_payload_is_unchanged_except_for_the_new_key():
     # not by any change to "vertices"/"edges"/"faces"/"face_materials". Pin
     # the literal dict shape so a codec that renames/reorders/reshapes any
     # of those fields is caught here, not just by a same-code round trip.
+    #
+    # M7.5b (Task 7) added "face_placements" / "face_placements_back" the
+    # same way schema 5 added "face_materials_back": additively, empty by
+    # default. The pin below gained those two keys for the same reason it
+    # gained "face_materials_back" at the previous bump.
     s = Scene()
     f = _square(s)
     s.set_face_material(f, 7, Side.FRONT)
@@ -84,6 +91,8 @@ def test_a_v4_geometry_payload_is_unchanged_except_for_the_new_key():
         "faces": [[0, 1, 2, 3]],
         "face_materials": {"0": 7},
         "face_materials_back": {},
+        "face_placements": {},
+        "face_placements_back": {},
     }
 
 

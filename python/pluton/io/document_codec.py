@@ -20,7 +20,8 @@ from pluton.model.instance import Instance
 from pluton.model.material import MaterialLibrary
 from pluton.model.model import Model
 from pluton.model.tag import TagLibrary
-from pluton.scene.scene import Scene, Side
+from pluton.model.texture import TextureLibrary
+from pluton.scene.scene import DEFAULT_PLACEMENT, Scene, Side, TexturePlacement
 from pluton.units import Units, units_from_dict, units_to_dict
 from pluton.viewport.face_batches import MAX_MATERIAL_ID
 from pluton.viewport.render_style import FaceStyle, RenderStyle
@@ -50,12 +51,25 @@ def geometry_to_dict(scene: Scene) -> dict:
         if back != _DEFAULT_MATERIAL_ID:
             face_materials_back[str(face_index)] = int(back)
 
+    face_placements: dict[str, list[float]] = {}
+    face_placements_back: dict[str, list[float]] = {}
+    for face_index, f in enumerate(scene.faces_iter()):
+        for side, target in (
+            (Side.FRONT, face_placements),
+            (Side.BACK, face_placements_back),
+        ):
+            p = scene.face_placement(f.id, side)
+            if p != DEFAULT_PLACEMENT:
+                target[str(face_index)] = [p.offset_u, p.offset_v, p.scale, p.rotation]
+
     return {
         "vertices": vertices,
         "edges": edges,
         "faces": faces,
         "face_materials": face_materials,
         "face_materials_back": face_materials_back,
+        "face_placements": face_placements,
+        "face_placements_back": face_placements_back,
     }
 
 
@@ -104,6 +118,15 @@ def geometry_from_dict(scene: Scene, data: dict) -> None:
 
     _apply_face_materials(data.get("face_materials", {}), Side.FRONT)
     _apply_face_materials(data.get("face_materials_back", {}), Side.BACK)
+
+    def _apply_face_placements(placements: dict, side: Side) -> None:
+        for face_index_str, values in placements.items():
+            fi = int(face_index_str)
+            if 0 <= fi < len(new_fids):
+                scene.set_face_placement(new_fids[fi], TexturePlacement(*values), side)
+
+    _apply_face_placements(data.get("face_placements", {}), Side.FRONT)
+    _apply_face_placements(data.get("face_placements_back", {}), Side.BACK)
 
 
 def annotation_to_dict(ann: Dimension | Label) -> dict:
@@ -329,6 +352,7 @@ def document_to_dict(model: Model, camera, doc, render_style) -> dict:
         "units": units_to_dict(doc.units),
         "camera": CameraState.from_camera(camera).to_dict(),
         "materials": {"next_id": model.materials.next_id, "items": model.materials.to_records()},
+        "textures": model.textures.to_records(),
         "tags": {"next_id": model.tags.next_id, "items": model.tags.to_records()},
         "scenes": {"next_id": model.views.next_id, "items": model.views.to_records()},
         "style": render_style_to_dict(render_style),
@@ -336,10 +360,15 @@ def document_to_dict(model: Model, camera, doc, render_style) -> dict:
     }
 
 
-def document_from_dict(data: dict) -> LoadedDocument:
+def document_from_dict(data: dict, blobs: dict[int, bytes] | None = None) -> LoadedDocument:
     """Rebuild a LoadedDocument. Any structural malformation anywhere in the
     document (including in nested geometry/model data) is normalized into
-    PlutonFormatError — the only exception callers need to catch."""
+    PlutonFormatError — the only exception callers need to catch.
+
+    `blobs` carries texture bytes the container stored as sibling entries,
+    keyed by texture id; `.get("textures", [])` below is what lets a schema 5
+    file (no texture records at all) still load.
+    """
     from pluton.views.view_library import ViewLibrary  # function-level: breaks import cycle
 
     try:
@@ -347,6 +376,7 @@ def document_from_dict(data: dict) -> LoadedDocument:
         model.materials = MaterialLibrary.from_records(
             data["materials"]["items"], data["materials"]["next_id"]
         )
+        model.textures = TextureLibrary.from_records(data.get("textures", []), blobs or {})
         model.tags = TagLibrary.from_records(data["tags"]["items"], data["tags"]["next_id"])
         scenes = data.get("scenes", {})
         model.views = ViewLibrary.from_records(scenes.get("items", []), scenes.get("next_id", 0))

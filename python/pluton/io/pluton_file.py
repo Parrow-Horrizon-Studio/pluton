@@ -19,9 +19,10 @@ from pluton.io.document_codec import (
 )
 from pluton.io.errors import PlutonFormatError, PlutonVersionError
 
-SCHEMA_VERSION = 5  # M7.5a: two-sided face materials, PBR materials, tag color
+SCHEMA_VERSION = 6  # M7.5b: texture records + blobs, per-face placement
 _MANIFEST = "manifest.json"
 _DOCUMENT = "document.json"
+_TEXTURES_DIR = "textures/"
 
 
 def save_document(path, model, camera, doc, render_style) -> None:
@@ -38,6 +39,9 @@ def save_document(path, model, camera, doc, render_style) -> None:
         with zipfile.ZipFile(tmp, "w", zipfile.ZIP_DEFLATED) as zf:
             zf.writestr(_MANIFEST, json.dumps(manifest, separators=(",", ":")))
             zf.writestr(_DOCUMENT, json.dumps(data, separators=(",", ":")))
+            for tex in model.textures.textures():
+                if tex.data:
+                    zf.writestr(f"{_TEXTURES_DIR}{tex.id}.{tex.image_format}", tex.data)
         os.replace(tmp, path)
     finally:
         if tmp.exists():
@@ -60,10 +64,17 @@ def load_document(path) -> LoadedDocument:
                     f"file schema_version {ver} is newer than supported ({SCHEMA_VERSION})"
                 )
             data = json.loads(zf.read(_DOCUMENT))
+            blobs: dict[int, bytes] = {}
+            for name in zf.namelist():
+                if not name.startswith(_TEXTURES_DIR):
+                    continue
+                stem = name[len(_TEXTURES_DIR) :].rsplit(".", 1)[0]
+                if stem.isdigit():
+                    blobs[int(stem)] = zf.read(name)
     except zipfile.BadZipFile as e:
         raise PlutonFormatError("not a valid .pluton file (not a zip archive)") from e
     except KeyError as e:
         raise PlutonFormatError(f"missing entry in .pluton archive: {e}") from e
     except json.JSONDecodeError as e:
         raise PlutonFormatError(f"corrupt JSON in .pluton archive: {e}") from e
-    return document_from_dict(data)
+    return document_from_dict(data, blobs)
