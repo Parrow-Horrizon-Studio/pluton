@@ -458,6 +458,34 @@ def build_face_uvs_both_sides(scene, model, face_buffer=None) -> tuple[np.ndarra
     )
 
 
+def model_has_any_texture(model) -> bool:
+    """Can anything in this model sample a UV?
+
+    M7.5b final review, item 2. The per-corner UV bake is pure cost in a
+    document that contains no image at all: measured on a 9,600-face definition
+    with an empty texture library, build_face_uvs_both_sides added ~61 ms to
+    every re-upload of coordinates nothing could ever read.
+
+    Asked of the MATERIAL library rather than the texture library on purpose:
+    a texture only reaches a fragment through a material's texture_id, and that
+    same field is what uv_material_key snapshots -- so the moment a material
+    the scene actually uses gains a texture, uv_key stops matching and the
+    definition re-uploads with real UVs. A texture imported but not yet
+    assigned, or assigned to a material no face carries, samples nothing and
+    correctly does not pay for a bake; painting that material onto a face
+    dirties the mesh and re-uploads by the ordinary route.
+
+    This gates the CPU bake ONLY. The vertex format stays unconditionally 10
+    floats (spec 1.5 as superseded during execution): a per-definition layout
+    branch in the renderer's hot path is expressly not wanted, and the memory
+    cost of the two zero-filled UV blocks is accepted.
+    """
+    materials = getattr(model, "materials", None)
+    if materials is None:
+        return False
+    return any(m.texture_id is not None for m in materials.materials())
+
+
 def uv_material_key(scene, model) -> tuple:
     """The material state the baked UVs depend on, for change detection.
 
@@ -564,9 +592,19 @@ def textures_visible(style: RenderStyle, *, tag_color: tuple | None) -> bool:
     Deliberately NOT consulted by _translucent_ids: the opaque/translucent
     partition is baked into the vertex buffer, so making it style-dependent
     would re-upload every textured definition on every style toggle. A cutout
-    under one of these styles therefore still draws in the sorted pass, but
-    with nothing sampled its alpha stays 1.0 and it fills solid, which is what
-    the style asks for.
+    under any of the three therefore still draws in the sorted pass, but with
+    nothing sampled its alpha stays 1.0 and it fills solid, which is what the
+    style asks for.
+
+    Color-by-Tag is the third of those three and is easy to miss, because it is
+    a MODE rather than a face style: `tag_color is not None` turns textures off
+    under any face style at all, including a lit one. So a cutout batch under
+    Color-by-Tag still carries blend=True and depth_write=False while sampling
+    nothing, and two such surfaces overlapping resolve by draw order rather
+    than by depth. That is bounded -- the sorted pass already orders the whole
+    translucent suffix back to front -- and it is accepted, not overlooked: the
+    alternative is making the buffer partition style-dependent, which is the
+    re-upload this paragraph exists to refuse.
     """
     return tag_color is None and FACE_STYLE_TABLE[style.face_style].shading is FaceShading.LIT
 
@@ -1662,7 +1700,15 @@ class SceneRenderer:
         face_buffer = scene.face_triangle_buffer()
         positions, normals = face_buffer
         if positions.shape[0] > 0:
-            front_uvs, back_uvs = build_face_uvs_both_sides(scene, model, face_buffer)
+            if model_has_any_texture(model):
+                front_uvs, back_uvs = build_face_uvs_both_sides(scene, model, face_buffer)
+            else:
+                # Nothing in this document can sample a UV, so the walk is
+                # skipped and the two blocks go out zero-filled -- the LAYOUT is
+                # unchanged, only the arithmetic is. See model_has_any_texture
+                # for why importing the first texture still re-bakes correctly.
+                zeros = np.zeros((positions.shape[0], 2), dtype=np.float64)
+                front_uvs = back_uvs = zeros
             interleaved = np.concatenate([positions, normals, front_uvs, back_uvs], axis=1).astype(
                 np.float32
             )

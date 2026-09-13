@@ -291,10 +291,14 @@ def test_the_uploaded_vertex_rows_carry_uvs_under_the_batch_permutation(monkeypa
     # just like positions and normals — leaving either unsorted scrambles
     # texturing only on definitions that contain translucent faces.
     model, scene = _boxed()
+    # texture_id is set as well as texture_size because the bake is gated on
+    # the model carrying a texture at all (final review, item 2) -- without it
+    # this definition would correctly upload zero-filled UVs and the
+    # permutation this test exists to check would be invisible.
     glass = model.materials.add_custom("Glass", (0.3, 0.5, 0.9))
-    model.materials.edit(glass.id, alpha=0.4, texture_size=(2.0, 2.0))
+    model.materials.edit(glass.id, alpha=0.4, texture_id=11, texture_size=(2.0, 2.0))
     lining = model.materials.add_custom("Lining", (0.9, 0.4, 0.1))
-    model.materials.edit(lining.id, texture_size=(5.0, 5.0))
+    model.materials.edit(lining.id, texture_id=12, texture_size=(5.0, 5.0))
     for f in list(scene.faces_iter())[:3]:
         scene.set_face_material(f.id, glass.id)
         scene.set_face_material(f.id, lining.id, Side.BACK)
@@ -517,3 +521,108 @@ def test_painting_a_material_the_key_does_not_name_rebuilds_the_buffer(uv_stubbe
     assert changed is not first
     assert len(calls) == 2
     assert any(entry[0] == fresh.id for entry in changed.uv_key)
+
+
+# --- M7.5b final review, item 2: the bake is gated on the model having a texture
+
+
+def _capture_uploads(monkeypatch):
+    """A GL-less SceneRenderer plus the FACE buffer uploads it issues.
+
+    Edges go through the same glBufferData with a 6-float row, so the bound
+    VBO id is tracked and only face_vbo (1) uploads are kept -- reshaping an
+    edge upload to 10 floats is a ValueError, not a wrong answer, but the
+    filter is what makes `uploads[-1]` mean "the latest face upload".
+    """
+    uploads: list[np.ndarray] = []
+    bound = [0]
+
+    def bind(_target, vbo):
+        bound[0] = vbo
+
+    def buffer_data(_target, _size, data, _usage):
+        if bound[0] == 1:
+            uploads.append(np.asarray(data, dtype=np.float32).copy())
+
+    monkeypatch.setattr(scene_renderer.GL, "glBindBuffer", bind)
+    monkeypatch.setattr(scene_renderer.GL, "glBufferData", buffer_data)
+    r = SceneRenderer()
+    monkeypatch.setattr(r, "_alloc_def_buffers", lambda: _DefBuffers(face_vbo=1, edge_vbo=2))
+    return r, uploads
+
+
+def _count_bakes(monkeypatch):
+    """Count calls to build_face_uvs_both_sides without suppressing them."""
+    calls: list[int] = []
+    real = scene_renderer.build_face_uvs_both_sides
+
+    def counted(*args, **kwargs):
+        calls.append(1)
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(scene_renderer, "build_face_uvs_both_sides", counted)
+    return calls
+
+
+def test_an_untextured_model_uploads_zero_uvs_without_walking_the_faces(monkeypatch):
+    # The bake is ~61 ms per re-upload on a 9,600-face definition and produced
+    # coordinates nothing in an untextured document can ever sample. Both
+    # assertions are needed: a version that still walked the faces and then
+    # zeroed the result would pass the UV check while paying the whole cost,
+    # and a version that skipped the walk but left the blocks unwritten would
+    # upload garbage. The row width is asserted too -- the vertex format stays
+    # unconditionally 10 floats; only the arithmetic is gated, never the layout.
+    model, _, mat = _painted_box()
+    assert mat.texture_id is None
+    calls = _count_bakes(monkeypatch)
+    r, uploads = _capture_uploads(monkeypatch)
+
+    buf = r._upload_definition(model.root, frozenset(), model)
+
+    assert calls == [], "an untextured model must not pay for the UV bake"
+    rows = uploads[0].reshape(-1, _FACE_VERTEX_FLOATS)
+    assert rows.shape[1] == 10
+    assert rows.shape[0] == buf.face_count
+    assert np.all(rows[:, 6:10] == 0.0)
+
+
+def test_a_model_that_gains_a_texture_rebuilds_real_uvs(monkeypatch):
+    # The other half of the pair, and the one that makes the gate safe to
+    # ship: assigning a texture to a material the scene already carries
+    # changes uv_material_key, so _ensure_buffers stops reusing the
+    # zero-filled buffer and the bake finally runs. A gate that latched
+    # "this document has no textures" once and never re-checked would pass
+    # the test above and fail here with textures rendering as a single texel.
+    model, scene, mat = _painted_box()
+    model.materials.edit(mat.id, texture_size=(2.0, 2.0))
+    r, uploads = _capture_uploads(monkeypatch)
+    r._ensure_buffers(model.root, frozenset(), model)
+    assert np.all(uploads[0].reshape(-1, _FACE_VERTEX_FLOATS)[:, 6:10] == 0.0)
+
+    model.materials.edit(mat.id, texture_id=5)
+    calls = _count_bakes(monkeypatch)
+    buf = r._ensure_buffers(model.root, frozenset(), model)
+
+    assert len(calls) == 1, "gaining a texture must re-bake, not reuse the zeros"
+    rows = uploads[-1].reshape(-1, _FACE_VERTEX_FLOATS)
+    order = np.asarray(buf.plan.vertex_order)
+    front = build_face_uvs(scene, model, Side.FRONT)
+    assert np.any(front != 0.0), "this box projects to all-zero UVs, so the test is blind"
+    assert np.allclose(rows[:, 6:8], front[order], atol=1e-6)
+
+
+def test_clearing_the_last_texture_goes_back_to_the_cheap_path(monkeypatch):
+    # Symmetry check on the gate itself: it is re-evaluated per upload rather
+    # than sampled once at construction, so a document whose only texture is
+    # cleared stops paying again.
+    model, _, mat = _painted_box()
+    model.materials.edit(mat.id, texture_id=5)
+    r, uploads = _capture_uploads(monkeypatch)
+    r._ensure_buffers(model.root, frozenset(), model)
+
+    model.materials.edit(mat.id, texture_id=None)
+    calls = _count_bakes(monkeypatch)
+    r._ensure_buffers(model.root, frozenset(), model)
+
+    assert calls == []
+    assert np.all(uploads[-1].reshape(-1, _FACE_VERTEX_FLOATS)[:, 6:10] == 0.0)
