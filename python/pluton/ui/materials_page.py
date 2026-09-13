@@ -16,7 +16,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from PySide6.QtCore import QSize, Signal
-from PySide6.QtGui import QColor, QIcon, QPixmap
+from PySide6.QtGui import QColor, QIcon, QImage, QPixmap
 from PySide6.QtWidgets import (
     QColorDialog,
     QDoubleSpinBox,
@@ -82,6 +82,15 @@ class MaterialsPage(QWidget):
         self._model = model
         self._active_id = MaterialLibrary.DEFAULT_ID
         self._buttons: dict[int, QPushButton] = {}
+        # QIcon per texture id, built once and reused across every
+        # _rebuild_swatches()/_restyle() call -- both fire on every keystroke
+        # in the alpha/metallic/roughness/size spin boxes (M7.5b fix round 1),
+        # and decoding the same PNG/JPEG per textured material per keystroke
+        # would be needless work. Kept in sync with the live TextureLibrary by
+        # set_library() (wipes it -- a new/reopened document's ids restart
+        # from 1 with different bytes) and refresh() (drops entries for ids
+        # an undo/redo removed).
+        self._texture_icon_cache: dict[int, QIcon] = {}
         self._syncing = False
 
         container = self
@@ -200,15 +209,59 @@ class MaterialsPage(QWidget):
         return style, icon
 
     def _texture_icon(self, texture_id: int | None) -> QIcon | None:
+        """The cached swatch QIcon for `texture_id`, decoding + building it
+        at most once.
+
+        Uses `decode_image` -- the SAME decoder `_choose_texture` already
+        used to accept the bytes into the library -- rather than a second,
+        independent one (`QPixmap.loadFromData`, M7.5b fix round 1). Two
+        decoders accepting different formats would show as a silently
+        icon-less swatch with no error for whatever the swatch's decoder
+        rejects and the picker's accepts.
+
+        Caching matters because `_rebuild_swatches()` runs after every
+        `_apply_edit`/`_apply_texture_size`, and `QDoubleSpinBox.valueChanged`
+        fires per keystroke -- without this, editing metallic on an unrelated
+        material would re-decode every textured material's image on every
+        keystroke.
+        """
         if texture_id is None or self._model is None:
             return None
+        cached = self._texture_icon_cache.get(texture_id)
+        if cached is not None:
+            return cached
         tex = self._model.textures.get(texture_id)
         if tex is None:
             return None
-        pixmap = QPixmap()
-        if not pixmap.loadFromData(tex.data):
+        img = decode_image(tex.data)
+        if img is None:
             return None
-        return QIcon(pixmap)
+        qimage = QImage(
+            img.pixels.tobytes(),
+            img.width,
+            img.height,
+            img.width * 4,
+            QImage.Format.Format_RGBA8888,
+        )
+        icon = QIcon(QPixmap.fromImage(qimage))
+        self._texture_icon_cache[texture_id] = icon
+        return icon
+
+    def _prune_texture_icon_cache(self) -> None:
+        """Drop cached icons for texture ids no longer in the live library.
+
+        Without this an icon built for an id an undo removed (or a future
+        DeleteTextureCommand removes) would outlive its Texture record --
+        harmless as long as ids are never reused for different bytes within
+        one document, but that invariant is `TextureLibrary`'s to keep, not
+        this page's to assume forever.
+        """
+        if self._model is None:
+            self._texture_icon_cache.clear()
+            return
+        live = {t.id for t in self._model.textures.textures()}
+        for tid in [t for t in self._texture_icon_cache if t not in live]:
+            del self._texture_icon_cache[tid]
 
     def _on_pick(self, material_id: int) -> None:
         self._active_id = material_id
@@ -234,6 +287,12 @@ class MaterialsPage(QWidget):
         """Rebind to a new library (after file Open / New) and rebuild swatches."""
         self._library = library
         self._active_id = MaterialLibrary.DEFAULT_ID
+        # A new or reopened document's TextureLibrary restarts id numbering
+        # from 1 with different bytes -- the same collision release_all()
+        # fixes for the renderer's GL cache, one layer up in this page's own
+        # icon cache. A stale id here would otherwise show the PREVIOUS
+        # document's image under the new one's swatch.
+        self._texture_icon_cache.clear()
         self._rebuild_swatches()
         self._sync_editor()
 
@@ -250,6 +309,10 @@ class MaterialsPage(QWidget):
         dropped = not any(m.id == self._active_id for m in self._library.materials())
         if dropped:
             self._active_id = MaterialLibrary.DEFAULT_ID
+        # An undone import (or a future DeleteTextureCommand) can remove a
+        # Texture record between refreshes; don't keep its icon around under
+        # a ghost key.
+        self._prune_texture_icon_cache()
         self._rebuild_swatches()
         self._sync_editor()
         if dropped:

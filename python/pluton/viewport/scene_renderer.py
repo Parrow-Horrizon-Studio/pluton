@@ -1044,6 +1044,11 @@ class SceneRenderer:
         # Constructed here rather than in initialize_gl because it makes no GL
         # call until something is actually uploaded.
         self._texture_cache = TextureCache()
+        # M7.5b Task 9: staleness reported by ordinary Qt slots (undo/redo,
+        # document New/Open) has to wait for render() to actually free GL
+        # objects -- see _flush_pending_texture_evictions().
+        self._pending_stale_textures: set[int] = set()
+        self._pending_release_all_textures: bool = False
 
         # Tool overlay buffers (rebuilt every frame)
         self._overlay_line_vao: int = 0
@@ -1141,6 +1146,12 @@ class SceneRenderer:
         """
         if not self._initialized:
             return
+
+        # M7.5b Task 9: flush any texture-cache releases queued by a slot
+        # that ran with no current GL context (undo/redo, document New/Open)
+        # -- BEFORE anything below looks up a GL texture for a material, so a
+        # stale upload is never bound this frame either.
+        self._flush_pending_texture_evictions()
 
         GL.glClearColor(*_BG_COLOR)
         GL.glClear(GL.GL_COLOR_BUFFER_BIT | GL.GL_DEPTH_BUFFER_BIT)
@@ -1353,7 +1364,7 @@ class SceneRenderer:
             buf.release()
 
     def evict_stale_textures(self, textures) -> None:
-        """Drop cached GL uploads for texture ids no longer in `textures`.
+        """Queue GL uploads for texture ids no longer in `textures` for release.
 
         M7.5b Task 9: an undone import (AddTextureCommand.undo) or a deleted
         texture (DeleteTextureCommand) removes a Texture record from the
@@ -1363,21 +1374,48 @@ class SceneRenderer:
         `_def_buffers` against the model, frees it promptly instead of
         letting a long session of import/undo cycles accumulate orphaned GL
         textures.
+
+        This is called from MainWindow._on_after_undo_redo(), an ordinary Qt
+        slot -- NOT the render path -- so there is no current GL context to
+        call TextureCache.invalidate() (which issues glDeleteTextures) with;
+        ViewportWidget never calls makeCurrent() outside
+        initializeGL/resizeGL/paintGL. So this only records which ids are
+        stale; render() flushes them (_flush_pending_texture_evictions),
+        mirroring how evict_unreachable() is itself only ever called from
+        inside render(), where a context is guaranteed current.
         """
         live = {t.id for t in textures.textures()}
-        for tid in self._texture_cache.cached_ids() - live:
-            self._texture_cache.invalidate(tid)
+        self._pending_stale_textures |= self._texture_cache.cached_ids() - live
 
     def release_all_textures(self) -> None:
-        """Free every cached GL texture upload (model close: New / Open).
+        """Queue every cached GL texture upload for release on the next frame.
 
         Without this, a new or reloaded Model's TextureLibrary restarts its
         id numbering from 1 -- the same ids the PREVIOUS document's textures
         used -- so texture_for() would happily hand back the old document's
         GL texture for the new document's id 1 (wrong image bound, not just a
         leak) until this cache was cleared.
+
+        Same GL-context constraint as evict_stale_textures(): this is called
+        from MainWindow._reset_document(), an ordinary Qt slot, so the actual
+        glDeleteTextures calls are deferred to the next render()
+        (_flush_pending_texture_evictions), which runs before that frame
+        binds any texture for the just-loaded model.
         """
-        self._texture_cache.release_all()
+        self._pending_release_all_textures = True
+        self._pending_stale_textures.clear()  # superseded by the full release
+
+    def _flush_pending_texture_evictions(self) -> None:
+        """Apply queued texture-cache releases. Only safe with a current GL
+        context, so this must only be called from render()."""
+        if self._pending_release_all_textures:
+            self._texture_cache.release_all()
+            self._pending_release_all_textures = False
+            self._pending_stale_textures.clear()
+            return
+        for tid in self._pending_stale_textures:
+            self._texture_cache.invalidate(tid)
+        self._pending_stale_textures.clear()
 
     # --- Init helpers -----------------------------------------------------
 

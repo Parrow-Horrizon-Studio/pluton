@@ -69,10 +69,16 @@ def test_page_selection_updates_active_material_id(win):
     assert win._active_material_id == brick.id
 
 
-def test_undoing_a_texture_import_evicts_it_from_the_renderer_cache(win, tmp_path):
-    # M7.5b Task 9: AddTextureCommand.undo() removes the Texture record; the
-    # renderer's TextureCache (Task 6, never wired to a caller until now)
-    # must not keep whatever it uploaded for that id alive indefinitely.
+def test_undoing_a_texture_import_queues_it_for_renderer_eviction(win, tmp_path):
+    # M7.5b Task 9 fix round 1: AddTextureCommand.undo() removes the Texture
+    # record, but _on_after_undo_redo is an ordinary Qt slot with no current
+    # GL context (ViewportWidget never calls makeCurrent() outside
+    # initializeGL/resizeGL/paintGL) -- so it can only QUEUE the id for
+    # eviction; the actual glDeleteTextures is deferred to the next render()
+    # (see tests/test_renderer_texture_eviction.py for that half). Calling
+    # TextureCache.invalidate() straight from this slot would be a silent
+    # no-op on WGL that also forgets the handle, permanently, which is worse
+    # than doing nothing.
     from pluton.viewport.texture_cache import TextureCache
 
     win._viewport.scene_renderer._texture_cache = TextureCache(gl=_RecordingGL())
@@ -88,7 +94,9 @@ def test_undoing_a_texture_import_evicts_it_from_the_renderer_cache(win, tmp_pat
 
     win._command_stack.undo()
 
-    assert tid not in win._viewport.scene_renderer._texture_cache.cached_ids()
+    assert tid in win._viewport.scene_renderer._pending_stale_textures
+    # Not deleted yet -- the slot must not touch GL itself.
+    assert tid in win._viewport.scene_renderer._texture_cache.cached_ids()
 
 
 def test_file_new_releases_the_renderer_texture_cache(win):
