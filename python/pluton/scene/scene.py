@@ -67,6 +67,44 @@ class TexturePlacement:
 DEFAULT_PLACEMENT = TexturePlacement()
 
 
+def _newell_normal(positions_3d: np.ndarray) -> np.ndarray:
+    """Newell normal of an (N, 3) closed loop, unnormalized, as float64 (3,).
+
+    Sums the twice-signed-area contribution of every loop edge rather than
+    reading one corner, so the result is the area-weighted normal of the whole
+    polygon. Two things follow, and both are why this exists:
+
+    - A loop whose first three vertices are collinear — the exact shape an edge
+      split leaves behind — still yields a normal, because no single corner is
+      privileged. A `p1-p0 x p2-p0` estimate returns a zero vector there.
+    - A loop starting at a REFLEX corner yields the right SIGN. That single
+      corner's cross product points the opposite way to the polygon's own
+      normal; the sum cannot, since the convex corners outweigh the reflex ones
+      by exactly the polygon's area.
+
+    Direction matches `np.cross(p1 - p0, p2 - p0)` for every loop on which that
+    estimate is valid: right-handed, so a CCW loop viewed from +Z gives +Z.
+
+    The length is proportional to the polygon's area, so it is only zero for a
+    genuinely zero-area face. Callers wanting a unit normal normalize and must
+    handle that case; `_project_loop_to_2d_for_earcut` instead wants the raw
+    components, to pick a dominant axis and its sign.
+
+    Assumes a planar loop. For a non-planar one this returns the normal of its
+    projection, which is the standard and usually wanted behaviour.
+    """
+    p = np.asarray(positions_3d, dtype=np.float64)
+    q = np.roll(p, -1, axis=0)
+    return np.array(
+        [
+            float(np.sum((p[:, 1] - q[:, 1]) * (p[:, 2] + q[:, 2]))),
+            float(np.sum((p[:, 2] - q[:, 2]) * (p[:, 0] + q[:, 0]))),
+            float(np.sum((p[:, 0] - q[:, 0]) * (p[:, 1] + q[:, 1]))),
+        ],
+        dtype=np.float64,
+    )
+
+
 def _project_loop_to_2d_for_earcut(positions_3d: np.ndarray) -> np.ndarray:
     """Project an (N, 3) loop onto its dominant axis-aligned plane.
 
@@ -96,15 +134,7 @@ def _project_loop_to_2d_for_earcut(positions_3d: np.ndarray) -> np.ndarray:
     if positions_3d.shape[0] < 3:
         return positions_3d[:, :2].astype(np.float32)
     # Newell's method: sum over every loop edge, robust to concave corners.
-    p = positions_3d.astype(np.float64)
-    q = np.roll(p, -1, axis=0)
-    n = np.array(
-        [
-            float(np.sum((p[:, 1] - q[:, 1]) * (p[:, 2] + q[:, 2]))),
-            float(np.sum((p[:, 2] - q[:, 2]) * (p[:, 0] + q[:, 0]))),
-            float(np.sum((p[:, 0] - q[:, 0]) * (p[:, 1] + q[:, 1]))),
-        ]
-    )
+    n = _newell_normal(positions_3d)
     nx, ny, nz = float(n[0]), float(n[1]), float(n[2])
     ax, ay, az = abs(nx), abs(ny), abs(nz)
     if az >= ax and az >= ay:
@@ -302,24 +332,36 @@ class Scene:
         return list(self._mesh.face_loop_vertices(f_id))
 
     def face_normal(self, f_id: int) -> np.ndarray:
-        """Geometric normal of the planar face, computed from the first three
-        boundary vertices via cross product, then normalized.
+        """Unit geometric normal of the planar face, via Newell's method.
 
-        Assumes the face is planar (M2 / M3a only produce planar faces).
-        # TODO M4+: handle non-planar faces (Newell's method, or fan-from-centroid).
+        Summed over the whole boundary loop rather than estimated from the
+        first three vertices, so a loop that merely STARTS awkwardly — three
+        collinear vertices, which is what an edge split leaves behind, or a
+        reflex first corner, which would flip the sign — is handled. The
+        direction is unchanged from the old first-three estimate wherever that
+        estimate was valid; six interactive tools push, offset and paint along
+        it, so the sign is contractual (see tests/test_face_normal_newell.py).
+
+        Raises on a loop with fewer than 3 vertices, and on a genuinely
+        degenerate face — one of zero area, where the Newell sum really is
+        zero-length.
+
+        Assumes the face is planar (a non-planar loop gives the normal of its
+        projection, which is the best single normal such a face has).
         """
         if not self._mesh.face_is_live(f_id):
             raise KeyError(f"face_normal: face {f_id} is not live")
         loop = self._mesh.face_loop_vertices(f_id)
         if len(loop) < 3:
             raise ValueError(f"face_normal: face {f_id} has fewer than 3 vertices")
-        p0 = np.asarray(self._mesh.vertex_position(loop[0]), dtype=np.float32)
-        p1 = np.asarray(self._mesh.vertex_position(loop[1]), dtype=np.float32)
-        p2 = np.asarray(self._mesh.vertex_position(loop[2]), dtype=np.float32)
-        n = np.cross(p1 - p0, p2 - p0).astype(np.float32)
+        positions = np.array(
+            [self._mesh.vertex_position(vid) for vid in loop],
+            dtype=np.float64,
+        )
+        n = _newell_normal(positions)
         length = float(np.linalg.norm(n))
         if length < 1e-9:
-            raise ValueError(f"face_normal: face {f_id} is degenerate (first 3 vertices collinear)")
+            raise ValueError(f"face_normal: face {f_id} is degenerate (zero area)")
         return (n / length).astype(np.float32)
 
     def face_center(self, f_id: int) -> np.ndarray:

@@ -60,8 +60,9 @@ def _split_edge_square(scene: Scene) -> int:
     """A square whose loop STARTS at a mid-edge vertex.
 
     Its first three boundary vertices are collinear, which is the shape any
-    edge split produces. Scene.face_normal raises on exactly this, while
-    face_triangle_buffer triangulates it correctly.
+    edge split produces. Scene.face_normal used to raise on exactly this
+    (issue #110, fixed by switching it to Newell's method); face_triangle_buffer
+    always triangulated it correctly.
     """
     pts = [(0.0, 0.0), (0.5, 0.0), (1.0, 0.0), (1.0, 1.0), (0.0, 1.0)]
     v = [scene.add_vertex(np.array([x, y, 0.0], dtype=np.float32)) for x, y in pts]
@@ -232,19 +233,21 @@ def test_an_empty_scene_yields_an_empty_uv_array():
 
 
 def test_a_face_whose_loop_starts_on_a_split_edge_still_gets_uvs():
-    # Scene.face_normal raises ValueError when a face's first three loop
-    # vertices are collinear, and splitting an edge produces exactly that.
+    # Scene.face_normal used to raise ValueError when a face's first three loop
+    # vertices were collinear, and splitting an edge produces exactly that.
     # Nothing in the render or upload path called face_normal before M7.5b —
     # every caller was interactive tool code working on one picked face — so
-    # taking the normal from it would let one ordinary face stop the entire
+    # taking the normal from it would have let one ordinary face stop the entire
     # document from rendering. face_triangle_buffer's own normals block is
     # correct for this face, so the projection reads it instead.
     #
-    # Scene.face_normal raising on this face is a pre-existing defect with six
-    # interactive callers, tracked outside this milestone. It is deliberately
-    # NOT asserted here: pinning it would make this test fail the day the defect
-    # is fixed. What is asserted is the property that must hold either way — a
-    # geometrically ordinary face gets finite UVs.
+    # That raise was a pre-existing defect with six interactive callers, fixed
+    # since as issue #110 (face_normal now uses Newell's method over the whole
+    # loop; see tests/test_face_normal_newell.py). It was deliberately never
+    # asserted here, so this test kept passing across the fix. What is asserted
+    # is the property that had to hold either way — a geometrically ordinary
+    # face gets finite UVs. The renderer still reads the buffer's normals block
+    # rather than calling face_normal per face, which remains the right split.
     model = Model()
     scene = model.root.mesh
     _split_edge_square(scene)
