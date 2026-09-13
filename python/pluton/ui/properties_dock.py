@@ -16,6 +16,7 @@ import math
 from PySide6.QtCore import QSize, Qt, Signal
 from PySide6.QtWidgets import (
     QButtonGroup,
+    QComboBox,
     QDockWidget,
     QDoubleSpinBox,
     QFormLayout,
@@ -179,6 +180,19 @@ class PropertiesDock(QDockWidget):
         group = QGroupBox("Texture position", parent)
         form = QFormLayout(group)
 
+        # There is no selected-side concept anywhere in the app (Selection
+        # carries only edges/faces/instances/annotations) and adding one
+        # would touch a core type nothing else needs -- so the group owns
+        # which side it edits itself, defaulting to Front. Populated with
+        # addItem BEFORE the signal is connected: an empty-to-first-item
+        # QComboBox fires currentIndexChanged on the first addItem, and
+        # connecting first would run _on_side_changed while the placement
+        # spin boxes below do not exist yet.
+        self._side_combo = QComboBox(group)
+        self._side_combo.addItem("Front", Side.FRONT)
+        self._side_combo.addItem("Back", Side.BACK)
+        form.addRow("Side", self._side_combo)
+
         self._offset_u_spin = self._make_placement_spin(group, -1000.0, 1000.0, 4)
         form.addRow("Offset U", self._offset_u_spin)
 
@@ -191,6 +205,10 @@ class PropertiesDock(QDockWidget):
         self._rotation_spin = self._make_placement_spin(group, -3600.0, 3600.0, 2)
         self._rotation_spin.setSuffix("°")
         form.addRow("Rotation", self._rotation_spin)
+
+        # Connected only now that every widget it can touch (via
+        # set_placement_target, from _on_side_changed) already exists.
+        self._side_combo.currentIndexChanged.connect(self._on_side_changed)
 
         return group
 
@@ -218,6 +236,7 @@ class PropertiesDock(QDockWidget):
 
         self._syncing = True
         try:
+            self._side_combo.setCurrentIndex(0 if side == Side.FRONT else 1)
             self._offset_u_spin.setValue(placement.offset_u)
             self._offset_v_spin.setValue(placement.offset_v)
             self._scale_spin.setValue(placement.scale)
@@ -225,9 +244,27 @@ class PropertiesDock(QDockWidget):
         finally:
             self._syncing = False
 
+    def set_selected_face(self, face_id: int | None) -> None:
+        """MainWindow's selection hook (M7.5b Task 10 fix round 1).
+
+        `face_id` is the one selected face, or None -- MainWindow decides
+        which of those it is (it already owns Selection; spec: enable only
+        for a selection of exactly one face and nothing else), this widget
+        only decides how to react. The currently chosen Front/Back side is
+        kept as-is: switching which face is targeted must not silently flip
+        which side the user was looking at.
+        """
+        self.set_placement_target(face_id, self._target_side)
+
     def _rotation_widget_value(self) -> float:
         """The rotation spin box's current value, in degrees."""
         return self._rotation_spin.value()
+
+    def _on_side_changed(self, index: int) -> None:
+        if self._syncing:
+            return
+        side = self._side_combo.itemData(index)
+        self.set_placement_target(self._target_face_id, side)
 
     def _on_placement_field_changed(self, _value: float) -> None:
         if self._syncing:

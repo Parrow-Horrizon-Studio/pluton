@@ -1277,6 +1277,28 @@ class MainWindow(QMainWindow):
             self._model.tags,
             self._model.materials,
         )
+        # M7.5b Task 10 fix round 1: the Properties panel's texture-position
+        # fields are "the primary placement mechanism ... for the selected
+        # face and side" (design line 172), so they must track the selection
+        # the same way Entity Info does -- reusing this method's ~15 call
+        # sites (including the two that deliberately bypass
+        # _refresh_selection_status, and _on_after_undo_redo, so an undo that
+        # changes a placement is reflected too) rather than adding a second,
+        # parallel refresh hook.
+        self._properties_dock.set_selected_face(self._single_selected_face_id())
+
+    def _single_selected_face_id(self) -> int | None:
+        """The one selected face, or None -- for the texture-position group,
+        which only makes sense for a single, unambiguous target (spec: "the
+        selected face", singular). Selection carries no notion of "just one
+        face and nothing else" itself, so this mirrors entity_summary's own
+        cross-type-Mixed check rather than adding that to Selection, which
+        nothing else needs.
+        """
+        sel = self._selection
+        if len(sel.faces) == 1 and not sel.edges and not sel.instances and not sel.annotations:
+            return next(iter(sel.faces))
+        return None
 
     def _on_entity_rename(self, new_name: str) -> None:
         from pluton.commands.naming_commands import RenameInstanceCommand
