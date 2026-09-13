@@ -1184,14 +1184,26 @@ std::vector<std::array<float, 3>> square_in_plane(const std::string& orientation
     std::vector<std::array<float, 3>> out;
     for (const auto& b : base) {
         const float x = b[0], y = b[1];
-        if (orientation == "+Z") out.push_back({x, y, 0.0f});
-        if (orientation == "-Z") out.push_back({y, x, 0.0f});
-        if (orientation == "+X") out.push_back({0.0f, x, y});
-        if (orientation == "-X") out.push_back({0.0f, y, x});
-        if (orientation == "+Y") out.push_back({y, 0.0f, x});
-        if (orientation == "-Y") out.push_back({x, 0.0f, y});
+        if (orientation == "+Z") {
+            out.push_back({x, y, 0.0f});
+        } else if (orientation == "-Z") {
+            out.push_back({y, x, 0.0f});
+        } else if (orientation == "+X") {
+            out.push_back({0.0f, x, y});
+        } else if (orientation == "-X") {
+            out.push_back({0.0f, y, x});
+        } else if (orientation == "+Y") {
+            out.push_back({y, 0.0f, x});
+        } else if (orientation == "-Y") {
+            out.push_back({x, 0.0f, y});
+        } else {
+            // Fail HERE with the bad string. Falling through would return an
+            // empty loop and add_face_from_loop would throw "loop has 0
+            // vertices", which names neither this helper nor the typo.
+            ADD_FAILURE() << "square_in_plane: unknown orientation \"" << orientation << "\"";
+            return {};
+        }
     }
-    EXPECT_EQ(out.size(), 4u) << "unknown orientation " << orientation;
     return out;
 }
 
@@ -1470,10 +1482,15 @@ TEST(HalfEdgeMeshTest, RecomputeFaceNormalUsesNewellOnACollinearStartWall) {
 }
 
 // faces_are_coplanar reads compute_face_normal_geometric, so it inherits the
-// fix. Before it, a split-edge wall took the (0,0,1) fallback at
-// add_face_from_loop and — on the looser threshold — the {0,0,0} sentinel on
-// recompute; either way the wall's relationship to a floor was decided by
-// something other than the wall's own plane.
+// fix. Be clear about what this one is worth: it is a CHARACTERIZATION test,
+// not a regression test. It does not discriminate the old implementation from
+// the new — it is absent from this change's red-probe failure list, because
+// under the probe the DISTANCE half of the test still separates a wall from a
+// floor even when the angle half is fed a fallback normal. It is here to pin
+// the behaviour of the consumer at the end of the chain, so a later change to
+// the sentinel or the threshold cannot silently make a wall coplanar with a
+// floor. Every other test in this block fails without the fix; this one does
+// not, and that is deliberate.
 TEST(HalfEdgeMeshTest, FacesAreCoplanar_CollinearStartWallIsNotCoplanarWithAFloor) {
     pluton::HalfEdgeMesh m;
     // Wall in the XZ plane (y = 0) with a split first edge.

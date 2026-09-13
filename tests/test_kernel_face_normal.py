@@ -181,9 +181,7 @@ def test_a_collinear_start_wall_keeps_its_own_orientation(orientation):
     # other implementation, so a shared mistake could not satisfy both.
     # `(0, 0, 1)` — the kernel's old answer for all six — passes only on "+Z".
     scene, (f_id,) = _scene_with_faces([_split_first_edge(_square_in_plane(orientation))])
-    np.testing.assert_allclose(
-        _kernel_normals(scene)[f_id], _AXIS[orientation], atol=1e-6
-    )
+    np.testing.assert_allclose(_kernel_normals(scene)[f_id], _AXIS[orientation], atol=1e-6)
 
 
 def test_splitting_an_edge_does_not_change_the_kernel_normal():
@@ -222,24 +220,60 @@ def test_many_faces_in_one_scene_stay_matched_face_by_face():
         )
 
 
-def test_a_zero_area_face_reaches_no_renderer_normal_at_all():
-    # The degenerate case the two implementations answer differently ON
-    # PURPOSE, pinned so the difference stays deliberate. A face with no area
-    # has no normal. Python says so by raising; the kernel cannot raise into
-    # the render path without blanking the whole viewport, so it stores the
-    # {0, 0, 0} sentinel — not the old hardcoded (0, 0, 1), which is a specific
-    # plausible-looking direction and is how a wall came to be textured as a
-    # floor.
+def test_python_raises_on_a_collinear_loop_that_earcut_drops_entirely():
+    # Two separate facts about one shape, both worth pinning and neither
+    # implying the other.
     #
-    # And nothing downstream ever sees even the sentinel: a zero-area loop
-    # triangulates to nothing, so the face contributes no corners to
-    # face_triangle_buffer. That is the whole cost of the fallback choice, and
-    # it is why the honest sentinel is free.
+    # 1. Scene.face_normal RAISES on a face with no area. That is the
+    #    deliberate difference between the two implementations: the kernel
+    #    cannot raise into the render path without blanking the whole viewport,
+    #    so it stores the {0, 0, 0} sentinel instead — not the old hardcoded
+    #    (0, 0, 1), which is a specific plausible-looking direction and is how
+    #    a wall came to be textured as a floor.
+    #
+    # 2. This particular loop emits nothing at all, because EARCUT finds no
+    #    triangles in a fully collinear ring. That is a property of the
+    #    TRIANGULATOR on this shape, NOT a kernel guarantee about degenerate
+    #    faces — do not read it as one. A thin-but-real face whose area vector
+    #    falls in the kernel's reject band (an XZ wall of side 2e-4 has an area
+    #    vector of 8e-8) triangulates normally and emits corners carrying the
+    #    sentinel. The kernel-side counterpart,
+    #    HalfEdgeMeshTest.FaceNormalOfAZeroAreaFaceIsTheSentinelNotAnUpwardGuess,
+    #    reads the sentinel straight out of face_triangle_buffer using a
+    #    hand-built fan, and the two only look contradictory if this one is
+    #    mistaken for a statement about the kernel.
+    #
+    # Consumers therefore have to cope with the sentinel rather than assume it
+    # never arrives: plane_bases answers it with the world XY basis, and
+    # phong.vert guards normalize() against it.
     scene, (f_id,) = _scene_with_faces(
         [[(0.0, 0.0, 0.0), (1.0, 0.0, 0.0), (2.0, 0.0, 0.0), (3.0, 0.0, 0.0)]]
     )
-    assert f_id not in _kernel_normals(scene)
-    assert scene.face_triangle_buffer()[1].shape[0] == 0
-
     with pytest.raises(ValueError, match="degenerate"):
         scene.face_normal(f_id)
+
+    assert scene.face_triangle_buffer()[1].shape[0] == 0
+    assert f_id not in _kernel_normals(scene)
+
+
+def test_a_thin_but_real_face_in_the_reject_band_still_emits_the_sentinel():
+    # The measured counterexample to "a face that small covers no pixels",
+    # kept as a test so the claim cannot quietly come back. A 2e-4 XZ square
+    # has an area vector of 8e-8, inside the kernel's 1e-7 reject band, yet it
+    # triangulates like any other quad and every corner it emits carries the
+    # {0, 0, 0} sentinel. This is why each consumer needs its own guard.
+    side = 2e-4
+    scene, (f_id,) = _scene_with_faces(
+        [[(0.0, 0.0, 0.0), (side, 0.0, 0.0), (side, 0.0, side), (0.0, 0.0, side)]]
+    )
+    _, normals = scene.face_triangle_buffer()
+    assert normals.shape[0] > 0, "a thin face still triangulates; it is not dropped"
+    np.testing.assert_allclose(normals, 0.0, atol=0.0)
+
+    # Ten times wider is outside the band and gets a real normal, which pins
+    # that the zeros above are the threshold talking and not a broken face.
+    wide = 2e-3
+    scene, (f_id,) = _scene_with_faces(
+        [[(0.0, 0.0, 0.0), (wide, 0.0, 0.0), (wide, 0.0, wide), (0.0, 0.0, wide)]]
+    )
+    np.testing.assert_allclose(_kernel_normals(scene)[f_id], [0.0, -1.0, 0.0], atol=1e-6)

@@ -153,10 +153,22 @@ AreaVector newell_area_vector(std::size_t n, PositionAt position_at) {
 //     sentinel rather than two conventions writing one field.
 //   - It is the kernel's non-throwing counterpart to Scene.face_normal, which
 //     raises on the same condition.
-//   - Nothing observable is lost. A face with essentially zero area covers no
-//     pixels, so there is no shading to preserve; and plane_bases in
-//     python/pluton/viewport/uv_projection.py already answers a zero-length
-//     normal with the world XY basis rather than dividing by zero.
+//   - It is not a new exposure. recompute_face_normal already wrote this
+//     sentinel into this same field at this same threshold, reached from
+//     set_vertex_position on every interactive vertex drag, so every consumer
+//     had to cope with it already. This only widens when it first appears,
+//     from the first drag to face creation.
+//
+// Do NOT read this as "a face this small is invisible". It is not: a face
+// whose area vector lands in the reject band still triangulates and still
+// emits corners, all of them carrying the sentinel. Measured on the installed
+// kernel, an XZ wall of side 2e-4 has an area vector of 8e-8 — inside the band
+// — and emits 6 corners. It is earcut on a genuinely collinear loop that
+// produces no triangles, which is a property of the triangulator and not of
+// this function. So the sentinel does reach consumers, and each one owns its
+// own guard: plane_bases in python/pluton/viewport/uv_projection.py answers a
+// zero-length normal with the world XY basis, and phong.vert falls back to a
+// fixed direction for LIGHTING only (see the comment there).
 std::array<float, 3> unit_normal_from_area_vector(const AreaVector& a) {
     if (!(a.length > static_cast<double>(kDegenerateAreaVectorLengthThreshold))) {
         return {0.0f, 0.0f, 0.0f};
@@ -601,13 +613,13 @@ bool pluton::HalfEdgeMesh::faces_are_coplanar(std::uint32_t f1_id, std::uint32_t
     auto n1 = compute_face_normal_geometric(*this, f1_id);
     auto n2 = compute_face_normal_geometric(*this, f2_id);
     // Degenerate normal → refuse. compute_face_normal_geometric returns either
-    // a unit vector or the exact {0,0,0} sentinel, so this is a sentinel test;
-    // the threshold it is written against lives in
-    // kDegenerateAreaVectorLengthThreshold, above.
-    if (len3(n1) < kDegenerateAreaVectorLengthThreshold ||
-        len3(n2) < kDegenerateAreaVectorLengthThreshold) {
-        return false;
-    }
+    // a unit vector or the exact {0,0,0} sentinel and nothing in between, so
+    // this is a test for the sentinel, not a magnitude test. Written as an
+    // exact zero check rather than against kDegenerateAreaVectorLengthThreshold:
+    // that constant measures an AREA VECTOR in world units, an unrelated
+    // quantity to the length of an already-normalized vector, and borrowing it
+    // here would couple the two under one name for no gain.
+    if (len3(n1) == 0.0f || len3(n2) == 0.0f) return false;
 
     // Angle test: |dot(n1, n2)| > tolerance — accept either winding direction.
     float ang = std::abs(dot3(n1, n2));

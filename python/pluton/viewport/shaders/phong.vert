@@ -27,7 +27,18 @@ void main() {
     // transpose(inverse()) equals mat3(u_model) for rotation-only/uniform-scale
     // transforms, so existing scenes are unaffected.
     mat3 normal_matrix = transpose(inverse(mat3(u_model)));
-    v_world_normal = normalize(normal_matrix * in_normal);
+    // The kernel hands a degenerate (zero-area) face the {0,0,0} sentinel
+    // rather than a guessed direction (issue #110), and normalize() of it is
+    // 0/0 — a NaN that carries through phong.frag into frag_color. Guess a
+    // direction HERE, and only here: lighting is the one purely cosmetic use
+    // of the normal, so a wrong shade on a face with no area costs nothing.
+    // Every other consumer must keep refusing the sentinel instead — the
+    // texture basis has its own guard in uv_projection.plane_bases, and
+    // faces_are_coplanar and the tools deliberately decline rather than guess.
+    // Do not propagate this fallback outward; a plausible-looking wrong
+    // direction reaching geometry is exactly what #110 was.
+    vec3 n = normal_matrix * in_normal;
+    v_world_normal = dot(n, n) > 0.0 ? normalize(n) : vec3(0.0, 0.0, 1.0);
     v_uv = in_uv;
     v_uv_back = in_uv_back;
     gl_Position = u_projection * u_view * world_pos;

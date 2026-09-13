@@ -86,7 +86,9 @@ public:
     /// Returns true iff both:
     ///   - the angle between unit normals satisfies dot(n1, n2) > angle_tol_cos, AND
     ///   - every vertex of either face lies within `dist_tol` of the other face's plane.
-    /// Returns false (without crashing) for degenerate-normal faces (|n| < 1e-7).
+    /// Returns false (without crashing) for a face whose geometric normal is the
+    /// {0,0,0} degenerate sentinel — one whose Newell area vector falls at or
+    /// below the kernel's degenerate-area threshold.
     /// Both tolerances are required (no defaults at this layer); Scene.faces_are_coplanar
     /// applies the project's recommended values: angle_tol_cos = cos(0.5°) ≈ 0.9999619f,
     /// dist_tol = 1e-4f.
