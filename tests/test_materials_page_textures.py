@@ -142,3 +142,57 @@ def test_a_textured_swatch_differs_from_an_untextured_one(main_window, tmp_path)
     page._choose_texture(chooser=lambda: str(path))
 
     assert page._swatch_appearance(model.materials.get(mat.id)) != plain
+
+
+# --- M7.5b final review, item 5: size fields follow the texture -------------
+
+
+def test_the_texture_size_fields_are_disabled_without_a_texture(main_window, tmp_path):
+    # Clear Texture already tracked texture_id; the two size spins did not, so
+    # a material that samples nothing still offered an edit that pushes an
+    # undoable command and invalidates the renderer's uv_key to change a
+    # number no pixel can read. Asserted across a real import and a real
+    # clear, not by calling _sync_editor, so a version that only got the
+    # enablement right on the first paint is caught.
+    page = main_window._materials_page
+    model = main_window._model
+    mat = model.materials.add_custom("Brick", (1.0, 1.0, 1.0))
+    page.set_library(model.materials)
+    page.set_active(mat.id)
+
+    assert model.materials.get(mat.id).texture_id is None
+    assert not page._texture_width_spin.isEnabled()
+    assert not page._texture_height_spin.isEnabled()
+    assert not page._clear_texture_btn.isEnabled()
+
+    path = tmp_path / "brick.png"
+    path.write_bytes(_IMG)
+    page._choose_texture(chooser=lambda: str(path))
+
+    assert page._texture_width_spin.isEnabled()
+    assert page._texture_height_spin.isEnabled()
+
+    page._clear_texture()
+
+    assert not page._texture_width_spin.isEnabled()
+    assert not page._texture_height_spin.isEnabled()
+
+
+def test_selecting_an_untextured_material_disables_the_size_fields_again(main_window, tmp_path):
+    # Switching the active material must re-evaluate the enablement, not leave
+    # it latched from whichever material was shown before.
+    page = main_window._materials_page
+    model = main_window._model
+    textured = model.materials.add_custom("Brick", (1.0, 1.0, 1.0))
+    plain = model.materials.add_custom("Plaster", (0.9, 0.9, 0.9))
+    page.set_library(model.materials)
+    page.set_active(textured.id)
+    path = tmp_path / "brick.png"
+    path.write_bytes(_IMG)
+    page._choose_texture(chooser=lambda: str(path))
+    assert page._texture_width_spin.isEnabled()
+
+    page.set_active(plain.id)
+
+    assert not page._texture_width_spin.isEnabled()
+    assert not page._texture_height_spin.isEnabled()

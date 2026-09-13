@@ -344,7 +344,15 @@ class MaterialsPage(QWidget):
         finally:
             self._syncing = False
         self._delete_btn.setEnabled(self._can_delete_active())
-        self._clear_texture_btn.setEnabled(mat.texture_id is not None)
+        # M7.5b final review, item 5: the size spins get the same treatment as
+        # Clear Texture, for the same reason. Editing them on a material that
+        # samples nothing pushes an undoable command and invalidates the
+        # renderer's uv_key -- a re-upload of every definition carrying the
+        # material -- to change a number that cannot alter a single pixel.
+        has_texture = mat.texture_id is not None
+        self._clear_texture_btn.setEnabled(has_texture)
+        self._texture_width_spin.setEnabled(has_texture)
+        self._texture_height_spin.setEnabled(has_texture)
 
     def _current_scene(self):
         return None if self._model is None else self._model.active_scene
