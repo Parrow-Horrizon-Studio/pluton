@@ -33,55 +33,136 @@ std::uint64_t HalfEdgeMesh::pack_pair(std::uint32_t a, std::uint32_t b) noexcept
 
 namespace {
 
-// Degenerate-length threshold for add_face_from_loop/restore_face's
-// render-fallback normal. These two call sites only need *some* normal to
-// hand the renderer (their fallback is {0,0,1}, a plausible upward normal so
-// the renderer still sees weak lighting rather than crashing), so a loose
-// 1e-9f guard is fine.
+// Degenerate-area threshold, shared by all three call sites that derive a
+// face normal from its boundary loop: add_face_from_loop, restore_face and
+// compute_face_normal_geometric.
 //
-// This is deliberately looser than kGeometricNormalLengthThreshold below —
-// the two thresholds are NOT meant to match. Only the cross-product math
-// (raw_normal_from_first_three) is shared between the three call sites; each
-// applies its own threshold and its own fallback for the degenerate case.
-constexpr float kDegenerateNormalLengthThreshold = 1e-9f;
+// It is compared against the length of the Newell area vector, which is
+// 2 * the polygon's own area (see newell_area_vector below) — a property of
+// the WHOLE face. Before issue #110 the three sites measured one cross
+// product of the first two boundary edges, i.e. twice the area of the first
+// corner triangle only, and split into two thresholds:
+//
+//   - a loose 1e-9f for add_face_from_loop/restore_face, on the reasoning
+//     that their normal was "only for the renderer" and any plausible
+//     direction would do, and
+//   - a tighter 1e-7f for compute_face_normal_geometric, which feeds
+//     faces_are_coplanar and recompute_face_normal (reached from
+//     set_vertex_position on every interactive vertex drag) and so needs a
+//     robust normal rather than a unit vector normalized out of float noise.
+//
+// Both halves of that split are gone deliberately:
+//
+//   - The premise that the stored normal is cosmetic is no longer true. All
+//     three sites write the same Face::normal field, and since M7.5b the
+//     renderer reads it out of face_triangle_buffer to build each face's
+//     TEXTURE PROJECTION BASIS (_face_uv_geometry in
+//     python/pluton/viewport/scene_renderer.py), on top of lighting, picking
+//     and coplanarity. One field with two different definitions of
+//     "degenerate" is how a value the geometric path would have rejected
+//     reached the renderer anyway. There is now one definition.
+//   - The tighter value is the one that survives, because the robustness
+//     argument for it applies to every reader of the field. Keeping the
+//     looser 1e-9f instead would buy nothing: at float32 precision the
+//     direction of an area vector of length 1e-8 on unit-scale geometry is
+//     coordinate rounding, not geometry.
+//
+// Against the OLD quantity this value is both looser and tighter, and the
+// looser half is the point of the fix:
+//
+//   - Looser where it matters. Newell's length is 2 * the total area, which
+//     for a convex face is >= twice the first corner triangle's, so faces the
+//     first-three estimate called degenerate now pass — including every face
+//     whose loop merely STARTS on three collinear vertices, which is exactly
+//     what an edge split leaves behind and is the whole of issue #110. Those
+//     faces have full area and a perfectly well-defined normal.
+//   - Tighter only on microscopic faces, those whose total area vector falls
+//     in (1e-9, 1e-7]. A face that small covers no pixels and its normal was
+//     float noise under the old guard too; it now gets the honest {0,0,0}
+//     sentinel instead of a normalized-noise unit vector.
+constexpr float kDegenerateAreaVectorLengthThreshold = 1e-7f;
 
-// Degenerate-length threshold for compute_face_normal_geometric, the
-// TIGHTER guard: it feeds faces_are_coplanar and recompute_face_normal
-// (reached from set_vertex_position on every interactive vertex drag), both
-// of which need a robust normal rather than a unit vector normalized from
-// float noise. A cross-product length in (kGeometricNormalLengthThreshold,
-// kDegenerateNormalLengthThreshold] would be silently accepted by the looser
-// threshold above but must still be treated as degenerate here.
-constexpr float kGeometricNormalLengthThreshold = 1e-7f;
-
-// Raw (non-normalized) geometric normal from a face loop's first three
-// vertices — cross product of the first two edges, plus its length. This is
-// the single source of the cross-product math shared by add_face_from_loop,
-// restore_face, and compute_face_normal_geometric (below); it carries no
-// threshold decision of its own. Callers apply their own fallback for the
-// degenerate (near-zero-length) case, using their own threshold, since they
-// don't agree on what either should be: add_face_from_loop/restore_face
-// default to {0,0,1} at the 1e-9f threshold above (a plausible upward normal
-// so the renderer still sees *some* lighting), while
-// compute_face_normal_geometric defaults to {0,0,0} at the tighter 1e-7f
-// threshold below (a sentinel its callers explicitly test for).
-struct RawNormal {
-    float x, y, z;
-    float length;
+// The polygon's area vector by Newell's method, summed over the WHOLE
+// boundary loop, plus its length. Unnormalized; equal to 2 * A * n_hat with
+// the right-hand rule, so the length is twice the polygon's area and the
+// direction is the face normal implied by the loop's winding.
+//
+// This replaces the pre-#110 raw_normal_from_first_three, a cross product of
+// the loop's first two edges, at all three of its call sites. Reading one
+// corner privileges it: a loop whose first three vertices are COLLINEAR
+// yielded a zero vector and fell through to a fallback, and a loop with a
+// REFLEX vertex at index 1 yielded the opposite sign, because
+// cross(p1 - p0, p2 - p0) is twice the SIGNED area of triangle (p0, p1, p2) —
+// the ear test at p1, not the polygon's normal. A sum over every edge cannot
+// go wrong either way: the convex corners outweigh the reflex ones by exactly
+// the polygon's area.
+//
+// The sign is unchanged wherever the old estimate was valid, which is
+// contractual — lighting, picking, faces_are_coplanar, push/pull, offset,
+// follow-me and the M7.5b texture basis all steer by this direction. For a
+// triangle the sum IS cross(p1 - p0, p2 - p0), term for term; for any convex
+// face the first corner's signed area is positive, so the two agree in
+// direction. See FaceNormalNewellMatchesFirstThreeOnATriangle and
+// FaceNormalNewellAgreesInSignWithFirstThreeOnRandomConvexFaces.
+//
+// Written as sum (p_i - p_i+1) x-paired with (p_i + p_i+1), the same form as
+// _newell_normal in python/pluton/scene/scene.py so the two implementations
+// agree term for term; it is algebraically identical to sum p_i x p_i+1
+// because the p_i*p_i products telescope away around a closed loop.
+// Accumulated in double: the terms are products of coordinates, so a face far
+// from the origin cancels badly in float32.
+//
+// Assumes a planar loop. For a non-planar one this returns the normal of its
+// projection, which is the best single normal such a face has.
+struct AreaVector {
+    double x, y, z;
+    double length;
 };
 
-RawNormal raw_normal_from_first_three(const float* p0, const float* p1, const float* p2) {
-    const float e1x = p1[0] - p0[0];
-    const float e1y = p1[1] - p0[1];
-    const float e1z = p1[2] - p0[2];
-    const float e2x = p2[0] - p0[0];
-    const float e2y = p2[1] - p0[1];
-    const float e2z = p2[2] - p0[2];
-    const float nx = e1y * e2z - e1z * e2y;
-    const float ny = e1z * e2x - e1x * e2z;
-    const float nz = e1x * e2y - e1y * e2x;
-    const float length = std::sqrt(nx * nx + ny * ny + nz * nz);
-    return {nx, ny, nz, length};
+// `position_at(i)` returns loop vertex i's position; `n` is the loop length.
+template <typename PositionAt>
+AreaVector newell_area_vector(std::size_t n, PositionAt position_at) {
+    double ax = 0.0, ay = 0.0, az = 0.0;
+    std::array<float, 3> q = position_at(0);
+    for (std::size_t i = 0; i < n; ++i) {
+        const std::array<float, 3> p = q;
+        q = position_at((i + 1) % n);
+        const double px = p[0], py = p[1], pz = p[2];
+        const double qx = q[0], qy = q[1], qz = q[2];
+        ax += (py - qy) * (pz + qz);
+        ay += (pz - qz) * (px + qx);
+        az += (px - qx) * (py + qy);
+    }
+    return {ax, ay, az, std::sqrt(ax * ax + ay * ay + az * az)};
+}
+
+// The unit face normal for a boundary loop, or the {0,0,0} sentinel when the
+// face is genuinely degenerate — zero area, not merely an awkward loop start.
+//
+// {0,0,0} is the single fallback for all three call sites. The pre-#110
+// fallback at add_face_from_loop/restore_face was a hardcoded {0,0,1} "so the
+// renderer sees weak lighting", and that is the defect issue #110 was
+// reopened for: it is a specific, plausible-looking, SILENTLY WRONG direction.
+// A vertical wall whose loop started on a split edge took it and was lit — and
+// since M7.5b textured — as if it were a floor. A zero vector cannot be
+// mistaken for an answer:
+//
+//   - It is already this file's convention for "no normal"
+//     (compute_face_normal_geometric's callers, faces_are_coplanar and
+//     recompute_face_normal, explicitly test for it), so there is now one
+//     sentinel rather than two conventions writing one field.
+//   - It is the kernel's non-throwing counterpart to Scene.face_normal, which
+//     raises on the same condition.
+//   - Nothing observable is lost. A face with essentially zero area covers no
+//     pixels, so there is no shading to preserve; and plane_bases in
+//     python/pluton/viewport/uv_projection.py already answers a zero-length
+//     normal with the world XY basis rather than dividing by zero.
+std::array<float, 3> unit_normal_from_area_vector(const AreaVector& a) {
+    if (!(a.length > static_cast<double>(kDegenerateAreaVectorLengthThreshold))) {
+        return {0.0f, 0.0f, 0.0f};
+    }
+    return {static_cast<float>(a.x / a.length), static_cast<float>(a.y / a.length),
+            static_cast<float>(a.z / a.length)};
 }
 
 }  // namespace
@@ -153,22 +234,14 @@ std::uint32_t HalfEdgeMesh::add_face_from_loop(const std::vector<std::uint32_t>&
         }
     }
     const std::uint32_t f_id = static_cast<std::uint32_t>(faces_.size());
-    // Compute geometric normal from the first three boundary vertices.
-    // Assumes planar face — M2/M3a only produce planar faces; M4+ will revisit.
-    const auto raw = raw_normal_from_first_three(vertices_[loop[0]].pos, vertices_[loop[1]].pos,
-                                                 vertices_[loop[2]].pos);
-    float nx = raw.x, ny = raw.y, nz = raw.z;
-    if (raw.length > kDegenerateNormalLengthThreshold) {
-        nx /= raw.length;
-        ny /= raw.length;
-        nz /= raw.length;
-    } else {
-        // Degenerate (collinear) — keep a sensible default; renderer will see weak lighting.
-        nx = 0.0f;
-        ny = 0.0f;
-        nz = 1.0f;
-    }
-    Face f{INVALID_ID, {nx, ny, nz}, triangles, loop, true};
+    // Geometric normal from the WHOLE boundary loop (Newell), not its first
+    // three vertices, so a loop that merely starts on three collinear
+    // vertices — what an edge split leaves behind — still gets its own normal
+    // instead of a hardcoded default (issue #110). Assumes planar face —
+    // M2/M3a only produce planar faces; M4+ will revisit.
+    const auto face_normal = unit_normal_from_area_vector(newell_area_vector(
+        loop.size(), [&](std::size_t i) { return vertex_position(loop[i]); }));
+    Face f{INVALID_ID, {face_normal[0], face_normal[1], face_normal[2]}, triangles, loop, true};
 
     // Wire each loop[i] → loop[i+1] half-edge to point to loop[i+1] → loop[i+2].
     // The half-edge from v_from to v_to has origin = v_from. Given the canonical
@@ -350,25 +423,15 @@ void HalfEdgeMesh::restore_face(std::uint32_t f_id, const std::vector<std::uint3
     f.tris = triangles;
     f.loop = loop;
     f.alive = true;
-    // Recompute geometric normal (same shared helper as add_face_from_loop)
+    // Recompute geometric normal (same shared helpers as add_face_from_loop)
     // so that undo→redo round-trips produce the correct normal rather than
     // preserving a stale value from before the fix.
     {
-        const auto raw = raw_normal_from_first_three(vertices_[loop[0]].pos, vertices_[loop[1]].pos,
-                                                     vertices_[loop[2]].pos);
-        float rnx = raw.x, rny = raw.y, rnz = raw.z;
-        if (raw.length > kDegenerateNormalLengthThreshold) {
-            rnx /= raw.length;
-            rny /= raw.length;
-            rnz /= raw.length;
-        } else {
-            rnx = 0.0f;
-            rny = 0.0f;
-            rnz = 1.0f;
-        }
-        f.normal[0] = rnx;
-        f.normal[1] = rny;
-        f.normal[2] = rnz;
+        const auto face_normal = unit_normal_from_area_vector(newell_area_vector(
+            loop.size(), [&](std::size_t i) { return vertex_position(loop[i]); }));
+        f.normal[0] = face_normal[0];
+        f.normal[1] = face_normal[1];
+        f.normal[2] = face_normal[2];
     }
     dirty_ = true;
 }
@@ -457,26 +520,22 @@ inline float len3(std::array<float, 3> a) {
     return std::sqrt(dot3(a, a));
 }
 
-// Compute geometric face normal from the first three boundary vertices.
-// Returns zero vector if the face is degenerate (collinear or repeated vertices).
-// Shares its cross-product math (only) with add_face_from_loop/restore_face
-// via raw_normal_from_first_three (this is the third of the three call sites
-// the M3c review flagged as duplicated) — but NOT their degenerate-length
-// threshold. This function feeds faces_are_coplanar and recompute_face_normal,
-// which need a robust normal, so it applies the tighter
-// kGeometricNormalLengthThreshold (1e-7f) rather than the looser
-// kDegenerateNormalLengthThreshold (1e-9f) used by add_face_from_loop/
-// restore_face's render-fallback normal.
+// Geometric face normal from the WHOLE boundary loop (Newell), or the
+// {0,0,0} sentinel for a genuinely degenerate — zero-area — face. This is the
+// third of the three call sites the M3c review flagged as duplicated; since
+// issue #110 all three share the same math (newell_area_vector), the same
+// threshold (kDegenerateAreaVectorLengthThreshold) and the same sentinel
+// (unit_normal_from_area_vector), because all three write the same
+// Face::normal field and had no business disagreeing about what degenerate
+// means. This function feeds faces_are_coplanar and recompute_face_normal
+// (reached from set_vertex_position on every interactive vertex drag), which
+// is where the robustness argument for the surviving threshold comes from.
 std::array<float, 3> compute_face_normal_geometric(const pluton::HalfEdgeMesh& m,
                                                    std::uint32_t f_id) {
     auto loop = m.face_loop_vertices(f_id);
     if (loop.size() < 3) return {0, 0, 0};
-    auto p0 = m.vertex_position(loop[0]);
-    auto p1 = m.vertex_position(loop[1]);
-    auto p2 = m.vertex_position(loop[2]);
-    const auto raw = raw_normal_from_first_three(p0.data(), p1.data(), p2.data());
-    if (!(raw.length > kGeometricNormalLengthThreshold)) return {0, 0, 0};
-    return {raw.x / raw.length, raw.y / raw.length, raw.z / raw.length};
+    return unit_normal_from_area_vector(newell_area_vector(
+        loop.size(), [&](std::size_t i) { return m.vertex_position(loop[i]); }));
 }
 
 // Insert vertex w into `loop` between the adjacent pair (va, vb) (either order),
@@ -541,8 +600,14 @@ bool pluton::HalfEdgeMesh::faces_are_coplanar(std::uint32_t f1_id, std::uint32_t
     if (!face_is_live(f1_id) || !face_is_live(f2_id)) return false;
     auto n1 = compute_face_normal_geometric(*this, f1_id);
     auto n2 = compute_face_normal_geometric(*this, f2_id);
-    // Degenerate normal → refuse.
-    if (len3(n1) < 1e-7f || len3(n2) < 1e-7f) return false;
+    // Degenerate normal → refuse. compute_face_normal_geometric returns either
+    // a unit vector or the exact {0,0,0} sentinel, so this is a sentinel test;
+    // the threshold it is written against lives in
+    // kDegenerateAreaVectorLengthThreshold, above.
+    if (len3(n1) < kDegenerateAreaVectorLengthThreshold ||
+        len3(n2) < kDegenerateAreaVectorLengthThreshold) {
+        return false;
+    }
 
     // Angle test: |dot(n1, n2)| > tolerance — accept either winding direction.
     float ang = std::abs(dot3(n1, n2));

@@ -143,6 +143,11 @@ private:
     };
     struct Face {
         std::uint32_t boundary_he;
+        /// Cached unit geometric normal, by Newell's method over the whole
+        /// boundary loop, or {0,0,0} for a genuinely degenerate (zero-area)
+        /// face — never a guessed direction (issue #110). Read by the
+        /// renderer through face_triangle_buffer, for lighting and for each
+        /// face's texture projection basis.
         float normal[3];
         std::vector<std::int32_t> tris;
         std::vector<std::uint32_t> loop;

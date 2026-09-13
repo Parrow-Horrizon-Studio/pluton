@@ -3,7 +3,11 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <cstdint>
+#include <random>
 #include <set>
+#include <string>
+#include <vector>
 
 #include "pluton/halfedge.h"
 
@@ -1093,4 +1097,402 @@ TEST(HalfEdgeSetVertexPosition, RecomputesAllIncidentFacesOfAFanVertexAndLeavesO
     EXPECT_GT(std::abs(after[1 * 9 + 0]) + std::abs(after[1 * 9 + 1]), 0.1f);  // face 1 incident
     EXPECT_NEAR(std::abs(after[2 * 9 + 2]), 1.0f, 1e-4f);                      // face 2 untouched
     EXPECT_LT(std::abs(after[2 * 9 + 0]) + std::abs(after[2 * 9 + 1]), 1e-3f);
+}
+
+// ====================================================================
+// #110: Face::normal by Newell's method over the whole boundary loop
+// ====================================================================
+//
+// The kernel used to estimate Face::normal from cross(p1 - p0, p2 - p0), the
+// loop's first two edges, and to substitute a hardcoded (0, 0, 1) when that
+// came out near zero. A loop whose first three vertices are COLLINEAR — the
+// exact shape an edge split leaves behind — hit that fallback, so a vertical
+// wall with a split edge was handed the normal of a floor. That is not merely
+// wrong lighting: since M7.5b the renderer reads this very field out of
+// face_triangle_buffer to build each face's TEXTURE PROJECTION BASIS
+// (_face_uv_geometry in python/pluton/viewport/scene_renderer.py), and
+// picking, faces_are_coplanar, push/pull, offset and follow-me steer by it
+// too.
+//
+// The Python half of the same defect was fixed first (Scene.face_normal, via
+// _newell_normal in python/pluton/scene/scene.py); the two implementations are
+// cross-checked against each other in tests/test_kernel_face_normal.py.
+//
+// Note the axis-aligned cases below cover all six orientations, not one per
+// axis: three of the six were the cases the v0.7.1 earcut winding bug
+// mirrored, so a test that only checked the axis and not the sign would have
+// passed straight through it.
+
+namespace {
+
+// Build a single face from an ordered loop of world points in `m` and return
+// its cached normal, read back the only way the kernel exposes it — through
+// face_triangle_buffer, which is also exactly what the renderer and the M7.5b
+// texture basis read. `m` must be empty.
+std::array<float, 3> face_normal_of_loop(pluton::HalfEdgeMesh& m,
+                                         const std::vector<std::array<float, 3>>& pts) {
+    std::vector<std::uint32_t> vids;
+    vids.reserve(pts.size());
+    for (const auto& p : pts) vids.push_back(m.add_vertex(p[0], p[1], p[2]));
+    const std::size_t n = vids.size();
+    for (std::size_t i = 0; i < n; ++i) m.add_halfedge_pair(vids[i], vids[(i + 1) % n]);
+    // A fan from loop[0] is enough to make the face emit corners; these tests
+    // read the per-face normal, not the tessellation.
+    std::vector<std::int32_t> tris;
+    for (std::size_t i = 1; i + 1 < n; ++i) {
+        tris.push_back(static_cast<std::int32_t>(vids[0]));
+        tris.push_back(static_cast<std::int32_t>(vids[i]));
+        tris.push_back(static_cast<std::int32_t>(vids[i + 1]));
+    }
+    m.add_face_from_loop(vids, tris);
+    auto normals = m.face_triangle_buffer().second;
+    EXPECT_GE(normals.size(), 3u);
+    if (normals.size() < 3) return {0.0f, 0.0f, 0.0f};
+    return {normals[0], normals[1], normals[2]};
+}
+
+std::array<float, 3> face_normal_of_loop(const std::vector<std::array<float, 3>>& pts) {
+    pluton::HalfEdgeMesh m;
+    return face_normal_of_loop(m, pts);
+}
+
+// The pre-#110 estimate, written out here rather than kept as a copy of the
+// implementation, so the equivalence tests state the PROPERTY ("Newell agrees
+// with a first-three cross product wherever that estimate is valid") instead
+// of restating code that could drift with it. Returns false when the estimate
+// was degenerate and there is nothing to compare against.
+bool first_three_unit_normal(const std::vector<std::array<float, 3>>& pts,
+                             std::array<double, 3>& out) {
+    const auto& p0 = pts[0];
+    const auto& p1 = pts[1];
+    const auto& p2 = pts[2];
+    const double e1[3] = {p1[0] - p0[0], p1[1] - p0[1], p1[2] - p0[2]};
+    const double e2[3] = {p2[0] - p0[0], p2[1] - p0[1], p2[2] - p0[2]};
+    const double n[3] = {e1[1] * e2[2] - e1[2] * e2[1], e1[2] * e2[0] - e1[0] * e2[2],
+                         e1[0] * e2[1] - e1[1] * e2[0]};
+    const double len = std::sqrt(n[0] * n[0] + n[1] * n[1] + n[2] * n[2]);
+    if (len < 1e-9) return false;
+    out = {n[0] / len, n[1] / len, n[2] / len};
+    return true;
+}
+
+// A unit square wound so its normal points along `orientation`. Mirrors
+// _square_in_plane in tests/test_face_normal_newell.py.
+std::vector<std::array<float, 3>> square_in_plane(const std::string& orientation) {
+    const std::array<std::array<float, 2>, 4> base = {
+        {{0.0f, 0.0f}, {1.0f, 0.0f}, {1.0f, 1.0f}, {0.0f, 1.0f}}};
+    std::vector<std::array<float, 3>> out;
+    for (const auto& b : base) {
+        const float x = b[0], y = b[1];
+        if (orientation == "+Z") out.push_back({x, y, 0.0f});
+        if (orientation == "-Z") out.push_back({y, x, 0.0f});
+        if (orientation == "+X") out.push_back({0.0f, x, y});
+        if (orientation == "-X") out.push_back({0.0f, y, x});
+        if (orientation == "+Y") out.push_back({y, 0.0f, x});
+        if (orientation == "-Y") out.push_back({x, 0.0f, y});
+    }
+    EXPECT_EQ(out.size(), 4u) << "unknown orientation " << orientation;
+    return out;
+}
+
+std::array<float, 3> axis_vector(const std::string& orientation) {
+    const float s = (orientation[0] == '+') ? 1.0f : -1.0f;
+    if (orientation[1] == 'X') return {s, 0.0f, 0.0f};
+    if (orientation[1] == 'Y') return {0.0f, s, 0.0f};
+    return {0.0f, 0.0f, s};
+}
+
+// Split the loop's FIRST edge by inserting its midpoint at index 1. The first
+// three vertices are then collinear — the #110 shape — while the face, its
+// area and its winding are otherwise untouched.
+std::vector<std::array<float, 3>> with_split_first_edge(
+    const std::vector<std::array<float, 3>>& pts) {
+    std::vector<std::array<float, 3>> out;
+    out.push_back(pts[0]);
+    out.push_back({0.5f * (pts[0][0] + pts[1][0]), 0.5f * (pts[0][1] + pts[1][1]),
+                   0.5f * (pts[0][2] + pts[1][2])});
+    for (std::size_t i = 1; i < pts.size(); ++i) out.push_back(pts[i]);
+    return out;
+}
+
+const std::array<const char*, 6> kOrientations = {"+X", "-X", "+Y", "-Y", "+Z", "-Z"};
+
+// A concave L wound CCW in XY, so its normal is +Z. Its reflex corner is
+// (1,1), at index 3 — a convex vertex sits at index 1, which is what keeps the
+// OLD estimate valid here and so makes this face usable as an equivalence case.
+const std::vector<std::array<float, 3>> kLShape = {{{0.0f, 0.0f, 0.0f},
+                                                    {2.0f, 0.0f, 0.0f},
+                                                    {2.0f, 1.0f, 0.0f},
+                                                    {1.0f, 1.0f, 0.0f},
+                                                    {1.0f, 2.0f, 0.0f},
+                                                    {0.0f, 2.0f, 0.0f}}};
+
+}  // namespace
+
+// The reopening evidence on issue #110, verbatim: a vertical wall in the XZ
+// plane whose loop starts on a split edge. The old kernel answered (0, 0, 1),
+// the hardcoded fallback, which happens to be a plausible FLOOR normal — so
+// the wall was lit, and since M7.5b textured, as a floor. Its true normal is
+// (0, -1, 0).
+TEST(HalfEdgeMeshTest, FaceNormalCollinearLoopStartOnAVerticalWall) {
+    const std::vector<std::array<float, 3>> wall = {{{0.0f, 0.0f, 0.0f},
+                                                     {0.5f, 0.0f, 0.0f},
+                                                     {1.0f, 0.0f, 0.0f},
+                                                     {1.0f, 0.0f, 1.0f},
+                                                     {0.0f, 0.0f, 1.0f}}};
+    std::array<double, 3> old_estimate{};
+    ASSERT_FALSE(first_three_unit_normal(wall, old_estimate))
+        << "this loop must be one the first-three estimate could not handle, or it proves nothing";
+
+    const auto n = face_normal_of_loop(wall);
+    EXPECT_NEAR(n[0], 0.0f, 1e-6f);
+    EXPECT_NEAR(n[1], -1.0f, 1e-6f);
+    EXPECT_NEAR(n[2], 0.0f, 1e-6f);
+}
+
+// The same wall without the split vertex must give the same answer — the
+// normal must not notice an extra collinear vertex, including its sign.
+TEST(HalfEdgeMeshTest, FaceNormalOfASplitEdgeWallMatchesItsUnsplitWall) {
+    const auto plain = square_in_plane("-Y");
+    const auto split = with_split_first_edge(plain);
+    ASSERT_EQ(split.size(), plain.size() + 1);
+
+    const auto n_plain = face_normal_of_loop(plain);
+    const auto n_split = face_normal_of_loop(split);
+    for (int i = 0; i < 3; ++i) EXPECT_NEAR(n_split[i], n_plain[i], 1e-6f);
+}
+
+// All six axis-aligned orientations, plain loops. Three of the six were the
+// cases the v0.7.1 earcut winding bug mirrored, so the SIGN is what is being
+// pinned, not the axis.
+TEST(HalfEdgeMeshTest, FaceNormalAllSixAxisAlignedOrientations) {
+    for (const char* o : kOrientations) {
+        SCOPED_TRACE(o);
+        const auto expected = axis_vector(o);
+        const auto n = face_normal_of_loop(square_in_plane(o));
+        for (int i = 0; i < 3; ++i) EXPECT_NEAR(n[i], expected[i], 1e-6f);
+    }
+}
+
+// The same six with a split first edge, which is the combination the old
+// kernel got wrong: it answered (0, 0, 1) for all six — right by accident on
+// "+Z" and wrong on the other five.
+TEST(HalfEdgeMeshTest, FaceNormalAllSixAxisAlignedOrientationsWithACollinearLoopStart) {
+    for (const char* o : kOrientations) {
+        SCOPED_TRACE(o);
+        const auto split = with_split_first_edge(square_in_plane(o));
+        std::array<double, 3> old_estimate{};
+        ASSERT_FALSE(first_three_unit_normal(split, old_estimate))
+            << "the split loop must defeat the first-three estimate, or this proves nothing";
+
+        const auto expected = axis_vector(o);
+        const auto n = face_normal_of_loop(split);
+        for (int i = 0; i < 3; ++i) EXPECT_NEAR(n[i], expected[i], 1e-6f);
+    }
+}
+
+// For a TRIANGLE the Newell sum is cross(p1 - p0, p2 - p0) term for term —
+// the polygon IS its first corner triangle — so the two must agree exactly,
+// not merely in direction. An oblique triangle on small integer coordinates,
+// so neither answer is protected by an axis-aligned zero.
+TEST(HalfEdgeMeshTest, FaceNormalNewellMatchesFirstThreeOnATriangle) {
+    const std::vector<std::array<float, 3>> tri = {
+        {{1.0f, 2.0f, 3.0f}, {4.0f, 0.0f, -2.0f}, {-3.0f, 5.0f, 1.0f}}};
+    std::array<double, 3> old_estimate{};
+    ASSERT_TRUE(first_three_unit_normal(tri, old_estimate));
+
+    const auto n = face_normal_of_loop(tri);
+    for (int i = 0; i < 3; ++i) EXPECT_NEAR(n[i], static_cast<float>(old_estimate[i]), 1e-6f);
+
+    // And reversed winding gives exactly the opposite, not some other vector.
+    std::vector<std::array<float, 3>> reversed(tri.rbegin(), tri.rend());
+    const auto n_rev = face_normal_of_loop(reversed);
+    for (int i = 0; i < 3; ++i) EXPECT_NEAR(n_rev[i], -n[i], 1e-6f);
+}
+
+// A concave face: the area-weighted sum must not be dragged off by the reflex
+// corner. Both windings, so the sign is pinned in each direction.
+TEST(HalfEdgeMeshTest, FaceNormalOfAConcavePolygon) {
+    const auto n = face_normal_of_loop(kLShape);
+    EXPECT_NEAR(n[0], 0.0f, 1e-6f);
+    EXPECT_NEAR(n[1], 0.0f, 1e-6f);
+    EXPECT_NEAR(n[2], 1.0f, 1e-6f);
+
+    std::vector<std::array<float, 3>> reversed(kLShape.rbegin(), kLShape.rend());
+    const auto n_rev = face_normal_of_loop(reversed);
+    EXPECT_NEAR(n_rev[2], -1.0f, 1e-6f);
+}
+
+// The improvement case, and the one that separates "stopped falling back" from
+// "computes the right thing". cross(p1 - p0, p2 - p0) is twice the SIGNED area
+// of triangle (p0, p1, p2) — the ear test at p1 — so a REFLEX vertex at INDEX 1
+// makes the old estimate point the opposite way to the polygon's own normal.
+// Rotating kLShape by two positions lands its reflex corner (1,1) there; the
+// winding, and therefore the true normal (+Z), is unchanged.
+TEST(HalfEdgeMeshTest, FaceNormalConcaveWithAReflexVertexAtIndexOne) {
+    std::vector<std::array<float, 3>> rolled(kLShape.begin() + 2, kLShape.end());
+    rolled.insert(rolled.end(), kLShape.begin(), kLShape.begin() + 2);
+    ASSERT_FLOAT_EQ(rolled[1][0], 1.0f);
+    ASSERT_FLOAT_EQ(rolled[1][1], 1.0f);  // the reflex vertex, now at index 1
+
+    std::array<double, 3> old_estimate{};
+    ASSERT_TRUE(first_three_unit_normal(rolled, old_estimate));
+    EXPECT_NEAR(old_estimate[2], -1.0, 1e-9) << "the old estimate must be wrong here";
+
+    const auto n = face_normal_of_loop(rolled);
+    EXPECT_NEAR(n[2], 1.0f, 1e-6f);  // ...and the new one right
+}
+
+// The sign is contractual — lighting, picking, faces_are_coplanar, push/pull,
+// offset, follow-me and the M7.5b texture basis all steer by this direction,
+// and a flip would be a far worse bug than the one being fixed while staying
+// invisible to any test that only checks the axis. Newell can only differ in
+// direction from the first-three estimate where that estimate is itself wrong
+// (a reflex vertex at index 1), which a CONVEX face cannot have. This measures
+// that claim over random convex faces in random planes rather than asserting
+// it: the dot product must be +1, never -1.
+TEST(HalfEdgeMeshTest, FaceNormalNewellAgreesInSignWithFirstThreeOnRandomConvexFaces) {
+    std::mt19937 rng(20250913u);  // fixed seed: a failure here must be reproducible
+    std::uniform_real_distribution<double> unit(-1.0, 1.0);
+    std::uniform_real_distribution<double> gap(0.15, 0.9);
+    std::uniform_int_distribution<int> sides(3, 9);
+
+    int checked = 0;
+    for (int trial = 0; trial < 600; ++trial) {
+        // A random plane, via a random unit normal and any basis orthogonal to it.
+        double nx = unit(rng), ny = unit(rng), nz = unit(rng);
+        const double nl = std::sqrt(nx * nx + ny * ny + nz * nz);
+        if (nl < 1e-3) continue;
+        nx /= nl;
+        ny /= nl;
+        nz /= nl;
+        const bool seed_z = std::abs(nz) < 0.9;
+        const double sx = seed_z ? 0.0 : 1.0;
+        const double sy = 0.0;
+        const double sz = seed_z ? 1.0 : 0.0;
+        double ux = ny * sz - nz * sy, uy = nz * sx - nx * sz, uz = nx * sy - ny * sx;
+        const double ul = std::sqrt(ux * ux + uy * uy + uz * uz);
+        if (ul < 1e-6) continue;
+        ux /= ul;
+        uy /= ul;
+        uz /= ul;
+        const double vx = ny * uz - nz * uy, vy = nz * ux - nx * uz, vz = nx * uy - ny * ux;
+
+        // Points at strictly increasing angles on a circle in that plane are
+        // convex by construction, and wound CCW about (nx, ny, nz).
+        const int k = sides(rng);
+        std::vector<std::array<float, 3>> pts;
+        double theta = 0.0;
+        for (int i = 0; i < k; ++i) {
+            const double c = std::cos(theta), s = std::sin(theta);
+            pts.push_back({static_cast<float>(ux * c + vx * s),
+                           static_cast<float>(uy * c + vy * s),
+                           static_cast<float>(uz * c + vz * s)});
+            theta += gap(rng);
+        }
+        if (theta >= 2.0 * 3.14159265358979) continue;  // wrapped past a full turn
+
+        std::array<double, 3> old_estimate{};
+        if (!first_three_unit_normal(pts, old_estimate)) continue;
+
+        const auto got = face_normal_of_loop(pts);
+        const double d =
+            got[0] * old_estimate[0] + got[1] * old_estimate[1] + got[2] * old_estimate[2];
+        EXPECT_GT(d, 0.999) << "trial " << trial << ": Newell normal (" << got[0] << ", " << got[1]
+                            << ", " << got[2] << ") disagrees with the first-three estimate ("
+                            << old_estimate[0] << ", " << old_estimate[1] << ", "
+                            << old_estimate[2] << ")";
+        ++checked;
+    }
+    EXPECT_GT(checked, 300) << "too few usable trials to call this evidence";
+}
+
+// A genuinely zero-area face has no normal, and must say so with the {0,0,0}
+// sentinel rather than the old hardcoded (0, 0, 1). A plausible-looking but
+// silently wrong direction is precisely what issue #110 was: it is why a
+// split-edge wall was textured as a floor. The zero vector cannot be mistaken
+// for an answer, it is already this file's convention for "no normal", and it
+// costs nothing visible — a face of no area covers no pixels.
+TEST(HalfEdgeMeshTest, FaceNormalOfAZeroAreaFaceIsTheSentinelNotAnUpwardGuess) {
+    const std::vector<std::array<float, 3>> collinear = {{{0.0f, 0.0f, 0.0f},
+                                                          {1.0f, 0.0f, 0.0f},
+                                                          {2.0f, 0.0f, 0.0f},
+                                                          {3.0f, 0.0f, 0.0f}}};
+    const auto n = face_normal_of_loop(collinear);
+    EXPECT_FLOAT_EQ(n[0], 0.0f);
+    EXPECT_FLOAT_EQ(n[1], 0.0f);
+    EXPECT_FLOAT_EQ(n[2], 0.0f);
+}
+
+// restore_face is the undo→redo path and the second of the three call sites.
+// It must reach the same answer as add_face_from_loop on the #110 shape, or a
+// wall's texture basis would change under an undo.
+TEST(HalfEdgeMeshTest, RestoreFaceRecomputesTheNewellNormalOfACollinearStartWall) {
+    pluton::HalfEdgeMesh m;
+    const auto wall = with_split_first_edge(square_in_plane("-Y"));
+    const auto n_before = face_normal_of_loop(m, wall);
+    ASSERT_NEAR(n_before[1], -1.0f, 1e-6f);
+
+    const std::uint32_t f_id = 0;
+    ASSERT_TRUE(m.face_is_live(f_id));
+    const auto loop = m.face_loop_vertices(f_id);
+    const auto tris = m.face_triangles(f_id);
+    m.remove_face(f_id);
+    ASSERT_FALSE(m.face_is_live(f_id));
+    m.restore_face(f_id, loop, tris);
+
+    auto normals = m.face_triangle_buffer().second;
+    ASSERT_GE(normals.size(), 3u);
+    EXPECT_NEAR(normals[0], 0.0f, 1e-6f);
+    EXPECT_NEAR(normals[1], -1.0f, 1e-6f);
+    EXPECT_NEAR(normals[2], 0.0f, 1e-6f);
+}
+
+// set_vertex_position → recompute_face_normal → compute_face_normal_geometric,
+// the third call site and the one reached on every interactive vertex drag.
+// Before #110 it shared only the cross-product math with the other two; now it
+// shares their threshold and sentinel as well, and it must agree with them on
+// the #110 shape rather than answering {0,0,0} for a face that has area.
+TEST(HalfEdgeMeshTest, RecomputeFaceNormalUsesNewellOnACollinearStartWall) {
+    pluton::HalfEdgeMesh m;
+    const auto wall = with_split_first_edge(square_in_plane("-Y"));
+    (void)face_normal_of_loop(m, wall);
+
+    const auto loop = m.face_loop_vertices(0);
+    const auto p = m.vertex_position(loop[0]);
+    m.set_vertex_position(loop[0], p[0], p[1], p[2]);  // force the recompute, move nothing
+
+    auto normals = m.face_triangle_buffer().second;
+    ASSERT_GE(normals.size(), 3u);
+    EXPECT_NEAR(normals[0], 0.0f, 1e-6f);
+    EXPECT_NEAR(normals[1], -1.0f, 1e-6f);
+    EXPECT_NEAR(normals[2], 0.0f, 1e-6f);
+}
+
+// faces_are_coplanar reads compute_face_normal_geometric, so it inherits the
+// fix. Before it, a split-edge wall took the (0,0,1) fallback at
+// add_face_from_loop and — on the looser threshold — the {0,0,0} sentinel on
+// recompute; either way the wall's relationship to a floor was decided by
+// something other than the wall's own plane.
+TEST(HalfEdgeMeshTest, FacesAreCoplanar_CollinearStartWallIsNotCoplanarWithAFloor) {
+    pluton::HalfEdgeMesh m;
+    // Wall in the XZ plane (y = 0) with a split first edge.
+    const auto wall = with_split_first_edge(square_in_plane("-Y"));
+    (void)face_normal_of_loop(m, wall);
+    const std::uint32_t f_wall = 0;
+
+    // Floor in the XY plane (z = 0), well away from the wall's vertices.
+    auto q0 = m.add_vertex(5.0f, 5.0f, 0.0f);
+    auto q1 = m.add_vertex(6.0f, 5.0f, 0.0f);
+    auto q2 = m.add_vertex(5.0f, 6.0f, 0.0f);
+    m.add_halfedge_pair(q0, q1);
+    m.add_halfedge_pair(q1, q2);
+    m.add_halfedge_pair(q2, q0);
+    const auto f_floor =
+        m.add_face_from_loop({q0, q1, q2}, {static_cast<std::int32_t>(q0),
+                                            static_cast<std::int32_t>(q1),
+                                            static_cast<std::int32_t>(q2)});
+
+    EXPECT_FALSE(m.faces_are_coplanar(f_wall, f_floor, kCos05Deg, kDistTol));
+    EXPECT_FALSE(m.faces_are_coplanar(f_floor, f_wall, kCos05Deg, kDistTol));
 }
