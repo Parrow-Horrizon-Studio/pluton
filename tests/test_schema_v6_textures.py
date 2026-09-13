@@ -6,10 +6,12 @@ import json
 import zipfile
 
 import numpy as np
+import pytest
 from pluton.document import DocumentSettings
 from pluton.io.document_codec import geometry_from_dict, geometry_to_dict
+from pluton.io.errors import PlutonFormatError
 from pluton.io.pluton_file import SCHEMA_VERSION
-from pluton.scene.scene import Scene, Side, TexturePlacement
+from pluton.scene.scene import DEFAULT_PLACEMENT, Scene, Side, TexturePlacement
 from pluton.viewport.camera import Camera
 
 _PNG = b"\x89PNG\r\n\x1a\nfake-but-stable-bytes"
@@ -74,6 +76,34 @@ def test_placement_is_keyed_by_face_index_not_face_id():
     assert b != 0
 
 
+def test_an_out_of_range_placement_face_index_raises():
+    # Structural corruption: the sidecar names a face that doesn't exist in
+    # this document's faces[] list. Mirrors
+    # test_geometry_from_dict_rejects_an_out_of_range_material_id for
+    # face_materials (test_document_codec.py) -- silently dropping the entry
+    # would erase the user's adjustment on load, and the very next save would
+    # then write that loss back out permanently.
+    s = Scene()
+    _square(s)
+    d = geometry_to_dict(s)
+    d["face_placements"] = {"99": [0.0, 0.0, 1.0, 0.0]}
+    with pytest.raises(PlutonFormatError):
+        geometry_from_dict(Scene(), d)
+
+
+def test_a_placement_with_the_wrong_arity_raises():
+    # A truncated record (e.g. [offset_u, offset_v] with scale/rotation
+    # missing) must not silently become a full TexturePlacement with invented
+    # defaults, and must raise PlutonFormatError (not a raw TypeError) so a
+    # direct caller of geometry_from_dict sees the documented exception.
+    s = Scene()
+    _square(s)
+    d = geometry_to_dict(s)
+    d["face_placements"] = {"0": [0.5, 0.5]}
+    with pytest.raises(PlutonFormatError):
+        geometry_from_dict(Scene(), d)
+
+
 def test_a_schema_5_payload_without_placement_keys_still_loads():
     s = Scene()
     _square(s)
@@ -83,6 +113,44 @@ def test_a_schema_5_payload_without_placement_keys_still_loads():
     out = Scene()
     geometry_from_dict(out, d)  # must not raise
     assert out.faces_with_placement() == []
+
+
+def test_placement_round_trips_through_a_real_file(tmp_path):
+    # The dict-level tests above go through geometry_to_dict/geometry_from_dict
+    # directly; this exercises the real zip + json.dumps/loads container path,
+    # a front placement, a back placement, a nested Definition's face (not just
+    # root), and an unadjusted face staying at identity -- the other half of
+    # this task, alongside the texture-blob real-file tests below.
+    from pluton.io.pluton_file import load_document, save_document
+    from pluton.model.model import Model
+    from pluton.viewport.render_style import RenderStyle
+
+    model = Model()
+    f_root = _square(model.root.mesh)
+    model.root.mesh.set_face_placement(f_root, TexturePlacement(0.1, 0.2, 1.5, 0.3), Side.FRONT)
+    model.root.mesh.set_face_placement(f_root, TexturePlacement(scale=2.0), Side.BACK)
+    _square(model.root.mesh, z=1.0)  # left at identity
+
+    chair = model.new_definition("Chair", is_group=False)
+    f_nested = _square(chair.mesh, z=2.0)
+    chair.mesh.set_face_placement(f_nested, TexturePlacement(offset_u=0.5))
+    model.root.children.append(model.new_instance(chair))
+
+    path = tmp_path / "t.pluton"
+    save_document(path, model, _camera(), _doc(), RenderStyle())
+    loaded = load_document(path)
+
+    root_faces = list(loaded.model.root.mesh.faces_iter())
+    loaded_f_root, loaded_f_plain = root_faces[0].id, root_faces[1].id
+    assert loaded.model.root.mesh.face_placement(loaded_f_root, Side.FRONT) == TexturePlacement(
+        0.1, 0.2, 1.5, 0.3
+    )
+    assert loaded.model.root.mesh.face_placement(loaded_f_root, Side.BACK).scale == 2.0
+    assert loaded.model.root.mesh.face_placement(loaded_f_plain) == DEFAULT_PLACEMENT
+
+    chair_def = loaded.model.root.children[0].definition
+    loaded_f_nested = next(iter(chair_def.mesh.faces_iter())).id
+    assert chair_def.mesh.face_placement(loaded_f_nested).offset_u == 0.5
 
 
 def test_texture_records_and_blobs_round_trip_through_a_real_file(tmp_path):
@@ -106,6 +174,32 @@ def test_texture_records_and_blobs_round_trip_through_a_real_file(tmp_path):
     assert loaded.model.materials.get(mat.id).texture_size == (2.0, 3.0)
 
 
+def test_next_id_survives_removing_the_highest_id_texture(tmp_path):
+    # Regression flagged for Task 8's upcoming DeleteTextureCommand:
+    # from_records used to recompute next_id as max(ids) + 1 whenever the
+    # container didn't carry a saved counter, so deleting the highest-id
+    # texture and saving regressed next_id. A texture added after reload
+    # would then reuse the freed id, and any material whose texture_id
+    # pointed at the original image would silently point at whatever gets
+    # that id next.
+    from pluton.io.pluton_file import load_document, save_document
+    from pluton.model.model import Model
+    from pluton.viewport.render_style import RenderStyle
+
+    model = Model()
+    first = model.textures.add("a.png", _PNG, "png", 4, 4, False)
+    second = model.textures.add("b.png", _PNG, "png", 4, 4, False)
+    model.textures.remove(second.id)
+
+    path = tmp_path / "t.pluton"
+    save_document(path, model, _camera(), _doc(), RenderStyle())
+    loaded = load_document(path)
+
+    reused = loaded.model.textures.add("c.png", _PNG, "png", 4, 4, False)
+    assert reused.id == second.id + 1
+    assert loaded.model.textures.get(first.id) is not None
+
+
 def test_the_blob_is_a_sibling_entry_not_base64_in_the_json(tmp_path):
     from pluton.io.pluton_file import save_document
     from pluton.model.model import Model
@@ -121,7 +215,19 @@ def test_the_blob_is_a_sibling_entry_not_base64_in_the_json(tmp_path):
         assert f"textures/{tex.id}.png" in names
         assert zf.read(f"textures/{tex.id}.png") == _PNG
         doc = json.loads(zf.read("document.json"))
-    assert "data" not in json.dumps(doc["textures"][0])
+    record = doc["textures"]["items"][0]
+    # Exact key set, not a substring check: a texture named "metadata.png"
+    # would make `"data" not in json.dumps(record)` fire spuriously, and a
+    # bare substring check would miss bytes smuggled in under a different
+    # key (e.g. "payload").
+    assert set(record.keys()) == {
+        "id",
+        "name",
+        "image_format",
+        "width",
+        "height",
+        "has_transparency",
+    }
 
 
 def test_a_document_referencing_a_missing_blob_still_opens(tmp_path):

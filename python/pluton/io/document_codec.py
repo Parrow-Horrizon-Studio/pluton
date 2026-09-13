@@ -42,6 +42,8 @@ def geometry_to_dict(scene: Scene) -> dict:
     faces: list[list[int]] = []
     face_materials: dict[str, int] = {}
     face_materials_back: dict[str, int] = {}
+    face_placements: dict[str, list[float]] = {}
+    face_placements_back: dict[str, list[float]] = {}
     for face_index, f in enumerate(scene.faces_iter()):
         faces.append([idmap[vid] for vid in f.loop_vertex_ids])
         front = scene.face_material(f.id, Side.FRONT)
@@ -50,10 +52,6 @@ def geometry_to_dict(scene: Scene) -> dict:
         back = scene.face_material(f.id, Side.BACK)
         if back != _DEFAULT_MATERIAL_ID:
             face_materials_back[str(face_index)] = int(back)
-
-    face_placements: dict[str, list[float]] = {}
-    face_placements_back: dict[str, list[float]] = {}
-    for face_index, f in enumerate(scene.faces_iter()):
         for side, target in (
             (Side.FRONT, face_placements),
             (Side.BACK, face_placements_back),
@@ -122,8 +120,16 @@ def geometry_from_dict(scene: Scene, data: dict) -> None:
     def _apply_face_placements(placements: dict, side: Side) -> None:
         for face_index_str, values in placements.items():
             fi = int(face_index_str)
-            if 0 <= fi < len(new_fids):
-                scene.set_face_placement(new_fids[fi], TexturePlacement(*values), side)
+            # Structural, like the face-index check in _apply_face_materials above:
+            # an out-of-range index means the geometry and the placement sidecar
+            # have drifted apart. Staying silent here would drop the user's
+            # adjustment on load, and the very next save would then write that
+            # loss back out permanently.
+            if not (0 <= fi < len(new_fids)):
+                raise PlutonFormatError(f"face index {fi} out of range (0..{len(new_fids) - 1})")
+            if len(values) != 4:
+                raise PlutonFormatError(f"face placement must have 4 numbers, got {len(values)}")
+            scene.set_face_placement(new_fids[fi], TexturePlacement(*values), side)
 
     _apply_face_placements(data.get("face_placements", {}), Side.FRONT)
     _apply_face_placements(data.get("face_placements_back", {}), Side.BACK)
@@ -352,7 +358,7 @@ def document_to_dict(model: Model, camera, doc, render_style) -> dict:
         "units": units_to_dict(doc.units),
         "camera": CameraState.from_camera(camera).to_dict(),
         "materials": {"next_id": model.materials.next_id, "items": model.materials.to_records()},
-        "textures": model.textures.to_records(),
+        "textures": {"next_id": model.textures.next_id, "items": model.textures.to_records()},
         "tags": {"next_id": model.tags.next_id, "items": model.tags.to_records()},
         "scenes": {"next_id": model.views.next_id, "items": model.views.to_records()},
         "style": render_style_to_dict(render_style),
@@ -366,8 +372,9 @@ def document_from_dict(data: dict, blobs: dict[int, bytes] | None = None) -> Loa
     PlutonFormatError — the only exception callers need to catch.
 
     `blobs` carries texture bytes the container stored as sibling entries,
-    keyed by texture id; `.get("textures", [])` below is what lets a schema 5
-    file (no texture records at all) still load.
+    keyed by texture id; `.get("textures", {})` below is what lets a schema 5
+    file (no `"textures"` key at all) still load, and also accepts a bare
+    list of records (no `next_id`) for a hand-written document.
     """
     from pluton.views.view_library import ViewLibrary  # function-level: breaks import cycle
 
@@ -376,7 +383,13 @@ def document_from_dict(data: dict, blobs: dict[int, bytes] | None = None) -> Loa
         model.materials = MaterialLibrary.from_records(
             data["materials"]["items"], data["materials"]["next_id"]
         )
-        model.textures = TextureLibrary.from_records(data.get("textures", []), blobs or {})
+        textures = data.get("textures", {})
+        # A schema-6 file with no textures wrote {} in place of {"items": [...],
+        # "next_id": n} above, and a bare list is also accepted (spec: "keep the
+        # .get default so a hand-written bare list still loads").
+        tex_items = textures.get("items", []) if isinstance(textures, dict) else textures
+        tex_next_id = textures.get("next_id") if isinstance(textures, dict) else None
+        model.textures = TextureLibrary.from_records(tex_items, blobs or {}, tex_next_id)
         model.tags = TagLibrary.from_records(data["tags"]["items"], data["tags"]["next_id"])
         scenes = data.get("scenes", {})
         model.views = ViewLibrary.from_records(scenes.get("items", []), scenes.get("next_id", 0))

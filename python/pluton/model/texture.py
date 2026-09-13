@@ -101,12 +101,21 @@ class TextureLibrary:
         ]
 
     @classmethod
-    def from_records(cls, records, blobs: dict[int, bytes]) -> TextureLibrary:
+    def from_records(
+        cls, records, blobs: dict[int, bytes], next_id: int | None = None
+    ) -> TextureLibrary:
         """Rebuild from records plus the blobs the container yielded.
 
         A record whose blob is absent loads with empty data rather than
         raising: spec 1.8 requires a document referencing a missing entry to
         open with that material untextured, not to be refused.
+
+        `next_id`, like `MaterialLibrary.from_records`, is normally the
+        container's saved counter. When it is absent (a hand-written document,
+        or records with no counter at all) it falls back to one past the
+        highest id present -- but that fallback regresses across a
+        remove-then-save of the highest-id texture, which is why the caller
+        should always pass the saved counter when it has one.
         """
         lib = cls()
         for rec in records:
@@ -122,5 +131,7 @@ class TextureLibrary:
             )
             lib._textures[tid] = tex
             lib._order.append(tid)
-            lib._next_id = max(lib._next_id, tid + 1)
+        if next_id is None:
+            next_id = max((t for t in lib._textures), default=0) + 1
+        lib._next_id = int(next_id)
         return lib
