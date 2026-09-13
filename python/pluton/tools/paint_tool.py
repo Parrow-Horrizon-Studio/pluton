@@ -69,6 +69,7 @@ class PaintTool(Tool):
         self._model = None
         self._active_material_provider = None
         self._set_active_material = None
+        self._on_placement_committed = None
         self._hovered_face: int | None = None
         self._stroke_commands: list = []
         self._stroke_painted: set[tuple[int, Side]] = set()
@@ -84,6 +85,7 @@ class PaintTool(Tool):
         self._model = ctx.model
         self._active_material_provider = ctx.active_material_provider
         self._set_active_material = ctx.set_active_material
+        self._on_placement_committed = ctx.on_placement_committed
         self._hovered_face = None
         self._stroke_commands = []
         self._stroke_painted = set()
@@ -268,6 +270,12 @@ class PaintTool(Tool):
             cmd = SetFacePlacementCommand(self._drag_face_id, self._drag_current, self._drag_side)
             cmd.do(self._scene)
             self._command_stack.push_executed(cmd, self._scene)
+            if self._on_placement_committed is not None:
+                # M7.5b Task 12 fix round 1: fired only here, on commit --
+                # never per mouse-move -- so the Properties panel's Task 10
+                # placement fields don't go stale after a drag on the
+                # currently-selected face without re-reading on every frame.
+                self._on_placement_committed()
         self._init_placement_drag_state()
 
     def _begin_placement_drag_projection(self, f_id: int, side: Side, event: QMouseEvent) -> None:

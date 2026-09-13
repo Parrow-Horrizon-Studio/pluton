@@ -33,6 +33,11 @@ class ToolContext:
     request_context_rebuild: object = None
     active_material_provider: object = None  # M5b — callable () -> Material (active material)
     set_active_material: object = None  # M5b — callable (int) -> None (eyedropper -> dock)
+    # M7.5b Task 12 fix round 1 — callable () -> None; fired once when
+    # PaintTool.end_placement_drag() commits a drag, so the Properties
+    # panel's Task 10 placement fields don't go stale after a Shift-drag on
+    # the currently-selected face. Fired on commit only, never per mouse-move.
+    on_placement_committed: object = None
 
 
 @dataclass(frozen=True, slots=True)

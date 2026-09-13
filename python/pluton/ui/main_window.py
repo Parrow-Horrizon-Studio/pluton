@@ -494,6 +494,12 @@ class MainWindow(QMainWindow):
             request_context_rebuild=self._on_active_context_changed,
             active_material_provider=lambda: self._model.materials.get(self._active_material_id),
             set_active_material=self._materials_page.set_active,
+            # M7.5b Task 12 fix round 1: PaintTool.end_placement_drag() calls
+            # this once per committed drag so Task 10's Properties placement
+            # fields don't go stale when the drag lands on the currently
+            # selected face -- _refresh_entity_info is the same single call
+            # site every other placement-touching action already uses.
+            on_placement_committed=self._refresh_entity_info,
         )
 
     def _rebuild_tool_context(self) -> None:

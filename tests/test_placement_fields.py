@@ -213,6 +213,51 @@ def test_the_group_updates_after_an_undo_that_changes_a_placement(main_window):
     assert panel._offset_u_spin.value() == pytest.approx(0.0)
 
 
+def test_a_placement_drag_refreshes_the_selected_faces_panel(main_window):
+    # M7.5b Task 12 fix round 1: CommandStack._fire_change() (fired by
+    # end_placement_drag's push_executed) only reaches _rebuild_outliner and
+    # _on_document_changed -- neither touches _refresh_entity_info, the sole
+    # place that repopulates these fields -- so without PaintTool calling the
+    # ToolContext's on_placement_committed hook, the panel would keep
+    # showing the pre-drag value (0.0) forever after a Shift-drag on the
+    # very face Properties has selected.
+    win = main_window
+    scene = win._model.active_context.mesh
+    f = _square(scene)
+    panel = win._properties_dock
+    win._selection.replace(faces=[f])
+    win._refresh_selection_status()
+    assert panel._offset_u_spin.value() == pytest.approx(0.0)
+
+    tool = win._paint_tool
+    tool.begin_placement_drag(f, Side.FRONT)
+    tool.update_placement_drag(du=0.6, dv=0.0)
+    tool.end_placement_drag()
+
+    assert scene.face_placement(f).offset_u == pytest.approx(0.6)
+    assert panel._offset_u_spin.value() == pytest.approx(0.6)
+
+
+def test_a_placement_drag_that_moves_nothing_does_not_refresh(main_window):
+    # A no-op drag pushes no command (tests/test_placement_drag.py), so it
+    # must not fire on_placement_committed either -- confirms the hook is
+    # gated on end_placement_drag's own push, not called unconditionally.
+    win = main_window
+    scene = win._model.active_context.mesh
+    f = _square(scene)
+    panel = win._properties_dock
+    win._selection.replace(faces=[f])
+    win._refresh_selection_status()
+
+    calls = []
+    win._paint_tool._on_placement_committed = lambda: calls.append(True)
+    tool = win._paint_tool
+    tool.begin_placement_drag(f, Side.FRONT)
+    tool.end_placement_drag()
+
+    assert calls == []
+
+
 def test_setting_a_spin_box_value_directly_drives_the_command(main_window):
     # Drives the real valueChanged path (setValue on a live widget) instead
     # of calling _apply_placement/_apply_placement_from_widgets directly, so
