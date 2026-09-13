@@ -251,8 +251,8 @@ std::uint32_t HalfEdgeMesh::add_face_from_loop(const std::vector<std::uint32_t>&
     // vertices — what an edge split leaves behind — still gets its own normal
     // instead of a hardcoded default (issue #110). Assumes planar face —
     // M2/M3a only produce planar faces; M4+ will revisit.
-    const auto face_normal = unit_normal_from_area_vector(newell_area_vector(
-        loop.size(), [&](std::size_t i) { return vertex_position(loop[i]); }));
+    const auto face_normal = unit_normal_from_area_vector(
+        newell_area_vector(loop.size(), [&](std::size_t i) { return vertex_position(loop[i]); }));
     Face f{INVALID_ID, {face_normal[0], face_normal[1], face_normal[2]}, triangles, loop, true};
 
     // Wire each loop[i] → loop[i+1] half-edge to point to loop[i+1] → loop[i+2].
@@ -546,8 +546,8 @@ std::array<float, 3> compute_face_normal_geometric(const pluton::HalfEdgeMesh& m
                                                    std::uint32_t f_id) {
     auto loop = m.face_loop_vertices(f_id);
     if (loop.size() < 3) return {0, 0, 0};
-    return unit_normal_from_area_vector(newell_area_vector(
-        loop.size(), [&](std::size_t i) { return m.vertex_position(loop[i]); }));
+    return unit_normal_from_area_vector(
+        newell_area_vector(loop.size(), [&](std::size_t i) { return m.vertex_position(loop[i]); }));
 }
 
 // Insert vertex w into `loop` between the adjacent pair (va, vb) (either order),

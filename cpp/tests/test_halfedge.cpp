@@ -1397,8 +1397,7 @@ TEST(HalfEdgeMeshTest, FaceNormalNewellAgreesInSignWithFirstThreeOnRandomConvexF
         double theta = 0.0;
         for (int i = 0; i < k; ++i) {
             const double c = std::cos(theta), s = std::sin(theta);
-            pts.push_back({static_cast<float>(ux * c + vx * s),
-                           static_cast<float>(uy * c + vy * s),
+            pts.push_back({static_cast<float>(ux * c + vx * s), static_cast<float>(uy * c + vy * s),
                            static_cast<float>(uz * c + vz * s)});
             theta += gap(rng);
         }
@@ -1412,8 +1411,8 @@ TEST(HalfEdgeMeshTest, FaceNormalNewellAgreesInSignWithFirstThreeOnRandomConvexF
             got[0] * old_estimate[0] + got[1] * old_estimate[1] + got[2] * old_estimate[2];
         EXPECT_GT(d, 0.999) << "trial " << trial << ": Newell normal (" << got[0] << ", " << got[1]
                             << ", " << got[2] << ") disagrees with the first-three estimate ("
-                            << old_estimate[0] << ", " << old_estimate[1] << ", "
-                            << old_estimate[2] << ")";
+                            << old_estimate[0] << ", " << old_estimate[1] << ", " << old_estimate[2]
+                            << ")";
         ++checked;
     }
     EXPECT_GT(checked, 300) << "too few usable trials to call this evidence";
@@ -1426,10 +1425,8 @@ TEST(HalfEdgeMeshTest, FaceNormalNewellAgreesInSignWithFirstThreeOnRandomConvexF
 // for an answer, it is already this file's convention for "no normal", and it
 // costs nothing visible — a face of no area covers no pixels.
 TEST(HalfEdgeMeshTest, FaceNormalOfAZeroAreaFaceIsTheSentinelNotAnUpwardGuess) {
-    const std::vector<std::array<float, 3>> collinear = {{{0.0f, 0.0f, 0.0f},
-                                                          {1.0f, 0.0f, 0.0f},
-                                                          {2.0f, 0.0f, 0.0f},
-                                                          {3.0f, 0.0f, 0.0f}}};
+    const std::vector<std::array<float, 3>> collinear = {
+        {{0.0f, 0.0f, 0.0f}, {1.0f, 0.0f, 0.0f}, {2.0f, 0.0f, 0.0f}, {3.0f, 0.0f, 0.0f}}};
     const auto n = face_normal_of_loop(collinear);
     EXPECT_FLOAT_EQ(n[0], 0.0f);
     EXPECT_FLOAT_EQ(n[1], 0.0f);
@@ -1505,10 +1502,9 @@ TEST(HalfEdgeMeshTest, FacesAreCoplanar_CollinearStartWallIsNotCoplanarWithAFloo
     m.add_halfedge_pair(q0, q1);
     m.add_halfedge_pair(q1, q2);
     m.add_halfedge_pair(q2, q0);
-    const auto f_floor =
-        m.add_face_from_loop({q0, q1, q2}, {static_cast<std::int32_t>(q0),
-                                            static_cast<std::int32_t>(q1),
-                                            static_cast<std::int32_t>(q2)});
+    const auto f_floor = m.add_face_from_loop(
+        {q0, q1, q2}, {static_cast<std::int32_t>(q0), static_cast<std::int32_t>(q1),
+                       static_cast<std::int32_t>(q2)});
 
     EXPECT_FALSE(m.faces_are_coplanar(f_wall, f_floor, kCos05Deg, kDistTol));
     EXPECT_FALSE(m.faces_are_coplanar(f_floor, f_wall, kCos05Deg, kDistTol));
