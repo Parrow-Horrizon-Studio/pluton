@@ -206,7 +206,9 @@ class MainWindow(QMainWindow):
         # Properties panel (M7.3) — Outliner over an icon-tabbed editor.
         # Must be added BEFORE restore_window_state() below: restoreState()
         # only reattaches docks it can find by object name at the time it runs.
-        self._properties_dock = PropertiesDock(self)
+        self._properties_dock = PropertiesDock(
+            self, command_stack=self._command_stack, model=self._model
+        )
         self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, self._properties_dock)
         self._outliner = OutlinerTree(self._properties_dock)
         self._properties_dock.set_outliner(self._outliner)

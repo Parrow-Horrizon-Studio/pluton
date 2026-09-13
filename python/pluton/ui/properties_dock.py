@@ -11,10 +11,15 @@ to show looks like -- so the empty state needed no extra machinery.
 
 from __future__ import annotations
 
+import math
+
 from PySide6.QtCore import QSize, Qt, Signal
 from PySide6.QtWidgets import (
     QButtonGroup,
     QDockWidget,
+    QDoubleSpinBox,
+    QFormLayout,
+    QGroupBox,
     QHBoxLayout,
     QLabel,
     QSplitter,
@@ -24,6 +29,8 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from pluton.commands.material_commands import SetFacePlacementCommand
+from pluton.scene.scene import Side, TexturePlacement
 from pluton.ui.icons import icon
 from pluton.ui.panels import PROPERTIES_TABS
 
@@ -40,9 +47,23 @@ class PropertiesDock(QDockWidget):
     # lose this dock's state.
     OBJECT_NAME = "properties_dock"
 
-    def __init__(self, parent=None) -> None:
+    def __init__(self, parent=None, *, command_stack=None, model=None) -> None:
         super().__init__("Properties", parent)
         self.setObjectName(self.OBJECT_NAME)
+
+        # Injected the same way MaterialsPage takes them (Task 8/M7.5a): both
+        # are None in the plain PropertiesDock() unit tests, and every
+        # placement-mutating method below is a documented no-op in that case.
+        self._command_stack = command_stack
+        self._model = model
+        self._target_face_id: int | None = None
+        self._target_side: Side = Side.FRONT
+        # Guards set_placement_target()'s setValue() calls from looping back
+        # into the spin boxes' valueChanged handlers below, the same way
+        # MaterialsPage._syncing guards _sync_editor() -- without it,
+        # populating the fields from a face's stored placement would issue a
+        # command for the value just read FROM the scene.
+        self._syncing = False
 
         self._buttons: dict[str, QToolButton] = {}
         self._page_index: dict[str, int] = {}
@@ -93,6 +114,17 @@ class PropertiesDock(QDockWidget):
         strip_layout.addStretch(1)
         properties_layout.addWidget(strip, stretch=0)
         properties_layout.addWidget(self._stack, stretch=1)
+
+        # Texture position (M7.5b Task 10): per-face-side placement, kept
+        # OUTSIDE the tab stack because it applies to whichever face+side is
+        # targeted regardless of which tab is showing, exactly like the
+        # Material tab it most often accompanies. Disabled -- never hidden,
+        # matching EntityInfoPage's rule -- until set_placement_target() has
+        # a face to edit.
+        self._placement_group = self._build_placement_group(properties)
+        self._placement_group.setEnabled(False)
+        properties_layout.addWidget(self._placement_group, stretch=0)
+
         self._splitter.addWidget(properties)
 
         self.setWidget(self._splitter)
@@ -141,6 +173,103 @@ class PropertiesDock(QDockWidget):
         self._page_index[tab_id] = self._stack.insertWidget(old_index, widget)
         if self._current == tab_id:
             self._stack.setCurrentIndex(self._page_index[tab_id])
+
+    # --- texture placement (M7.5b Task 10) --------------------------------
+    def _build_placement_group(self, parent: QWidget) -> QGroupBox:
+        group = QGroupBox("Texture position", parent)
+        form = QFormLayout(group)
+
+        self._offset_u_spin = self._make_placement_spin(group, -1000.0, 1000.0, 4)
+        form.addRow("Offset U", self._offset_u_spin)
+
+        self._offset_v_spin = self._make_placement_spin(group, -1000.0, 1000.0, 4)
+        form.addRow("Offset V", self._offset_v_spin)
+
+        self._scale_spin = self._make_placement_spin(group, 0.001, 1000.0, 4)
+        form.addRow("Scale", self._scale_spin)
+
+        self._rotation_spin = self._make_placement_spin(group, -3600.0, 3600.0, 2)
+        self._rotation_spin.setSuffix("°")
+        form.addRow("Rotation", self._rotation_spin)
+
+        return group
+
+    def _make_placement_spin(
+        self, parent: QWidget, minimum: float, maximum: float, decimals: int
+    ) -> QDoubleSpinBox:
+        spin = QDoubleSpinBox(parent)
+        spin.setRange(minimum, maximum)
+        spin.setDecimals(decimals)
+        spin.setSingleStep(0.1)
+        spin.valueChanged.connect(self._on_placement_field_changed)
+        return spin
+
+    def set_placement_target(self, face_id: int | None, side: Side = Side.FRONT) -> None:
+        """Point the group at `face_id`'s placement for `side` and repopulate
+        the fields from `scene.face_placement` (the identity, for a face
+        never adjusted -- there is no None case to handle)."""
+        self._target_face_id = face_id
+        self._target_side = side
+        self._placement_group.setEnabled(face_id is not None)
+
+        placement = TexturePlacement()
+        if face_id is not None and self._model is not None:
+            placement = self._model.active_scene.face_placement(face_id, side)
+
+        self._syncing = True
+        try:
+            self._offset_u_spin.setValue(placement.offset_u)
+            self._offset_v_spin.setValue(placement.offset_v)
+            self._scale_spin.setValue(placement.scale)
+            self._rotation_spin.setValue(math.degrees(placement.rotation))
+        finally:
+            self._syncing = False
+
+    def _rotation_widget_value(self) -> float:
+        """The rotation spin box's current value, in degrees."""
+        return self._rotation_spin.value()
+
+    def _on_placement_field_changed(self, _value: float) -> None:
+        if self._syncing:
+            return
+        self._apply_placement_from_widgets(
+            offset_u=self._offset_u_spin.value(),
+            offset_v=self._offset_v_spin.value(),
+            scale=self._scale_spin.value(),
+            rotation_deg=self._rotation_spin.value(),
+        )
+
+    def _apply_placement_from_widgets(
+        self, *, offset_u: float, offset_v: float, scale: float, rotation_deg: float
+    ) -> None:
+        """Build the full `TexturePlacement` the fields currently describe
+        and apply it. Rotation is converted to radians here, at the widget
+        boundary -- `TexturePlacement.rotation` is radians because that is
+        what `uv_projection.apply_placement` wants, but users think in
+        degrees."""
+        self._apply_placement(
+            TexturePlacement(
+                offset_u=offset_u,
+                offset_v=offset_v,
+                scale=scale,
+                rotation=math.radians(rotation_deg),
+            )
+        )
+
+    def _apply_placement(self, placement: TexturePlacement) -> None:
+        """Set the targeted face+side's placement through the command stack.
+
+        A no-op with nothing targeted or uninjected, the same as every
+        MaterialsPage mutator with self._command_stack is None.
+        """
+        if self._target_face_id is None or self._command_stack is None or self._model is None:
+            return
+        cmd = SetFacePlacementCommand(self._target_face_id, placement, side=self._target_side)
+        self._command_stack.execute(cmd, self._model.active_scene)
+        # Re-read from the scene rather than trusting `placement` verbatim:
+        # setting the identity CLEARS the entry (scene.set_face_placement),
+        # so the fields must reflect that, not just echo what was passed in.
+        self.set_placement_target(self._target_face_id, self._target_side)
 
     # --- outliner --------------------------------------------------------
     def outliner(self) -> QWidget | None:
