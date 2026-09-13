@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import ClassVar
 
 import numpy as np
-from PySide6.QtCore import QPoint, QSettings, Qt
+from PySide6.QtCore import QBuffer, QIODevice, QPoint, QSettings, Qt
 from PySide6.QtGui import QKeySequence, QShortcut
 from PySide6.QtWidgets import QMainWindow, QVBoxLayout, QWidget
 
@@ -86,6 +86,10 @@ from pluton.viewport.render_style import FaceStyle, RenderStyle
 from pluton.viewport.view_animator import ViewAnimator
 from pluton.viewport.viewport_widget import ViewportWidget
 from pluton.views.capture import apply_tags_and_style, capture_view
+
+# M7.5b Task 11 (#78): container thumbnails are for a file browser preview, so
+# the long edge is capped well below full viewport resolution.
+_THUMBNAIL_MAX_EDGE = 512
 
 
 class MainWindow(QMainWindow):
@@ -1591,12 +1595,61 @@ class MainWindow(QMainWindow):
         path, _ = QFileDialog.getSaveFileName(self, title, "", file_filter)
         return path or None
 
+    def _capture_thumbnail(self) -> bytes | None:
+        """Grab the viewport framebuffer and encode a capped-size PNG preview.
+
+        QOpenGLWidget.grabFramebuffer() manages its own GL context (it calls
+        makeCurrent() internally), so unlike the raw GL calls in
+        scene_renderer.py -- which only run safely inside initializeGL/
+        resizeGL/paintGL -- this is safe to call from an ordinary slot such as
+        the save path. If the viewport has never been painted (no GL context
+        created yet, e.g. a headless test that never shows the window),
+        grabFramebuffer() returns a null QImage instead of raising; that null
+        image is treated as "no thumbnail" rather than guessed at.
+
+        A preview image is never worth losing a document over, so any GL- or
+        encoding-related failure here degrades to None instead of failing
+        the save.
+        """
+        try:
+            image = self._viewport.grabFramebuffer()
+        except (RuntimeError, OSError):
+            return None
+        if image.isNull() or image.width() <= 0 or image.height() <= 0:
+            return None
+        long_edge = max(image.width(), image.height())
+        if long_edge > _THUMBNAIL_MAX_EDGE:
+            if image.width() >= image.height():
+                image = image.scaledToWidth(
+                    _THUMBNAIL_MAX_EDGE, Qt.TransformationMode.SmoothTransformation
+                )
+            else:
+                image = image.scaledToHeight(
+                    _THUMBNAIL_MAX_EDGE, Qt.TransformationMode.SmoothTransformation
+                )
+        buffer = QBuffer()
+        buffer.open(QIODevice.OpenModeFlag.WriteOnly)
+        try:
+            saved = image.save(buffer, "PNG")
+        except (RuntimeError, OSError):
+            saved = False
+        data = bytes(buffer.data()) if saved else None
+        buffer.close()
+        return data or None
+
     def _save_to(self, path) -> bool:
         path = str(path)
         if not path.endswith(".pluton"):
             path += ".pluton"
         try:
-            save_document(path, self._model, self._viewport.camera, self._doc, self._render_style)
+            save_document(
+                path,
+                self._model,
+                self._viewport.camera,
+                self._doc,
+                self._render_style,
+                thumbnail=self._capture_thumbnail(),
+            )
         except OSError as e:
             from PySide6.QtWidgets import QMessageBox
 

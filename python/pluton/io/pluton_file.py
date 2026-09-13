@@ -23,10 +23,19 @@ SCHEMA_VERSION = 6  # M7.5b: texture records + blobs, per-face placement
 _MANIFEST = "manifest.json"
 _DOCUMENT = "document.json"
 _TEXTURES_DIR = "textures/"
+_THUMBNAIL = "thumbnail.png"
 
 
-def save_document(path, model, camera, doc, render_style) -> None:
-    """Write the document to `path` atomically (temp file + os.replace)."""
+def save_document(
+    path, model, camera, doc, render_style, *, thumbnail: bytes | None = None
+) -> None:
+    """Write the document to `path` atomically (temp file + os.replace).
+
+    `thumbnail`, when given, is a PNG-encoded preview image written as a sibling
+    entry for file browsers (#78). It is optional (D13): producing one needs a
+    live GL context, which headless saves and tests do not have, so `None`
+    (the default) writes no entry and the save still succeeds.
+    """
     path = Path(path)
     data = document_to_dict(model, camera, doc, render_style)
     manifest = {
@@ -42,6 +51,8 @@ def save_document(path, model, camera, doc, render_style) -> None:
             for tex in model.textures.textures():
                 if tex.data:
                     zf.writestr(f"{_TEXTURES_DIR}{tex.id}.{tex.image_format}", tex.data)
+            if thumbnail:
+                zf.writestr(_THUMBNAIL, thumbnail)
         os.replace(tmp, path)
     finally:
         if tmp.exists():
