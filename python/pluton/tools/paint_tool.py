@@ -336,6 +336,13 @@ class PaintTool(Tool):
         `uv_projection.project_corners` and `apply_placement`'s contract
         that a larger scale makes a fixed offset delta move the texture
         less.
+
+        Negated: `apply_placement` computes `base_uv/scale + offset`, so
+        increasing offset_u samples the image further along +u for a FIXED
+        surface point -- which looks like the image sliding toward -u on the
+        surface. Grabbing a point and dragging it to +u (the cursor's actual
+        motion) must slide the image toward +u instead, which takes the
+        opposite sign on the offset delta.
         """
         cx, cy = self._cursor(event)
         w, h = self._viewport_size()
@@ -353,8 +360,8 @@ class PaintTool(Tool):
             if self._drag_local_from_world is not None
             else world_delta
         )
-        du = float(np.dot(local_delta, self._drag_u_axis)) / (self._drag_su * self._drag_scale)
-        dv = float(np.dot(local_delta, self._drag_v_axis)) / (self._drag_sv * self._drag_scale)
+        du = -float(np.dot(local_delta, self._drag_u_axis)) / (self._drag_su * self._drag_scale)
+        dv = -float(np.dot(local_delta, self._drag_v_axis)) / (self._drag_sv * self._drag_scale)
         return du, dv
 
     def on_mouse_move(self, event: QMouseEvent, snap) -> None:
