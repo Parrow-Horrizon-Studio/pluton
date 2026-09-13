@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import zipfile
 
+from PySide6.QtGui import QImage
+
 from pluton.document import DocumentSettings
 from pluton.io.pluton_file import load_document, save_document
 from pluton.model.model import Model
@@ -53,3 +55,64 @@ def test_a_file_with_a_thumbnail_loads_normally(tmp_path):
     path = tmp_path / "e.pluton"
     save_document(path, Model(), _camera(), _doc(), RenderStyle(), thumbnail=_PNG)
     assert load_document(path) is not None
+
+
+# --- MainWindow._capture_thumbnail ------------------------------------------
+#
+# grabFramebuffer() is monkeypatched directly on the viewport instance, so
+# these run headlessly with no real GL context: `self._viewport` is a plain
+# attribute, and a QImage of an arbitrary size can be constructed without GL.
+
+
+def test_a_landscape_capture_is_capped_to_512_on_its_long_edge(main_window, monkeypatch):
+    monkeypatch.setattr(
+        main_window._viewport,
+        "grabFramebuffer",
+        lambda: QImage(2048, 1024, QImage.Format.Format_RGB32),
+    )
+    data = main_window._capture_thumbnail()
+    decoded = QImage()
+    assert decoded.loadFromData(data, "PNG")
+    assert decoded.width() == 512  # long edge capped
+    assert decoded.height() == 256  # short edge scaled proportionally, not capped itself
+
+
+def test_a_portrait_capture_is_capped_to_512_on_its_long_edge(main_window, monkeypatch):
+    monkeypatch.setattr(
+        main_window._viewport,
+        "grabFramebuffer",
+        lambda: QImage(1024, 2048, QImage.Format.Format_RGB32),
+    )
+    data = main_window._capture_thumbnail()
+    decoded = QImage()
+    assert decoded.loadFromData(data, "PNG")
+    assert decoded.width() == 256  # short edge scaled proportionally, not capped itself
+    assert decoded.height() == 512  # long edge capped
+
+
+def test_a_capture_under_the_cap_is_encoded_at_its_own_size(main_window, monkeypatch):
+    # Exercises the encode path independent of the scaling branch: a broken
+    # encoder (or a cap applied unconditionally) would show up here too.
+    monkeypatch.setattr(
+        main_window._viewport,
+        "grabFramebuffer",
+        lambda: QImage(64, 48, QImage.Format.Format_RGB32),
+    )
+    data = main_window._capture_thumbnail()
+    decoded = QImage()
+    assert decoded.loadFromData(data, "PNG")
+    assert (decoded.width(), decoded.height()) == (64, 48)
+
+
+def test_a_null_framebuffer_capture_degrades_to_no_thumbnail(main_window, monkeypatch, tmp_path):
+    # The context-less case: an unshown/uninitialized QOpenGLWidget returns a
+    # null QImage from grabFramebuffer() rather than raising (verified against
+    # a real ViewportWidget under QT_QPA_PLATFORM=offscreen). The save must
+    # still succeed, with no thumbnail.png entry.
+    monkeypatch.setattr(main_window._viewport, "grabFramebuffer", lambda: QImage())
+    assert main_window._capture_thumbnail() is None
+
+    path = tmp_path / "f.pluton"
+    assert main_window._save_to(path) is True
+    with zipfile.ZipFile(path) as zf:
+        assert "thumbnail.png" not in zf.namelist()

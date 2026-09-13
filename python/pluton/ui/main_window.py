@@ -1607,9 +1607,11 @@ class MainWindow(QMainWindow):
         grabFramebuffer() returns a null QImage instead of raising; that null
         image is treated as "no thumbnail" rather than guessed at.
 
-        A preview image is never worth losing a document over, so any GL- or
-        encoding-related failure here degrades to None instead of failing
-        the save.
+        A preview image is never worth losing a document over, so a missing
+        GL context degrades to None instead of failing the save. PNG encoding
+        failure is reported through QImage.save()'s boolean return, not an
+        exception, so that path is handled by checking the return value
+        rather than by catching anything.
         """
         try:
             image = self._viewport.grabFramebuffer()
@@ -1629,10 +1631,7 @@ class MainWindow(QMainWindow):
                 )
         buffer = QBuffer()
         buffer.open(QIODevice.OpenModeFlag.WriteOnly)
-        try:
-            saved = image.save(buffer, "PNG")
-        except (RuntimeError, OSError):
-            saved = False
+        saved = image.save(buffer, "PNG")
         data = bytes(buffer.data()) if saved else None
         buffer.close()
         return data or None
