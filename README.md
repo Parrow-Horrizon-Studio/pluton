@@ -6,7 +6,7 @@ Pluton is a long-horizon project inspired by Blender's development model, intend
 
 ## Status
 
-**Alpha, v0.7.1.** Phase 2 (Modeling App) is complete: you can draw, push/pull, transform,
+**Alpha, v0.8.0.** Phase 2 (Modeling App) is complete: you can draw, push/pull, transform,
 organize, paint, annotate, save, and import/export real models. v0.4.0 gave it the surface of a
 real application: seven dockable toolbars over an original icon set, per-tool cursors,
 right-click context menus, and a layout that persists between runs. v0.5.0
@@ -22,10 +22,21 @@ independent front and back materials with a distinct back default, added translu
 materials drawn in a sorted second pass, made material add, edit and delete undoable from a
 real editor, added drag-to-paint, and gave tags a per-tag colour with a Color-by-Tag view
 mode. v0.7.1 fixed a long-standing triangulation bug that left half of every closed solid's
-triangles wound inside-out, which the new back-face default had made visible. Still missing:
-textures and UV mapping (M7.5b), the rest of
-[Phase 2.5 (Parity & Polish)](docs/2026-05-16-pluton-design.md) (v0.4 to v0.8), and installers.
-Run it from source.
+triangles wound inside-out, which the new back-face default had made visible. v0.8.0
+([M7.5b](docs/2026-09-13-M7.5b-textures-design.md)) added texture images to materials: a
+texture is projected onto every face painted with it at a real-world size, tiling rather than
+stretching, tinted by the material's base colour, with its alpha making cutouts genuinely
+see-through in the same sorted translucent pass. A face can override the projection with its
+own offset, scale and rotation, independently per side, and the `.pluton` container now
+embeds texture images and a thumbnail. Texture add, assign, and placement (including a
+direct drag on the face) are all undoable. Still missing: imported per-corner UVs and the
+accompanying OBJ `vt`/`.mtl` round-trip (`#80`) and glTF texture import, both deferred to
+M7.5c since they need UV storage this design deliberately excludes; the four-pin Texture
+Position tool; any UI to delete a texture from the library (deletion clears every material
+reference and is fully undoable underneath, but nothing in the UI reaches it yet); order-independent
+transparency and real PBR shading (M12); the rest of
+[Phase 2.5 (Parity & Polish)](docs/2026-05-16-pluton-design.md); and installers. Run it from
+source.
 
 ## What works today
 
