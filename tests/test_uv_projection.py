@@ -127,10 +127,52 @@ def test_a_larger_scale_makes_the_texture_appear_larger():
 
 
 def test_rotation_turns_the_uvs_about_the_origin():
+    # A stored `rotation` of +90 degrees means the IMAGE turns 90 degrees
+    # counter-clockwise (v-up frame), and this function returns the sample
+    # coordinate a fixed face point reads the texture at -- which moves the
+    # opposite way from the image, exactly as paint_tool._pixel_delta_to_uv
+    # documents for offset_u/offset_v. So a +90 degree rotation must turn the
+    # raw (1, 0) UV to (0, -1): mathematically, rotating a vector by -90
+    # degrees (cos(-90)=0, sin(-90)=-1) sends (x, y) -> (y, -x), i.e.
+    # (1, 0) -> (0, -1).
     uvs = np.array([[1.0, 0.0]], dtype=np.float32)
     turned = apply_placement(uvs, 0.0, 0.0, 1.0, np.pi / 2.0)
     assert turned[0, 0] == pytest.approx(0.0, abs=1e-6)
-    assert turned[0, 1] == pytest.approx(1.0, abs=1e-6)
+    assert turned[0, 1] == pytest.approx(-1.0, abs=1e-6)
+
+
+def test_a_plus_90_rotation_turns_the_image_counter_clockwise_not_clockwise():
+    # This is the eye-checkable pin for the sign convention itself, written so
+    # a reader who does not want to trust the matrix algebra can still verify
+    # it against a mental picture of a rotating photograph.
+    #
+    # `raw_right` is the raw UV of a face corner that, at rotation=0, samples
+    # the RIGHT edge of the texture (texture coordinates run u=right, v=up,
+    # per the v-up convention this milestone settled on and the module
+    # docstring's contract). apply_placement returns the coordinate that same
+    # FIXED face corner samples the texture at once a placement is applied --
+    # not where a piece of the image moves to. paint_tool._pixel_delta_to_uv
+    # spells out why those two are opposite for offset_u/offset_v ("increasing
+    # offset_u samples the image further along +u for a FIXED surface point --
+    # which looks like the image sliding toward -u on the surface"); the same
+    # inversion applies to rotation.
+    #
+    # So: turn the image +90 degrees counter-clockwise, and ask what a viewer
+    # now sees at the face corner that used to show the image's right edge.
+    # Picture a photo with a distinct top, bottom, left and right (like the
+    # scratchpad's asymmetric test texture). Rotate that photo 90 degrees
+    # counter-clockwise: its BOTTOM edge swings around to where its RIGHT edge
+    # used to be (bottom sits at -90 degrees on the clock face; +90 degrees of
+    # counter-clockwise turn brings it to 0 degrees, i.e. the right). So the
+    # face corner that used to show the image's right edge must now sample the
+    # image's BOTTOM edge instead: raw (1, 0) must land at (0, -1), not (0, 1).
+    # (0, 1) is the clockwise answer this test exists to rule out -- it is
+    # what a viewer would see if the image had turned clockwise instead, and
+    # it was this module's actual behaviour before the M7.5b rotation-sign fix.
+    raw_right = np.array([[1.0, 0.0]], dtype=np.float32)
+    sampled_after_ccw_90 = apply_placement(raw_right, 0.0, 0.0, 1.0, np.pi / 2.0)
+    assert sampled_after_ccw_90[0, 0] == pytest.approx(0.0, abs=1e-6)
+    assert sampled_after_ccw_90[0, 1] == pytest.approx(-1.0, abs=1e-6)
 
 
 def test_scale_is_applied_before_rotation_and_offset_last():
@@ -139,9 +181,11 @@ def test_scale_is_applied_before_rotation_and_offset_last():
     # Task 10's fields and Task 12's drag out of step with the renderer.
     uvs = np.array([[2.0, 0.0]], dtype=np.float32)
     out = apply_placement(uvs, 10.0, 0.0, 2.0, np.pi / 2.0)
-    # scale: (2,0) -> (1,0);  rotate 90 deg: -> (0,1);  offset: -> (10,1)
+    # scale: (2,0) -> (1,0);  a +90 degree rotation is applied to the UV as
+    # -90 degrees (see test_rotation_turns_the_uvs_about_the_origin), so
+    # (1,0) -> (0,-1);  offset: -> (10,-1)
     assert out[0, 0] == pytest.approx(10.0, abs=1e-6)
-    assert out[0, 1] == pytest.approx(1.0, abs=1e-6)
+    assert out[0, 1] == pytest.approx(-1.0, abs=1e-6)
 
 
 def test_placement_returns_float32():

@@ -85,6 +85,16 @@ def apply_placement(
     by it. Task 10's numeric fields and Task 12's drag both depend on this
     order matching, and a different one passes any test that varies a single
     parameter at a time.
+
+    `rotation` is negated before it drives the UV rotation matrix. This
+    function returns the coordinate a FIXED face point samples the texture
+    at, and (as `paint_tool._pixel_delta_to_uv` already documents for offset)
+    a change to that sample coordinate is the opposite of the corresponding
+    change in what the viewer sees painted on the surface. Applying the UV
+    frame's rotation unnegated is mathematically tidy but turns the image
+    clockwise for a positive value; negating it here makes the stored
+    `rotation` mean the image's own counter-clockwise turn, in a v-up frame,
+    which is what the bare "Rotation" field in Properties promises.
     """
     out = np.asarray(uvs, dtype=np.float64).reshape(-1, 2)
     if out.shape[0] == 0:
@@ -92,7 +102,8 @@ def apply_placement(
     s = float(scale) or 1.0
     out = out / s
     if rotation:
-        c, sn = np.cos(float(rotation)), np.sin(float(rotation))
+        r = -float(rotation)
+        c, sn = np.cos(r), np.sin(r)
         rot = np.array([[c, -sn], [sn, c]])
         out = out @ rot.T
     out = out + np.array([float(offset_u), float(offset_v)])
@@ -179,14 +190,17 @@ def apply_placements(
     Same contractual order — scale, then rotate, then offset. Rotation is
     applied unconditionally rather than under the scalar's `if rotation:`,
     which changes nothing: cos(0) and sin(0) are exactly 1.0 and 0.0, so a zero
-    rotation is the identity to the last bit.
+    rotation is the identity to the last bit. `rotations` is negated exactly as
+    the scalar `apply_placement` negates `rotation`, and for the same reason:
+    the two are pinned together by an equivalence test and must agree bit for
+    bit, not just in the identity case.
     """
     out = np.asarray(uvs, dtype=np.float64).reshape(-1, 2)
     if out.shape[0] == 0:
         return np.zeros((0, 2), dtype=np.float32)
     s = np.asarray(scales, dtype=np.float64).reshape(-1)
     out = out / np.where(s == 0.0, 1.0, s)[:, None]
-    rot = np.asarray(rotations, dtype=np.float64).reshape(-1)
+    rot = -np.asarray(rotations, dtype=np.float64).reshape(-1)
     c, sn = np.cos(rot), np.sin(rot)
     out = np.stack([out[:, 0] * c - out[:, 1] * sn, out[:, 0] * sn + out[:, 1] * c], axis=1)
     out = out + np.asarray(offsets, dtype=np.float64).reshape(-1, 2)
