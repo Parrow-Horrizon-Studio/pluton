@@ -8,7 +8,12 @@ import zlib
 import numpy as np
 from pluton.model.texture import TextureLibrary
 from pluton.viewport import texture_cache
-from pluton.viewport.texture_cache import TextureCache, decode_image, sniff_format
+from pluton.viewport.texture_cache import (
+    TextureCache,
+    decode_image,
+    gl_row_order,
+    sniff_format,
+)
 
 
 def _png(w: int, h: int, rgba: list[int]) -> bytes:
@@ -28,6 +33,17 @@ def _png(w: int, h: int, rgba: list[int]) -> bytes:
 
 _OPAQUE = _png(2, 2, [255, 0, 0, 255, 0, 255, 0, 255, 0, 0, 255, 255, 9, 9, 9, 255])
 _CUTOUT = _png(2, 2, [255, 0, 0, 255, 0, 255, 0, 128, 0, 0, 255, 255, 9, 9, 9, 0])
+
+# Vertically ASYMMETRIC on purpose: red across the top row, blue across the
+# bottom. Every earlier fixture in this milestone was symmetric under a
+# vertical flip, which is exactly why a mirrored upload shipped unnoticed.
+_TOP = (220, 30, 30)
+_BOTTOM = (30, 30, 220)
+_TOP_DOWN = _png(
+    2,
+    2,
+    [*_TOP, 255, *_TOP, 255, *_BOTTOM, 255, *_BOTTOM, 255],
+)
 
 
 def test_decoding_needs_no_qapplication():
@@ -202,3 +218,56 @@ def test_invalidating_a_failed_texture_lets_it_decode_again(monkeypatch):
     cache.invalidate(tex.id)
     fixed = lib.edit(tex.id, data=_OPAQUE)
     assert cache.texture_for(fixed) is not None
+
+
+# --- Row order: Qt's top-down vs GL's bottom-left origin ---------------------
+#
+# The manual visual pass found every texture rendering vertically mirrored: a
+# photograph painted on a wall came out upside down, left/right correct. Nothing
+# in 2211 tests saw it, because every fixture was symmetric under a vertical
+# flip. These three hold that line at the seam where the two conventions meet.
+
+
+def test_decode_keeps_qt_row_order_with_the_top_row_first():
+    # The Materials swatch hands these pixels straight back to QImage, which
+    # numbers rows from the top. Flipping here to suit GL would fix the 3D
+    # surface and silently mirror every swatch.
+    img = decode_image(_TOP_DOWN)
+    assert tuple(img.pixels[0, 0, :3]) == _TOP
+    assert tuple(img.pixels[-1, 0, :3]) == _BOTTOM
+
+
+def test_gl_row_order_puts_the_bottom_row_first():
+    # glTexImage2D reads its buffer starting at v = 0, which GL places at the
+    # BOTTOM of the texture, so the bottom row has to travel first.
+    img = decode_image(_TOP_DOWN)
+    rows = gl_row_order(img.pixels)
+    assert tuple(rows[0, 0, :3]) == _BOTTOM
+    assert tuple(rows[-1, 0, :3]) == _TOP
+    # glTexImage2D reads a raw buffer, so a negative-stride view will not do.
+    assert rows.flags["C_CONTIGUOUS"]
+
+
+def test_the_upload_hands_gl_the_bottom_row_first():
+    # The seam itself: whatever helper is used, the buffer that actually
+    # reaches glTexImage2D must be in GL order. Uploading decode_image's own
+    # top-down buffer is the shipped defect this kills.
+    lib = TextureLibrary()
+    img = decode_image(_TOP_DOWN)
+    tex = lib.add("wall.png", _TOP_DOWN, "png", img.width, img.height, img.has_transparency)
+
+    class _CapturingGL(_RecordingGL):
+        uploaded = None
+
+        def glTexImage2D(self, _t, _l, _if, _w, _h, _b, _f, _ty, pixels):
+            self.uploaded = np.asarray(pixels).reshape(_h, _w, 4).copy()
+
+    gl = _CapturingGL()
+    TextureCache(gl=gl).texture_for(tex)
+
+    assert gl.uploaded is not None, "nothing was uploaded"
+    assert tuple(gl.uploaded[0, 0, :3]) == _BOTTOM, (
+        "the image's TOP row reached GL first, so it lands at v = 0 (the bottom "
+        "of the texture) and every texture renders vertically mirrored"
+    )
+    assert tuple(gl.uploaded[-1, 0, :3]) == _TOP

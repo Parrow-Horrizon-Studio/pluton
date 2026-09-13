@@ -25,6 +25,13 @@ class DecodedImage:
     width: int
     height: int
     has_transparency: bool
+    # TOP-DOWN: pixels[0] is the image's TOP row, which is QImage's own row
+    # order and what ui/materials_page.py hands straight back to QImage to
+    # build the swatch icon. Do NOT flip it here to suit OpenGL -- GL's texture
+    # origin is the bottom-left, and reconciling the two is the upload path's
+    # job (see gl_row_order below). Flipping here would fix the 3D surface and
+    # silently mirror every swatch, reintroducing the decoder divergence Task 9
+    # deliberately removed.
     pixels: np.ndarray
 
 
@@ -58,6 +65,26 @@ def decode_image(data: bytes) -> DecodedImage | None:
     # Rows are padded to bytesPerLine, so reshape by stride and trim.
     pixels = flat.reshape(h, img.bytesPerLine())[:, : w * 4].reshape(h, w, 4).copy()
     return DecodedImage(w, h, bool((pixels[:, :, 3] < 255).any()), pixels)
+
+
+def gl_row_order(pixels: np.ndarray) -> np.ndarray:
+    """Re-order a top-down image buffer for OpenGL's bottom-left origin.
+
+    QImage numbers rows from the top; glTexImage2D reads its buffer as starting
+    at `v = 0`, which GL places at the BOTTOM of the texture. Handing Qt's
+    buffer over unchanged therefore paints every image upside down on the
+    surface -- left/right correct, top/bottom swapped, which reads as "the
+    photograph is upside down" and which no fixture that is symmetric under a
+    vertical flip can see. This is the one place the two conventions meet, so
+    it is the one place the reconciliation belongs: not in decode_image, whose
+    pixels the Materials swatch consumes in Qt's own order, and not in
+    uv_projection, where flipping `v` would invert the meaning of the
+    `offset_v` stored in every saved file.
+
+    Returns a contiguous copy, because glTexImage2D reads a raw buffer and a
+    reversed numpy view has a negative stride.
+    """
+    return np.ascontiguousarray(pixels[::-1])
 
 
 class TextureCache:
@@ -104,7 +131,7 @@ class TextureCache:
             0,
             gl.GL_RGBA,
             gl.GL_UNSIGNED_BYTE,
-            img.pixels,
+            gl_row_order(img.pixels),
         )
         gl.glGenerateMipmap(gl.GL_TEXTURE_2D)
         gl.glBindTexture(gl.GL_TEXTURE_2D, 0)
