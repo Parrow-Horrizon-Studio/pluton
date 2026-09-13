@@ -31,13 +31,30 @@ _CUTOUT = _png(2, 2, [255, 0, 0, 255, 0, 255, 0, 128, 0, 0, 255, 255, 9, 9, 9, 0
 
 
 def test_decoding_needs_no_qapplication():
-    # Verified at plan time. If this ever fails, every headless test touching
-    # textures needs a Qt fixture and the testing story changes.
-    from PySide6.QtGui import QGuiApplication
+    """Decoding must not require a QApplication -- that closes the spec's
+    biggest flagged risk and is the whole reason texture decoding is testable
+    headlessly. Asserting on QGuiApplication.instance() in *this* process is
+    the wrong mechanism: pytest's own qtbot/main_window fixtures create one,
+    and a QApplication is process-global and never goes away once built, so
+    the assertion fails as soon as anything Qt-backed has already run in this
+    session. Prove the claim in an isolated subprocess instead, where a clean
+    `QGuiApplication.instance() is None` is actually meaningful.
+    """
+    import subprocess
+    import sys
 
-    assert QGuiApplication.instance() is None
-    assert decode_image(_OPAQUE) is not None
-    assert QGuiApplication.instance() is None
+    code = (
+        "from pluton.viewport.texture_cache import decode_image\n"
+        f"img = decode_image({_CUTOUT!r})\n"
+        "assert img is not None\n"
+        "assert (img.width, img.height) == (2, 2)\n"
+        "assert [int(a) for a in img.pixels[:, :, 3].flatten()] == [255, 128, 255, 0]\n"
+        "from PySide6.QtGui import QGuiApplication\n"
+        "assert QGuiApplication.instance() is None\n"
+        "print('ok')\n"
+    )
+    out = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, check=True)
+    assert out.stdout.strip() == "ok"
 
 
 def test_decode_reports_size_and_rgba_pixels():
