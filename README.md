@@ -31,7 +31,8 @@ own offset, scale and rotation, independently per side, and the `.pluton` contai
 embeds texture images and a thumbnail. Texture add, assign, and placement (including a
 direct drag on the face) are all undoable. Still missing: imported per-corner UVs and the
 accompanying OBJ `vt`/`.mtl` round-trip (`#80`) and glTF texture import, both deferred to
-M7.5c since they need UV storage this design deliberately excludes; the four-pin Texture
+M7.5c (whose stage 1 has since added the storage this design deliberately excluded; import
+itself is stage 2); the four-pin Texture
 Position tool; any UI to delete a texture from the library (deletion clears every material
 reference and is fully undoable underneath, but nothing in the UI reaches it yet); order-independent
 transparency and real PBR shading (M12); the rest of
