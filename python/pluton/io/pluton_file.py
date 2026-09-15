@@ -19,7 +19,7 @@ from pluton.io.document_codec import (
 )
 from pluton.io.errors import PlutonFormatError, PlutonVersionError
 
-SCHEMA_VERSION = 6  # M7.5b: texture records + blobs, per-face placement
+SCHEMA_VERSION = 7  # M7.5c: stored per-corner UVs
 _MANIFEST = "manifest.json"
 _DOCUMENT = "document.json"
 _TEXTURES_DIR = "textures/"

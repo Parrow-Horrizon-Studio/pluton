@@ -44,6 +44,8 @@ def geometry_to_dict(scene: Scene) -> dict:
     face_materials_back: dict[str, int] = {}
     face_placements: dict[str, list[float]] = {}
     face_placements_back: dict[str, list[float]] = {}
+    face_uvs: dict[str, list[float]] = {}
+    face_uvs_back: dict[str, list[float]] = {}
     for face_index, f in enumerate(scene.faces_iter()):
         faces.append([idmap[vid] for vid in f.loop_vertex_ids])
         front = scene.face_material(f.id, Side.FRONT)
@@ -60,6 +62,14 @@ def geometry_to_dict(scene: Scene) -> dict:
             if p != DEFAULT_PLACEMENT:
                 target[str(face_index)] = [p.offset_u, p.offset_v, p.scale, p.rotation]
 
+        for side, target in (
+            (Side.FRONT, face_uvs),
+            (Side.BACK, face_uvs_back),
+        ):
+            stored = scene.face_uvs(f.id, side)
+            if stored is not None:
+                target[str(face_index)] = [float(x) for x in stored.reshape(-1)]
+
     return {
         "vertices": vertices,
         "edges": edges,
@@ -68,6 +78,8 @@ def geometry_to_dict(scene: Scene) -> dict:
         "face_materials_back": face_materials_back,
         "face_placements": face_placements,
         "face_placements_back": face_placements_back,
+        "face_uvs": face_uvs,
+        "face_uvs_back": face_uvs_back,
     }
 
 
@@ -133,6 +145,32 @@ def geometry_from_dict(scene: Scene, data: dict) -> None:
 
     _apply_face_placements(data.get("face_placements", {}), Side.FRONT)
     _apply_face_placements(data.get("face_placements_back", {}), Side.BACK)
+
+    def _apply_face_uvs(stored: dict, side: Side) -> None:
+        for face_index_str, values in stored.items():
+            try:
+                fi = int(face_index_str)
+            except (TypeError, ValueError):
+                raise PlutonFormatError(
+                    f"face_uvs: face index {face_index_str!r} is not an integer"
+                ) from None
+            if fi < 0 or fi >= len(new_fids):
+                raise PlutonFormatError(f"face_uvs: face index {fi} is out of range")
+            flat = list(values)
+            if len(flat) % 2 != 0:
+                raise PlutonFormatError(
+                    f"face_uvs: face {fi} has an odd coordinate count ({len(flat)})"
+                )
+            pairs = [(float(flat[i]), float(flat[i + 1])) for i in range(0, len(flat), 2)]
+            expected = len(scene.face_loop(new_fids[fi]))
+            if len(pairs) != expected:
+                raise PlutonFormatError(
+                    f"face_uvs: face {fi} has {expected} corners, file gives {len(pairs)}"
+                )
+            scene.set_face_uvs(new_fids[fi], pairs, side)
+
+    _apply_face_uvs(data.get("face_uvs", {}), Side.FRONT)
+    _apply_face_uvs(data.get("face_uvs_back", {}), Side.BACK)
 
 
 def annotation_to_dict(ann: Dimension | Label) -> dict:

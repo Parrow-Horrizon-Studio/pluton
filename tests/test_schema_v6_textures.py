@@ -38,7 +38,7 @@ def _square(scene, z=0.0):
 
 
 def test_the_schema_version_is_six():
-    assert SCHEMA_VERSION == 6
+    assert SCHEMA_VERSION == 7
 
 
 def test_placement_round_trips_per_side():
