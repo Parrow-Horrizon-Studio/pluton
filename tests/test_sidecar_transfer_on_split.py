@@ -100,3 +100,66 @@ def test_a_boundary_edge_split_transfers_only_the_one_real_face():
     # A lone quad's edges are all boundary, so one side has no face at all.
     assert res.face_b is None
     assert s.face_material(res.face_a, Side.FRONT) == 7
+
+
+def test_an_interior_edge_split_transfers_both_faces_independently():
+    # Two quads sharing a vertical edge, both coplanar with normal +Z:
+    #
+    #   D(0,1)---C(1,1)---G(2,1)
+    #    |    f1   |   f2   |
+    #   A(0,0)---B(1,0)---E(2,0)
+    #
+    # f1's loop is A,B,C,D so it traverses the shared edge B->C. f2's loop is
+    # B,E,G,C so it traverses the shared edge as ...,C,(back to)B, i.e. C->B:
+    # the opposite direction. A manifold half-edge mesh requires this (the
+    # two half-edges along a shared edge always run opposite ways), and it is
+    # exactly the condition transfer_uvs_across_split's t vs 1-t branch
+    # exists for.
+    s = Scene()
+    a = s.add_vertex(np.array([0, 0, 0], dtype=np.float32))
+    b = s.add_vertex(np.array([1, 0, 0], dtype=np.float32))
+    c = s.add_vertex(np.array([1, 1, 0], dtype=np.float32))
+    d = s.add_vertex(np.array([0, 1, 0], dtype=np.float32))
+    e_vert = s.add_vertex(np.array([2, 0, 0], dtype=np.float32))
+    g = s.add_vertex(np.array([2, 1, 0], dtype=np.float32))
+
+    f1 = s.add_face_from_loop([a, b, c, d])
+    f2 = s.add_face_from_loop([b, e_vert, g, c])
+
+    # Confirm the shared edge is genuinely traversed in opposite directions
+    # by the two faces before this split, which is the precondition for the
+    # branch under test.
+    assert list(s.face_loop(f1)) == [a, b, c, d]
+    assert list(s.face_loop(f2)) == [b, e_vert, g, c]
+
+    s.set_face_material(f1, 7, Side.FRONT)
+    s.set_face_material(f2, 11, Side.FRONT)
+    # Distinct UV layouts per face so a crossed pairing or a t/1-t mix-up
+    # produces a visibly wrong number rather than passing by symmetry.
+    s.set_face_uvs(f1, [(0.0, 0.0), (1.0, 0.0), (1.0, 1.0), (0.0, 1.0)], Side.FRONT)
+    s.set_face_uvs(f2, [(10.0, 0.0), (12.0, 0.0), (12.0, 1.0), (10.0, 1.0)], Side.FRONT)
+
+    shared_edge = s.edge_between(b, c)
+    edge = s.edge(shared_edge)
+    assert (edge.v1_id, edge.v2_id) == (b, c)  # va=b, vb=c
+
+    res = s.split_edge(shared_edge, 0.25)
+    assert res.face_b is not None
+
+    # f1's new loop is A,B,W,C,D: W sits between B(=va) and C(=vb), so the
+    # split runs the SAME way as the loop (va-then-vb) and the inserted UV
+    # is lerped at t=0.25 straight from B's UV (1.0, 0.0) toward C's UV
+    # (1.0, 1.0): (1.0, 0.0) + 0.25 * (0.0, 1.0) = (1.0, 0.25).
+    loop_a = s.face_loop(res.face_a)
+    uvs_a = s.face_uvs(res.face_a, Side.FRONT)
+    assert s.face_material(res.face_a, Side.FRONT) == 7
+    np.testing.assert_allclose(uvs_a[loop_a.index(res.vertex)], [1.0, 0.25], atol=1e-6)
+
+    # f2's new loop is B,E,G,C,W: W sits between C(=vb) and B(=va), so the
+    # split runs the OPPOSITE way from the loop (vb-then-va) and the inserted
+    # UV is lerped at 1-t=0.75 from C's UV (10.0, 1.0) toward B's UV
+    # (10.0, 0.0): (10.0, 1.0) + 0.75 * (0.0, -1.0) = (10.0, 0.25).
+    loop_b = s.face_loop(res.face_b)
+    uvs_b = s.face_uvs(res.face_b, Side.FRONT)
+    assert s.face_material(res.face_b, Side.FRONT) == 11
+    np.testing.assert_allclose(uvs_b[loop_b.index(res.vertex)], [10.0, 0.25], atol=1e-6)
