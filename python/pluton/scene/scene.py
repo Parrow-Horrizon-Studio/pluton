@@ -28,6 +28,7 @@ if TYPE_CHECKING:
     from pluton._core import RayMeshHit
 from pluton.scene.edge import Edge
 from pluton.scene.face import Face
+from pluton.scene.uv_transfer import transfer_uvs_across_split
 from pluton.scene.vertex import Vertex
 
 SplitResult = namedtuple("SplitResult", "vertex edge_a edge_b face_a face_b")
@@ -486,18 +487,89 @@ class Scene:
 
     def split_edge(self, e_id: int, t: float) -> SplitResult | None:
         """Split edge e at parameter t. Returns a SplitResult (face_* None for a
-        boundary edge's empty side), or None if the split is invalid."""
-        res = self._mesh.split_edge(int(e_id), float(t))
+        boundary edge's empty side), or None if the split is invalid.
+
+        The kernel removes both incident faces and rebuilds them with NEW ids,
+        so every face-keyed sidecar would be dropped. Capture them first, then
+        replay them onto the rebuilt faces. The old faces' entries are left in
+        place deliberately: ids are never reused, and SplitEdgeCommand.undo
+        restores the ORIGINAL ids, so the entries still sitting there are what
+        makes undo restore the paint.
+        """
+        e_id = int(e_id)
+        t = float(t)
+        try:
+            edge = self.edge(e_id)
+        except KeyError:
+            return None
+        va, vb = edge.v1_id, edge.v2_id
+        f_before = self.edge_faces(e_id)
+        captured = [None if fid is None else (fid, tuple(self.face_loop(fid))) for fid in f_before]
+
+        res = self._mesh.split_edge(e_id, t)
         if res is None:
             return None
         invalid = self._mesh.INVALID_ID
-        return SplitResult(
+        result = SplitResult(
             vertex=int(res.vertex),
             edge_a=int(res.edge_a),
             edge_b=int(res.edge_b),
             face_a=None if res.face_a == invalid else int(res.face_a),
             face_b=None if res.face_b == invalid else int(res.face_b),
         )
+
+        for old, new_fid in zip(captured, (result.face_a, result.face_b), strict=True):
+            if old is None or new_fid is None:
+                continue
+            old_fid, old_loop = old
+            self._transfer_face_attributes(
+                old_fid, new_fid, old_loop, self.face_loop(new_fid), result.vertex, va, vb, t
+            )
+        return result
+
+    def _transfer_face_attributes(
+        self,
+        old_fid: int,
+        new_fid: int,
+        old_loop: Sequence[int],
+        new_loop: Sequence[int],
+        w: int,
+        va: int,
+        vb: int,
+        t: float,
+    ) -> None:
+        """Replay one destroyed face's sidecars onto the face that replaced it.
+
+        Materials and placements copy verbatim: neither depends on the loop, and
+        a split does not move the face's plane. Stored UVs are parallel to the
+        loop, so they gain one entry interpolated at the split parameter.
+
+        A UV array that does not transfer cleanly is dropped rather than
+        guessed at, which returns that face to the projection.
+        """
+        for side in (Side.FRONT, Side.BACK):
+            materials = self._materials_for(side)
+            if old_fid in materials:
+                materials[int(new_fid)] = materials[old_fid]
+
+            placements = self._placements_for(side)
+            if old_fid in placements:
+                placements[int(new_fid)] = placements[old_fid]
+
+            stored = self._uvs_for(side).get(old_fid)
+            if stored is None:
+                continue
+            moved = transfer_uvs_across_split(
+                [(float(u), float(v)) for u, v in stored],
+                old_loop,
+                new_loop,
+                w,
+                va,
+                vb,
+                t,
+            )
+            if moved is not None:
+                self._uvs_for(side)[int(new_fid)] = np.asarray(moved, dtype=np.float32)
 
     # --- Queries ----------------------------------------------------------
 
