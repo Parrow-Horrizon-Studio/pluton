@@ -163,6 +163,10 @@ def geometry_from_dict(scene: Scene, data: dict) -> None:
                 )
             pairs = [(float(flat[i]), float(flat[i + 1])) for i in range(0, len(flat), 2)]
             expected = len(scene.face_loop(new_fids[fi]))
+            # Deliberately duplicated in Scene.set_face_uvs below: that check exists to
+            # catch a programming error and raises ValueError, this one exists to catch
+            # a corrupt file and raises PlutonFormatError. Same arithmetic, different
+            # contract, so neither call site can be removed in favour of the other.
             if len(pairs) != expected:
                 raise PlutonFormatError(
                     f"face_uvs: face {fi} has {expected} corners, file gives {len(pairs)}"
