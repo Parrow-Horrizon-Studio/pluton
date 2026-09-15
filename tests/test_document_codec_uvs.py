@@ -90,3 +90,12 @@ def test_an_out_of_range_face_index_is_rejected():
     data["face_uvs"] = {"9": [0.0, 0.0] * 4}
     with pytest.raises(PlutonFormatError, match="face_uvs"):
         geometry_from_dict(Scene(), data)
+
+
+def test_a_non_integer_face_index_is_rejected():
+    s = Scene()
+    _quad(s)
+    data = geometry_to_dict(s)
+    data["face_uvs"] = {"abc": [0.0, 0.0] * 4}
+    with pytest.raises(PlutonFormatError, match="face_uvs"):
+        geometry_from_dict(Scene(), data)

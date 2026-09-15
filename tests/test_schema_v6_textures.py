@@ -37,7 +37,9 @@ def _square(scene, z=0.0):
     return scene.add_face_from_loop(v)
 
 
-def test_the_schema_version_is_six():
+def test_the_schema_version_is_current():
+    # Tracks whatever SCHEMA_VERSION currently is, same as every prior bump;
+    # not pinned to a specific number.
     assert SCHEMA_VERSION == 7
 
 
