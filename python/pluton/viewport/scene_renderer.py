@@ -405,6 +405,44 @@ def _face_uv_geometry(scene, face_buffer=None) -> _FaceUvGeometry | None:
     )
 
 
+def _overlay_stored_uvs(scene, side: Side, geom: _FaceUvGeometry, uvs: np.ndarray) -> np.ndarray:
+    """Replace projected UVs with stored ones, for the faces that have them.
+
+    Stored UVs are parallel to a face's boundary loop; `uvs` is per triangle
+    corner. face_triangle_loop_indices is the bridge: corner i of a stored face
+    takes stored[loop_indices[i]].
+
+    Iterates the sidecar's entries rather than every face, so a definition with
+    three stored faces among ten thousand touches three.
+    """
+    stored_here = [f for f, s in scene.faces_with_uvs() if s is side]
+    if not stored_here:
+        return uvs
+
+    starts = np.concatenate(([0], np.cumsum(geom.counts)[:-1]))
+    span = {
+        int(f): (int(s), int(c)) for f, s, c in zip(geom.face_ids, starts, geom.counts, strict=True)
+    }
+    loop_indices = scene.face_triangle_loop_indices()
+
+    out = uvs
+    for face_id in stored_here:
+        where = span.get(int(face_id))
+        if where is None:
+            continue  # stored on a face this definition's buffer does not carry
+        arr = scene.face_uvs(face_id, side)
+        if arr is None:
+            continue
+        first, count = where
+        idx = loop_indices[first : first + count]
+        if idx.size == 0 or int(idx.max()) >= arr.shape[0]:
+            continue  # stale array, shorter than the loop: leave it projected
+        if out is uvs:
+            out = uvs.copy()
+        out[first : first + count] = arr[idx]
+    return out
+
+
 def _side_uvs(scene, materials, side: Side, geom: _FaceUvGeometry) -> np.ndarray:
     """One side's (3T, 2) UVs from the shared geometry."""
     if materials is None:
@@ -417,6 +455,8 @@ def _side_uvs(scene, materials, side: Side, geom: _FaceUvGeometry) -> np.ndarray
         sizes = np.repeat(per_face, geom.counts, axis=0)
 
     uvs = project_onto_bases(geom.positions, geom.u_axes, geom.v_axes, geom.origins, sizes)
+
+    uvs = _overlay_stored_uvs(scene, side, geom, uvs)
 
     # The placement sidecars hold only adjusted faces, so a definition nobody has
     # placed a texture on skips the gather entirely rather than reading the
