@@ -19,14 +19,26 @@ def test_without_stored_uvs_the_bake_is_unchanged():
     _quad(s)
     before = build_face_uvs(s, None, Side.FRONT)
     assert before.shape[0] == 6  # a quad is 2 triangles
-    # Nothing stored, so a second call must be bit-identical.
-    np.testing.assert_array_equal(before, build_face_uvs(s, None, Side.FRONT))
+    # Golden pin on the projection path itself (not a self-comparison): the
+    # unit quad's centroid is (0.5, 0.5), and with nothing stored the bake
+    # must equal the centroid-relative projection, captured here as literals.
+    expected = np.array(
+        [
+            [-0.5, 0.5],
+            [-0.5, -0.5],
+            [0.5, -0.5],
+            [0.5, -0.5],
+            [0.5, 0.5],
+            [-0.5, 0.5],
+        ],
+        dtype=np.float32,
+    )
+    np.testing.assert_allclose(before, expected, atol=1e-6)
 
 
 def test_stored_uvs_land_on_the_right_corners():
     s = Scene()
     f = _quad(s)
-    loop = s.face_loop(f)
     # A distinct UV per loop corner so a mis-mapped corner is unmissable.
     stored = [(0.0, 0.0), (0.1, 0.0), (0.2, 0.0), (0.3, 0.0)]
     s.set_face_uvs(f, stored, Side.FRONT)
@@ -61,8 +73,15 @@ def test_placement_composes_on_top_of_stored_uvs():
     s.set_face_placement(f, TexturePlacement(0.5, 0.25, 1.0, 0.0), Side.FRONT)
     offset = build_face_uvs(s, None, Side.FRONT)
 
-    # Offset with unit scale and no rotation is a pure translation of the base.
-    np.testing.assert_allclose(offset - plain, np.tile([0.5, 0.25], (6, 1)), atol=1e-6)
+    # Pin the base itself, not just the delta between plain and offset: without
+    # this, offset - plain would cancel the base entirely and only exercise
+    # apply_placements' linearity, which this task does not touch.
+    idx = s.face_triangle_loop_indices()
+    for corner in range(6):
+        expected_base = np.array(stored[int(idx[corner])])
+        np.testing.assert_allclose(plain[corner], expected_base, atol=1e-6)
+        # Offset with unit scale and no rotation is a pure translation of the base.
+        np.testing.assert_allclose(offset[corner], expected_base + [0.5, 0.25], atol=1e-6)
 
 
 def test_one_stored_face_among_many_leaves_the_others_projected():
@@ -71,12 +90,16 @@ def test_one_stored_face_among_many_leaves_the_others_projected():
     f2 = _quad(s, z=1.0)
     projected_both = build_face_uvs(s, None, Side.FRONT)
 
-    s.set_face_uvs(f1, [(0.0, 0.0), (0.1, 0.0), (0.2, 0.0), (0.3, 0.0)], Side.FRONT)
+    stored = [(0.0, 0.0), (0.1, 0.0), (0.2, 0.0), (0.3, 0.0)]
+    s.set_face_uvs(f1, stored, Side.FRONT)
     mixed = build_face_uvs(s, None, Side.FRONT)
 
     face_per_tri = s.face_triangle_face_ids()
+    idx = s.face_triangle_loop_indices()
     for corner in range(mixed.shape[0]):
         owning = int(face_per_tri[corner // 3])
         if owning == f2:
             np.testing.assert_allclose(mixed[corner], projected_both[corner], atol=1e-6)
+        elif owning == f1:
+            np.testing.assert_allclose(mixed[corner], stored[int(idx[corner])], atol=1e-6)
     assert not np.allclose(mixed, projected_both)

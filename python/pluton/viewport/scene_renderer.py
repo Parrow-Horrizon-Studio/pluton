@@ -419,9 +419,12 @@ def _overlay_stored_uvs(scene, side: Side, geom: _FaceUvGeometry, uvs: np.ndarra
     if not stored_here:
         return uvs
 
+    stored_ids = {int(f) for f in stored_here}
     starts = np.concatenate(([0], np.cumsum(geom.counts)[:-1]))
     span = {
-        int(f): (int(s), int(c)) for f, s, c in zip(geom.face_ids, starts, geom.counts, strict=True)
+        int(f): (int(s), int(c))
+        for f, s, c in zip(geom.face_ids, starts, geom.counts, strict=True)
+        if int(f) in stored_ids
     }
     loop_indices = scene.face_triangle_loop_indices()
 
@@ -431,12 +434,12 @@ def _overlay_stored_uvs(scene, side: Side, geom: _FaceUvGeometry, uvs: np.ndarra
         if where is None:
             continue  # stored on a face this definition's buffer does not carry
         arr = scene.face_uvs(face_id, side)
-        if arr is None:
-            continue
         first, count = where
         idx = loop_indices[first : first + count]
-        if idx.size == 0 or int(idx.max()) >= arr.shape[0]:
-            continue  # stale array, shorter than the loop: leave it projected
+        if int(idx.max()) >= arr.shape[0]:
+            # Defensive: a stored array shorter than the face's loop, which the
+            # public API (set_face_uvs' length validation) prevents.
+            continue
         if out is uvs:
             out = uvs.copy()
         out[first : first + count] = arr[idx]
