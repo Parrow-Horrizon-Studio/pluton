@@ -94,3 +94,53 @@ def test_the_returned_array_is_not_a_live_view():
     got = s.face_uvs(f, Side.FRONT)
     got[0, 0] = 9.0
     np.testing.assert_allclose(s.face_uvs(f, Side.FRONT)[0], [0.0, 0.0])
+
+
+def test_loop_indices_align_with_the_triangle_buffer():
+    s = Scene()
+    _quad(s)
+    positions, _ = s.face_triangle_buffer()
+    idx = s.face_triangle_loop_indices()
+    assert idx.shape == (positions.shape[0],)
+    assert idx.dtype == np.int32
+    # A quad triangulates to 2 triangles, 6 corners, all indices within 0..3.
+    assert positions.shape[0] == 6
+    assert idx.min() >= 0 and idx.max() <= 3
+
+
+def test_each_corner_index_names_the_vertex_at_that_corner():
+    s = Scene()
+    f = _quad(s)
+    loop = s.face_loop(f)
+    positions, _ = s.face_triangle_buffer()
+    idx = s.face_triangle_loop_indices()
+    for corner in range(positions.shape[0]):
+        expected_vertex = loop[int(idx[corner])]
+        np.testing.assert_allclose(
+            positions[corner], s.vertex(expected_vertex).position, atol=1e-6
+        )
+
+
+def test_loop_indices_span_two_faces_in_walk_order():
+    s = Scene()
+    f1 = _quad(s)
+    f2 = _quad(s, z=1.0)
+    positions, _ = s.face_triangle_buffer()
+    idx = s.face_triangle_loop_indices()
+    assert idx.shape == (positions.shape[0],)
+    assert positions.shape[0] == 12
+    loops = {f1: s.face_loop(f1), f2: s.face_loop(f2)}
+    face_per_tri = s.face_triangle_face_ids()
+    for corner in range(positions.shape[0]):
+        owning_face = int(face_per_tri[corner // 3])
+        expected_vertex = loops[owning_face][int(idx[corner])]
+        np.testing.assert_allclose(
+            positions[corner], s.vertex(expected_vertex).position, atol=1e-6
+        )
+
+
+def test_an_empty_scene_returns_an_empty_index_array():
+    s = Scene()
+    idx = s.face_triangle_loop_indices()
+    assert idx.shape == (0,)
+    assert idx.dtype == np.int32

@@ -698,6 +698,26 @@ class Scene:
             f = self._mesh.next_live_face(f + 1)
         return np.asarray(ids, dtype=np.int64)
 
+    def face_triangle_loop_indices(self) -> np.ndarray:
+        """Per-CORNER index into the owning face's boundary loop, (3T,) int32.
+
+        Aligned 1:1 with the rows of face_triangle_buffer()'s positions, and so
+        three times longer than face_triangle_face_ids, which is per triangle.
+
+        Stored UVs are parallel to a face's loop; the render buffer is per
+        triangle corner and repeats loop vertices. This is how a corner finds
+        its UV: stored[loop_indices[corner]].
+        """
+        out: list[int] = []
+        f = self._mesh.next_live_face(0)
+        while f != HalfEdgeMesh.INVALID_ID:
+            loop = self._mesh.face_loop_vertices(f)
+            position = {int(v): i for i, v in enumerate(loop)}
+            for vid in self._mesh.face_triangles(f):
+                out.append(position[int(vid)])
+            f = self._mesh.next_live_face(f + 1)
+        return np.asarray(out, dtype=np.int32).reshape(-1)
+
     # --- Render-buffer projection -----------------------------------------
 
     def edge_line_buffer(self) -> np.ndarray:
