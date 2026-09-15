@@ -164,6 +164,8 @@ class Scene:
         self._face_materials_back: dict[int, int] = {}
         self._face_placements_front: dict[int, TexturePlacement] = {}
         self._face_placements_back: dict[int, TexturePlacement] = {}
+        self._face_uvs_front: dict[int, np.ndarray] = {}
+        self._face_uvs_back: dict[int, np.ndarray] = {}
         self._render_dirty = False
 
     # --- Mutators ---------------------------------------------------------
@@ -302,6 +304,8 @@ class Scene:
         self._face_materials_back.clear()
         self._face_placements_front.clear()
         self._face_placements_back.clear()
+        self._face_uvs_front.clear()
+        self._face_uvs_back.clear()
         self._render_dirty = True
 
     # --- Lifecycle (renderer sync) ----------------------------------------
@@ -625,6 +629,42 @@ class Scene:
         """Every adjusted (face, side) pair. Never walks the mesh."""
         pairs = [(f, Side.FRONT) for f in self._face_placements_front]
         pairs += [(f, Side.BACK) for f in self._face_placements_back]
+        return pairs
+
+    # --- Stored per-corner UVs (M7.5c) ------------------------------------
+    #
+    # Imported geometry arrives with UVs baked per corner; M7.5b's projection
+    # cannot represent them. A face either has an array parallel to its
+    # boundary loop or it does not, so there is no default to compare against
+    # and face_uvs returns None rather than a sentinel.
+
+    def _uvs_for(self, side: Side) -> dict[int, np.ndarray]:
+        return self._face_uvs_back if side is Side.BACK else self._face_uvs_front
+
+    def face_uvs(self, f_id: int, side: Side = Side.FRONT) -> np.ndarray | None:
+        """(L, 2) float32 UVs parallel to the face's loop, or None."""
+        stored = self._uvs_for(side).get(int(f_id))
+        return None if stored is None else stored.copy()
+
+    def set_face_uvs(self, f_id: int, uvs, side: Side = Side.FRONT) -> None:
+        """Store per-corner UVs. `uvs` must have one entry per loop vertex."""
+        arr = np.asarray(uvs, dtype=np.float32).reshape(-1, 2)
+        expected = len(self.face_loop(int(f_id)))
+        if arr.shape[0] != expected:
+            raise ValueError(
+                f"set_face_uvs: face {f_id} has {expected} corners, got {arr.shape[0]}"
+            )
+        self._uvs_for(side)[int(f_id)] = arr
+        self._render_dirty = True
+
+    def clear_face_uvs(self, f_id: int, side: Side = Side.FRONT) -> None:
+        if self._uvs_for(side).pop(int(f_id), None) is not None:
+            self._render_dirty = True
+
+    def faces_with_uvs(self) -> list[tuple[int, Side]]:
+        """Every (face, side) carrying stored UVs, in no particular order."""
+        pairs = [(f, Side.FRONT) for f in self._face_uvs_front]
+        pairs += [(f, Side.BACK) for f in self._face_uvs_back]
         return pairs
 
     def face_triangle_materials(self, side: Side = Side.FRONT) -> np.ndarray:
