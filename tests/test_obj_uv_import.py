@@ -50,8 +50,14 @@ def test_a_face_without_vt_gets_no_stored_array():
     assert mesh.face_uvs(fid, Side.FRONT) is None
 
 
-def test_a_uv_seam_gives_two_faces_different_uvs_on_one_welded_vertex():
-    # Two triangles sharing the edge (1,0,0)-(1,1,0), with different UVs there.
+def test_a_uv_seam_gives_two_faces_different_uvs_on_one_shared_vertex():
+    # Two triangles sharing the edge (1,0,0)-(1,1,0). Both `f` lines reference
+    # the same OBJ vertex row for (1,0,0): this is index reuse, not welding
+    # (no two distinct `v` rows collapse here). It still proves the thing that
+    # matters for storage: one shared kernel corner carries a different UV per
+    # face, which per-vertex storage could not express but per-corner storage
+    # does. See test_real_v_row_duplicates_weld_to_one_kernel_vertex below for
+    # the case where two distinct `v` rows actually collapse.
     obj = (
         "v 0 0 0\nv 1 0 0\nv 1 1 0\nv 2 0 0\n"
         "vt 0 0\nvt 1 0\nvt 1 1\nvt 0.25 0.75\nvt 0.5 0.5\n"
@@ -63,9 +69,44 @@ def test_a_uv_seam_gives_two_faces_different_uvs_on_one_welded_vertex():
     assert len(faces) == 2
     uv_a = mesh.face_uvs(faces[0], Side.FRONT)
     uv_b = mesh.face_uvs(faces[1], Side.FRONT)
-    # The vertex at (1,0,0) is welded to one kernel id but carries (1,0) on the
-    # first face and (0.25,0.75) on the second. Per-vertex storage could not
-    # express this; per-corner storage does.
+    np.testing.assert_allclose(uv_a[1], [1.0, 0.0], rtol=1e-6)
+    np.testing.assert_allclose(uv_b[0], [0.25, 0.75], rtol=1e-6)
+
+
+def test_real_v_row_duplicates_weld_to_one_kernel_vertex():
+    # Two DISTINCT `v` rows (2 and 4) carry identical coordinates (1, 0, 0).
+    # This is deliberate, not an oversight: it is exactly what an OBJ exporter
+    # emits when it splits vertices at a UV seam, which is the single most
+    # common way a textured OBJ arrives. Do not "tidy" these into one `v` row;
+    # that removes the case this test exists to cover, namely add_vertex's
+    # position idempotence actually collapsing two rows into one kernel id.
+    obj = (
+        "v 0 0 0\nv 1 0 0\nv 1 1 0\nv 1 0 0\nv 2 0 0\n"
+        "vt 0 0\nvt 1 0\nvt 1 1\nvt 0.25 0.75\nvt 0.5 0.5\n"
+        "f 1/1 2/2 3/3\n"
+        "f 4/4 5/5 3/1\n"
+    )
+    doc = parse_obj(obj, None)
+    assert len(doc.vertices) == 5
+
+    model = Model()
+    build_obj_into_model(doc, model, model.root)
+    mesh = model.root.mesh
+
+    kernel_vertex_count = len(list(mesh.vertices_iter()))
+    assert kernel_vertex_count < len(doc.vertices)
+
+    faces = [f.id for f in mesh.faces_iter()]
+    assert len(faces) == 2
+    loop_a = mesh.face_loop(faces[0])
+    loop_b = mesh.face_loop(faces[1])
+    # Row 2 (in face A) and row 4 (in face B) must collapse to the same
+    # kernel vertex id, asserted directly so this fails loudly if add_vertex
+    # ever stops being position-idempotent.
+    assert loop_a[1] == loop_b[0]
+
+    uv_a = mesh.face_uvs(faces[0], Side.FRONT)
+    uv_b = mesh.face_uvs(faces[1], Side.FRONT)
     np.testing.assert_allclose(uv_a[1], [1.0, 0.0], rtol=1e-6)
     np.testing.assert_allclose(uv_b[0], [0.25, 0.75], rtol=1e-6)
 
