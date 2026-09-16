@@ -115,3 +115,17 @@ def test_a_three_dimensional_vt_keeps_only_u_and_v():
     obj = "v 0 0 0\nv 1 0 0\nv 1 1 0\nvt 0 0 0\nvt 1 0 0\nvt 1 1 0\nf 1/1 2/2 3/3\n"
     doc = parse_obj(obj, None)
     assert doc.uvs == ((0.0, 0.0), (1.0, 0.0), (1.0, 1.0))
+
+
+def test_negative_vt_indices_resolve_against_the_uv_pool_not_the_vertex_pool():
+    # Deliberately mismatch pool lengths (4 vertices, 2 vt entries) so resolving
+    # a negative vt index against the wrong pool produces an out-of-range index
+    # and silently drops the face's UVs. This catches accidental swaps.
+    obj = "v 0 0 0\nv 1 0 0\nv 1 1 0\nv 0 1 0\nvt 0.25 0.75\nvt 0.5 0.5\nf 1/-2 2/-1 3/-2 4/-1\n"
+    doc = parse_obj(obj, None)
+    face = doc.objects[0].faces[0]
+    # -2 against len(uvs)==2 -> index 0; -1 against len(uvs)==2 -> index 1
+    assert face.uv_indices == (0, 1, 0, 1)
+    # If resolved against len(vertices)==4 instead, -2 would give index 2,
+    # which is out of range and would produce uv_indices is None.
+    assert face.uv_indices is not None
