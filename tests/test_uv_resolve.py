@@ -70,9 +70,36 @@ def test_it_agrees_with_the_renderer_corner_for_corner():
 def test_it_agrees_with_the_renderer_for_a_projected_face_too():
     s = Scene()
     f = _quad(s)
-    s.set_face_placement(f, TexturePlacement(0.1, 0.2, 1.5, 0.0), Side.FRONT)
+    s.set_face_placement(f, TexturePlacement(0.1, 0.2, 1.5, 0.35), Side.FRONT)
     per_face = resolve_face_uvs(s, None, f, Side.FRONT)
     baked = build_face_uvs(s, None, Side.FRONT)
+    idx = s.face_triangle_loop_indices()
+    for corner in range(baked.shape[0]):
+        np.testing.assert_allclose(baked[corner], per_face[int(idx[corner])], atol=1e-5)
+
+
+def test_it_agrees_with_the_renderer_for_the_material_path_too():
+    """Both agreement tests above pass materials=None on both sides, so the
+    texture_size lookup itself is never cross-checked: resolve_face_uvs reads
+    it via `materials.get(...).texture_size` while the renderer's _side_uvs
+    does its own separate per-face gather. A drift there (wrong side, stale
+    snapshot, a swapped width and height) would sail past every other test in
+    this file. Use a non-square texture_size so a swapped width/height would
+    be caught, and a non-identity placement so base and placement both
+    matter."""
+    s = Scene()
+    f = _quad(s)
+    lib = MaterialLibrary()
+    mat = lib.add_custom("tall", (1.0, 1.0, 1.0))
+    lib.edit(mat.id, texture_size=(2.0, 4.0))
+    s.set_face_material(f, mat.id, Side.FRONT)
+    s.set_face_placement(f, TexturePlacement(0.2, -0.1, 1.5, 0.3), Side.FRONT)
+
+    class _ModelStub:
+        materials = lib
+
+    per_face = resolve_face_uvs(s, lib, f, Side.FRONT)
+    baked = build_face_uvs(s, _ModelStub(), Side.FRONT)
     idx = s.face_triangle_loop_indices()
     for corner in range(baked.shape[0]):
         np.testing.assert_allclose(baked[corner], per_face[int(idx[corner])], atol=1e-5)
