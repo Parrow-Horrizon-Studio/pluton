@@ -49,6 +49,8 @@ def write_obj(doc: ObjDocument, mtl_filename: str = "model.mtl") -> tuple[str, s
         obj.append(f"mtllib {mtl_filename}")
     for vx, vy, vz in doc.vertices:
         obj.append(f"v {vx:.6f} {vy:.6f} {vz:.6f}")
+    for tu, tv in doc.uvs:
+        obj.append(f"vt {tu:.6f} {tv:.6f}")
     for o in doc.objects:
         obj.append(f"o {o.name}")
         # Sort faces so unpainted (None) come first, then grouped by material,
@@ -59,7 +61,16 @@ def write_obj(doc: ObjDocument, mtl_filename: str = "model.mtl") -> tuple[str, s
             if face.material is not None and face.material != current:
                 obj.append(f"usemtl {face.material}")
             current = face.material
-            obj.append("f " + " ".join(str(i + 1) for i in face.vertex_indices))
+            if face.uv_indices is None:
+                obj.append("f " + " ".join(str(i + 1) for i in face.vertex_indices))
+            else:
+                obj.append(
+                    "f "
+                    + " ".join(
+                        f"{v + 1}/{t + 1}"
+                        for v, t in zip(face.vertex_indices, face.uv_indices, strict=True)
+                    )
+                )
     obj_text = "\n".join(obj) + "\n"
 
     mtl_text: str | None = None
@@ -71,6 +82,9 @@ def write_obj(doc: ObjDocument, mtl_filename: str = "model.mtl") -> tuple[str, s
             m.append("Ka 0.000000 0.000000 0.000000")
             m.append("Ns 10.000000")
             m.append("d 1.000000")
+            tex = doc.material_textures.get(name)
+            if tex:
+                m.append(f"map_Kd {tex}")
         mtl_text = "\n".join(m) + "\n"
     return obj_text, mtl_text
 
