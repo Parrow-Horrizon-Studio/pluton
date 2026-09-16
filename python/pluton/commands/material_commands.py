@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import numpy as np
+
 from pluton.commands.command import Command
 from pluton.scene.scene import Side, TexturePlacement
 
@@ -310,7 +312,7 @@ class ResetFaceUvsCommand(Command):
     def __init__(self, face_id: int, side: Side = Side.FRONT) -> None:
         self._fid = int(face_id)
         self._side = side
-        self._before = None
+        self._before: np.ndarray | None = None
 
     def do(self, scene) -> None:
         self._before = scene.face_uvs(self._fid, self._side)

@@ -389,3 +389,95 @@ def test_a_drag_that_moves_nothing_does_not_repaint(main_window, monkeypatch):
     tool.end_placement_drag()
 
     assert calls == []
+
+
+# --- reset to projection (M7.5c Task 8 fix round 1) -------------------------
+#
+# ResetFaceUvsCommand's do/undo/redo are covered command-level in
+# tests/test_reset_uvs_command.py. What was missing is coverage of the
+# MainWindow wiring around it: the button's enabled state (the sole
+# stored-UV indicator, spec D12), which side it targets, the no/multi
+# selection guard, and -- the M7.5b case again -- whether the click actually
+# asks the viewport to repaint. Reuses this file's fixture idioms
+# (_selected_square, _count_repaints, win._selection.replace +
+# _refresh_selection_status) rather than introducing a second style.
+
+_QUAD_UVS = [(0.0, 0.0), (1.0, 0.0), (1.0, 1.0), (0.0, 1.0)]
+
+
+def test_clicking_reset_uvs_repaints_the_viewport(main_window, monkeypatch):
+    win = main_window
+    scene, f = _selected_square(win)
+    scene.set_face_uvs(f, _QUAD_UVS, Side.FRONT)
+    win._refresh_selection_status()
+    calls = _count_repaints(win, monkeypatch)
+
+    win._properties_dock._reset_uvs_btn.click()
+
+    assert scene.face_uvs(f, Side.FRONT) is None
+    assert calls, "reset to projection never asked the viewport to repaint"
+
+
+def test_reset_uvs_enabled_state_tracks_the_target(main_window):
+    # The last assertion is the discriminating one: it fails against a
+    # version that sets the button's enabled state once (e.g. only inside
+    # set_placement_target's initial call) instead of recomputing it fresh
+    # on every retarget, including the one _on_after_undo_redo drives.
+    win = main_window
+    scene, f = _selected_square(win)
+    panel = win._properties_dock
+
+    assert not panel._reset_uvs_btn.isEnabled(), "no stored UVs yet"
+
+    scene.set_face_uvs(f, _QUAD_UVS, Side.FRONT)
+    win._refresh_selection_status()
+    assert panel._reset_uvs_btn.isEnabled(), "stored UVs exist but the button stayed disabled"
+
+    win._on_reset_uvs_requested()
+    assert not panel._reset_uvs_btn.isEnabled(), "reset ran but the button stayed enabled"
+
+    win._command_stack.undo()
+    assert panel._reset_uvs_btn.isEnabled(), "undo restored the UVs but the button stayed disabled"
+
+
+def test_reset_uvs_respects_the_side(main_window):
+    win = main_window
+    scene, f = _selected_square(win)
+    scene.set_face_uvs(f, _QUAD_UVS, Side.FRONT)
+    win._refresh_selection_status()
+    panel = win._properties_dock
+
+    assert panel._reset_uvs_btn.isEnabled(), "Front has stored UVs"
+
+    panel._side_combo.setCurrentIndex(1)  # Back
+    assert not panel._reset_uvs_btn.isEnabled(), "Back has no stored UVs of its own"
+
+    scene.set_face_uvs(f, [(0.9, 0.9)] * 4, Side.BACK)
+    panel._side_combo.setCurrentIndex(0)  # Front
+    panel._side_combo.setCurrentIndex(1)  # Back again, now with stored UVs
+    assert panel._reset_uvs_btn.isEnabled()
+
+    win._on_reset_uvs_requested()
+    assert scene.face_uvs(f, Side.BACK) is None
+    assert scene.face_uvs(f, Side.FRONT) is not None, "resetting Back must not touch Front"
+
+
+def test_reset_uvs_guard_holds_with_no_or_multiple_selection(main_window):
+    win = main_window
+    scene = win._model.active_context.mesh
+    f1 = _square(scene, x0=0.0)
+    f2 = _square(scene, x0=2.0)
+    scene.set_face_uvs(f1, _QUAD_UVS, Side.FRONT)
+    panel = win._properties_dock
+
+    win._selection.clear()
+    win._refresh_selection_status()
+    assert not panel._reset_uvs_btn.isEnabled()
+    win._on_reset_uvs_requested()  # must be a clean no-op, not an exception
+    assert scene.face_uvs(f1, Side.FRONT) is not None
+
+    win._selection.replace(faces=[f1, f2])
+    win._refresh_selection_status()
+    assert not panel._reset_uvs_btn.isEnabled()
+    win._on_reset_uvs_requested()  # must be a clean no-op, not an exception
+    assert scene.face_uvs(f1, Side.FRONT) is not None
