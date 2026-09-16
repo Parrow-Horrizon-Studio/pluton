@@ -14,26 +14,40 @@ def _quad(scene, z=0.0):
     return scene.add_face_from_loop(ids)
 
 
-def test_without_stored_uvs_the_bake_is_unchanged():
+def test_without_stored_uvs_the_bake_is_the_plane_projection():
     s = Scene()
     _quad(s)
-    before = build_face_uvs(s, None, Side.FRONT)
-    assert before.shape[0] == 6  # a quad is 2 triangles
-    # Golden pin on the projection path itself (not a self-comparison): the
-    # unit quad's centroid is (0.5, 0.5), and with nothing stored the bake
-    # must equal the centroid-relative projection, captured here as literals.
-    expected = np.array(
-        [
-            [-0.5, 0.5],
-            [-0.5, -0.5],
-            [0.5, -0.5],
-            [0.5, -0.5],
-            [0.5, 0.5],
-            [-0.5, 0.5],
-        ],
-        dtype=np.float32,
+    uvs = build_face_uvs(s, None, Side.FRONT)
+    idx = s.face_triangle_loop_indices()
+    assert uvs.shape == (6, 2)  # a quad is 2 triangles
+
+    # Golden pin on the projection path itself, not a self-comparison: the unit
+    # quad's centroid is (0.5, 0.5), so each loop vertex projects to a corner of
+    # a unit square centred on the origin.
+    #
+    # Keyed by LOOP index rather than by buffer position, because the
+    # triangulation's rotation is not a contract. pyproject.toml asks only for
+    # "mapbox-earcut>=2.0", so CI resolved 2.1.0 where this machine had 2.0.0,
+    # and 2.1.0 emits the quad's second triangle as [2, 0, 1] where 2.0.0 emits
+    # [0, 1, 2]: the same triangle, the same winding, started at a different
+    # vertex. Nothing renders differently, but a flat (6, 2) literal captured
+    # that rotation as though it were stable, and turned CI red on both
+    # platforms while passing locally.
+    #
+    # Every other test in this file already reads through
+    # face_triangle_loop_indices for exactly this reason. Do not reintroduce a
+    # positional literal here, and do not pin earcut to paper over one.
+    expected_by_loop = {
+        0: (0.5, -0.5),
+        1: (0.5, 0.5),
+        2: (-0.5, 0.5),
+        3: (-0.5, -0.5),
+    }
+    assert set(int(i) for i in idx) == set(expected_by_loop), (
+        "every loop vertex should appear in the triangulation"
     )
-    np.testing.assert_allclose(before, expected, atol=1e-6)
+    for corner in range(6):
+        np.testing.assert_allclose(uvs[corner], expected_by_loop[int(idx[corner])], atol=1e-6)
 
 
 def test_stored_uvs_land_on_the_right_corners():
