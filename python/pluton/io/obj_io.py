@@ -21,6 +21,7 @@ from pluton.io.obj_codec import (
     sanitize_material_name,
     write_obj,
 )
+from pluton.scene.scene import Side
 
 
 def _unique_name(base: str, used: set[str]) -> str:
@@ -197,9 +198,15 @@ def _ensure_materials(materials, model, texture_bytes=None, decoder=None) -> dic
     return name_to_id
 
 
-def _add_faces(mesh, faces, localmap, name_to_id) -> tuple[int, int]:
+def _add_faces(mesh, faces, localmap, name_to_id, uv_pool=()) -> tuple[int, int]:
     """Best-effort: build each face, skipping+counting any the kernel rejects
-    or any that references an unknown/out-of-range vertex index."""
+    or any that references an unknown/out-of-range vertex index.
+
+    Imported per-corner UVs are stored on BOTH sides (spec D6): the source has
+    one set and pluton has two, so writing both means the model reads correctly
+    from either side. The mapping is positional, because add_face_from_loop
+    stores the loop in the order it was given.
+    """
     imported = skipped = 0
     for face in faces:
         try:
@@ -215,6 +222,15 @@ def _add_faces(mesh, faces, localmap, name_to_id) -> tuple[int, int]:
             mid = name_to_id.get(face.material)
             if mid is not None:
                 mesh.set_face_material(fid, mid)
+        if face.uv_indices is not None and uv_pool:
+            try:
+                corner_uvs = [uv_pool[t] for t in face.uv_indices]
+                for side in (Side.FRONT, Side.BACK):
+                    mesh.set_face_uvs(fid, corner_uvs, side)
+            except (IndexError, ValueError):
+                # A UV problem never costs the face: it falls back to the
+                # plane projection, which is what an untextured face uses.
+                pass
         imported += 1
     return imported, skipped
 
@@ -247,7 +263,7 @@ def build_obj_into_model(
             for gi in used:
                 x, y, z = doc.vertices[gi]
                 localmap[gi] = defn.mesh.add_vertex(np.array([x, y, z], dtype=np.float32))
-            i, s = _add_faces(defn.mesh, obj.faces, localmap, name_to_id)
+            i, s = _add_faces(defn.mesh, obj.faces, localmap, name_to_id, doc.uvs)
             imported += i
             skipped += s
             inst = model.new_instance(defn)
@@ -263,7 +279,7 @@ def build_obj_into_model(
     for gi, (x, y, z) in enumerate(doc.vertices):
         localmap[gi] = mesh.add_vertex(np.array([x, y, z], dtype=np.float32))
     all_faces = [f for o in doc.objects for f in o.faces]
-    imported, skipped = _add_faces(mesh, all_faces, localmap, name_to_id)
+    imported, skipped = _add_faces(mesh, all_faces, localmap, name_to_id, doc.uvs)
     after = _snapshot_ids(mesh)
     created = tuple(sorted(after[i] - before[i]) for i in range(3))  # (vids, eids, fids)
     return BuildResult(ImportSummary(0, imported, skipped), [], created)
