@@ -30,6 +30,7 @@ class ObjDocument:
     vertices: tuple[tuple[float, float, float], ...]
     objects: tuple[ObjObject, ...]
     materials: dict[str, tuple[float, float, float]] = field(default_factory=dict)
+    material_textures: dict[str, str] = field(default_factory=dict)
     has_object_tags: bool = False
 
 
@@ -72,8 +73,32 @@ def write_obj(doc: ObjDocument, mtl_filename: str = "model.mtl") -> tuple[str, s
     return obj_text, mtl_text
 
 
-def _parse_mtl(mtl_text: str) -> dict[str, tuple[float, float, float]]:
+def _map_kd_filename(parts: list[str]) -> str | None:
+    """The filename from a `map_Kd` line, skipping its option arguments.
+
+    OBJ map lines may carry options before the filename (`-s 1 1 1 brick.png`)
+    and filenames may contain spaces (`my brick.png`), so neither parts[1] nor
+    parts[-1] is right on its own. Drop a leading run of option tokens, each
+    consuming itself and any numeric values that follow it, then join what is
+    left.
+    """
+    i = 1
+    while i < len(parts) and parts[i].startswith("-"):
+        i += 1
+        while i < len(parts):
+            try:
+                float(parts[i])
+            except ValueError:
+                break
+            i += 1
+    name = " ".join(parts[i:]).strip()
+    return name or None
+
+
+def _parse_mtl(mtl_text: str) -> tuple[dict[str, tuple[float, float, float]], dict[str, str]]:
+    """Parse an MTL to (name -> Kd colour, name -> map_Kd filename)."""
     materials: dict[str, tuple[float, float, float]] = {}
+    textures: dict[str, str] = {}
     current: str | None = None
     for raw in mtl_text.splitlines():
         line = raw.strip()
@@ -88,13 +113,17 @@ def _parse_mtl(mtl_text: str) -> dict[str, tuple[float, float, float]]:
                 materials[current] = (float(parts[1]), float(parts[2]), float(parts[3]))
             except (IndexError, ValueError):
                 pass  # keep the default grey
-    return materials
+        elif parts[0] == "map_Kd" and current is not None:
+            name = _map_kd_filename(parts)
+            if name is not None:
+                textures[current] = name
+    return materials, textures
 
 
 def parse_obj(obj_text: str, mtl_text: str | None) -> ObjDocument:
     """Parse OBJ (+ optional MTL) text to an ObjDocument. Raises PlutonFormatError
     on a structurally invalid face index."""
-    materials = _parse_mtl(mtl_text) if mtl_text else {}
+    materials, material_textures = _parse_mtl(mtl_text) if mtl_text else ({}, {})
     vertices: list[tuple[float, float, float]] = []
     objects: list[ObjObject] = []
     has_object_tags = False
@@ -148,5 +177,6 @@ def parse_obj(obj_text: str, mtl_text: str | None) -> ObjDocument:
         vertices=tuple(vertices),
         objects=tuple(objects),
         materials=materials,
+        material_textures=material_textures,
         has_object_tags=has_object_tags,
     )
