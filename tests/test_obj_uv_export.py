@@ -39,7 +39,12 @@ def test_exported_uvs_are_the_stored_values():
     np.testing.assert_allclose(got, [(0.0, 0.0), (0.25, 0.0), (0.5, 0.5), (0.75, 1.0)], atol=1e-5)
 
 
-def test_an_untextured_model_still_exports_projected_uvs():
+def test_a_face_with_no_stored_uvs_and_no_texture_exports_no_uvs():
+    # UVs are written only when a face genuinely needs them: it has its own
+    # stored front-side UVs, or its front material carries a texture.
+    # Baking a projection onto a face with neither freezes it for no benefit
+    # (a later texture_size/placement edit can no longer reproject it) and
+    # bloats untextured exports with a UV map nothing downstream needs.
     model = Model()
     mesh = model.root.mesh
     ids = [
@@ -47,7 +52,26 @@ def test_an_untextured_model_still_exports_projected_uvs():
     ]
     mesh.add_face_from_loop(ids)
     doc = model_to_objdoc(model, resolver=resolve_face_uvs)
-    assert doc.objects[0].faces[0].uv_indices is not None
+    assert doc.objects[0].faces[0].uv_indices is None
+    assert doc.uvs == ()
+
+
+def test_a_face_with_no_stored_uvs_but_a_textured_material_exports_uvs():
+    model = Model()
+    mesh = model.root.mesh
+    ids = [
+        mesh.add_vertex(np.array(p, dtype=np.float32)) for p in [(0, 0, 0), (1, 0, 0), (1, 1, 0)]
+    ]
+    fid = mesh.add_face_from_loop(ids)
+    tex = model.textures.add("brick", FAKE_PNG, "png", 4, 8, False)
+    mat = model.materials.add_custom("brick", (1.0, 1.0, 1.0))
+    model.materials.edit(mat.id, texture_id=tex.id)
+    mesh.set_face_material(fid, mat.id, Side.FRONT)
+
+    doc = model_to_objdoc(model, resolver=resolve_face_uvs)
+    face = doc.objects[0].faces[0]
+    assert face.uv_indices is not None
+    assert len(face.uv_indices) == len(face.vertex_indices)
 
 
 def test_export_without_a_resolver_writes_no_uvs():

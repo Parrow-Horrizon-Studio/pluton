@@ -27,9 +27,7 @@ def test_export_obj_writes_obj_and_mtl(tmp_path):
     obj_text = path.read_text()
     assert "mtllib house.mtl" in obj_text
     assert "o Model" in obj_text
-    # Since M7.5c task 7, export always resolves UVs (stored, or projected
-    # when the face has none), so faces carry v/vt pairs, not bare v indices.
-    assert "f 1/1 2/2 3/3 4/4" in obj_text
+    assert "f 1 2 3 4" in obj_text
     assert "newmtl Brick_Red" in mtl.read_text()
 
 

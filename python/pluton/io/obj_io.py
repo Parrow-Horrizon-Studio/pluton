@@ -45,6 +45,13 @@ def model_to_objdoc(model, resolver=None) -> ObjDocument:
     and `pluton.viewport` does (through the Qt-backed texture loader it uses
     for GPU upload). With no resolver, no `vt`s are produced and every face's
     `uv_indices` stays None.
+
+    UVs are written only for a face that genuinely needs them: one with its
+    own stored front-side UVs, or whose front material carries a texture.
+    Baking a projection onto a face with neither would freeze it at the
+    export-time projection with no benefit (a later texture_size or placement
+    edit could no longer reproject it), bloat untextured exports for nothing,
+    and hand downstream tools a UV map with no meaning.
     """
     vertices: list[tuple[float, float, float]] = []
     objects: list[ObjObject] = []
@@ -53,18 +60,19 @@ def model_to_objdoc(model, resolver=None) -> ObjDocument:
     default_id = model.materials.DEFAULT_ID
 
     uv_pool: list[tuple[float, float]] = []
-    uv_lookup: dict[tuple[int, int], int] = {}
+    uv_lookup: dict[tuple[float, float], int] = {}
 
-    def _uv_indices_for(mesh, fid):
+    def _uv_indices_for(mesh, fid, needs_uvs):
         """Resolve this face's UVs and intern them into the shared vt pool."""
-        if resolver is None:
+        if resolver is None or not needs_uvs:
             return None
         try:
             resolved = resolver(mesh, getattr(model, "materials", None), fid, Side.FRONT)
+            resolved = np.asarray(resolved, dtype=np.float64).reshape(-1, 2)
         except (KeyError, ValueError):
             return None
         out = []
-        for u, v in np.asarray(resolved, dtype=np.float64).reshape(-1, 2):
+        for u, v in resolved:
             key = (round(float(u), 6), round(float(v), 6))
             idx = uv_lookup.get(key)
             if idx is None:
@@ -89,9 +97,11 @@ def model_to_objdoc(model, resolver=None) -> ObjDocument:
         for f in mesh.faces_iter():
             loop = tuple(idmap[vid] for vid in f.loop_vertex_ids)
             mat_id = mesh.face_material(f.id)
-            uv_indices = _uv_indices_for(mesh, f.id)
+            mat = model.materials.get(mat_id)
+            has_stored_uvs = mesh.face_uvs(f.id, Side.FRONT) is not None
+            is_textured = mat is not None and mat.texture_id is not None
+            uv_indices = _uv_indices_for(mesh, f.id, has_stored_uvs or is_textured)
             if mat_id != default_id:
-                mat = model.materials.get(mat_id)
                 mname = sanitize_material_name(mat.name)
                 materials[mname] = mat.base_color
                 faces.append(ObjFace(loop, mname, uv_indices=uv_indices))
