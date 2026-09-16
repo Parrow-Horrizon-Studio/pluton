@@ -293,6 +293,9 @@ class MainWindow(QMainWindow):
         # panel the spec calls "the primary mechanism" (design line 172) has to
         # ask for the repaint too, exactly as the two library pages above do.
         self._properties_dock.placement_changed.connect(self._on_placement_committed)
+        # Task 8 (M7.5c): the button only asks; MainWindow owns the command
+        # stack and the selection, so it builds the ResetFaceUvsCommand.
+        self._properties_dock.reset_uvs_requested.connect(self._on_reset_uvs_requested)
 
         # NOW we can build the ToolContext that includes the viewport refs.
         self._rebuild_tool_context()
@@ -1390,6 +1393,26 @@ class MainWindow(QMainWindow):
         one thing nothing else does is put the moved image on screen.
         """
         self._viewport.update()
+
+    def _on_reset_uvs_requested(self) -> None:
+        """Properties' "Reset to projection" button (Task 8, M7.5c).
+
+        Clears the stored UVs for the selected face on the placement group's
+        current side, never the placement (spec D11: projection is the base,
+        placement is a separate layer on top). Re-syncs the panel afterward
+        so the button's own enabled state -- the stored-UV indicator, spec
+        D12 -- reflects the clear, then repaints through the same path
+        _on_placement_committed uses rather than a second mechanism.
+        """
+        from pluton.commands.material_commands import ResetFaceUvsCommand
+
+        face_id = self._single_selected_face_id()
+        if face_id is None:
+            return
+        side = self._properties_dock.target_side
+        self._command_stack.execute(ResetFaceUvsCommand(face_id, side), self._model.active_scene)
+        self._refresh_entity_info()
+        self._on_placement_committed()
 
     def _on_placement_drag_committed(self) -> None:
         """Task 12's Shift-drag committed a placement (ToolContext hook).

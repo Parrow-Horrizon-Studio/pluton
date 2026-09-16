@@ -295,3 +295,27 @@ class SetFacePlacementCommand(Command):
 
     def undo(self, scene) -> None:
         scene.set_face_placement(self._fid, self._before, self._side)
+
+
+class ResetFaceUvsCommand(Command):
+    """Drop a face's stored UVs so it follows the plane projection again.
+
+    Clears the stored array ONLY and never the placement (spec D11): the
+    projection is the base and the placement is a separate layer composed on
+    top, so clearing both under one name would be two actions in one control.
+    """
+
+    name = "Reset to Projection"
+
+    def __init__(self, face_id: int, side: Side = Side.FRONT) -> None:
+        self._fid = int(face_id)
+        self._side = side
+        self._before = None
+
+    def do(self, scene) -> None:
+        self._before = scene.face_uvs(self._fid, self._side)
+        scene.clear_face_uvs(self._fid, self._side)
+
+    def undo(self, scene) -> None:
+        if self._before is not None:
+            scene.set_face_uvs(self._fid, self._before, self._side)

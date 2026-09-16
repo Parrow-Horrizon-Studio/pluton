@@ -23,6 +23,7 @@ from PySide6.QtWidgets import (
     QGroupBox,
     QHBoxLayout,
     QLabel,
+    QPushButton,
     QSplitter,
     QStackedWidget,
     QToolButton,
@@ -52,6 +53,13 @@ class PropertiesDock(QDockWidget):
     # Same shape as MaterialsPage/TagsPage.library_changed, which MainWindow
     # already wires to self._viewport.update for exactly this hazard.
     placement_changed = Signal()
+
+    # Task 8 (M7.5c): the button only asks -- MainWindow owns the command
+    # stack and the selection, so it is the one that knows which face is
+    # targeted and builds the ResetFaceUvsCommand, the same division as every
+    # other *_requested signal on this dock's sibling pages (EntityInfoPage's
+    # rename_requested, etc).
+    reset_uvs_requested = Signal()
 
     # QMainWindow.saveState() silently drops docks without an object name.
     # This is a persistence key: never rename it, or saved layouts silently
@@ -216,6 +224,19 @@ class PropertiesDock(QDockWidget):
         self._rotation_spin.setSuffix("°")
         form.addRow("Rotation", self._rotation_spin)
 
+        # Task 8 (M7.5c): enabled state IS the stored-UV indicator (spec
+        # D12) -- disabled means the face follows the projection, enabled
+        # means it has its own coordinates. Kept inside the same group as
+        # the placement fields it accompanies, not a tab, for the same
+        # reason the group itself lives outside the tab stack.
+        self._reset_uvs_btn = QPushButton("Reset to projection", group)
+        self._reset_uvs_btn.setToolTip(
+            "Drop this face's imported texture coordinates and use the plane "
+            "projection again. Leaves offset, scale and rotation unchanged."
+        )
+        self._reset_uvs_btn.clicked.connect(self.reset_uvs_requested.emit)
+        form.addRow(self._reset_uvs_btn)
+
         # Connected only now that every widget it can touch (via
         # set_placement_target, from _on_side_changed) already exists.
         self._side_combo.currentIndexChanged.connect(self._on_side_changed)
@@ -232,6 +253,16 @@ class PropertiesDock(QDockWidget):
         spin.valueChanged.connect(self._on_placement_field_changed)
         return spin
 
+    @property
+    def target_side(self) -> Side:
+        """The side (Front/Back) the placement group currently edits.
+
+        Read by MainWindow's reset_uvs_requested handler (Task 8, M7.5c),
+        which knows the selected face but not which side this dock's own
+        combo box is pointed at.
+        """
+        return self._target_side
+
     def set_placement_target(self, face_id: int | None, side: Side = Side.FRONT) -> None:
         """Point the group at `face_id`'s placement for `side` and repopulate
         the fields from `scene.face_placement` (the identity, for a face
@@ -241,8 +272,10 @@ class PropertiesDock(QDockWidget):
         self._placement_group.setEnabled(face_id is not None)
 
         placement = TexturePlacement()
+        stored_uvs = None
         if face_id is not None and self._model is not None:
             placement = self._model.active_scene.face_placement(face_id, side)
+            stored_uvs = self._model.active_scene.face_uvs(face_id, side)
 
         self._syncing = True
         try:
@@ -253,6 +286,12 @@ class PropertiesDock(QDockWidget):
             self._rotation_spin.setValue(math.degrees(placement.rotation))
         finally:
             self._syncing = False
+
+        # Task 8 (M7.5c): the button's enabled state IS the stored-UV
+        # indicator (spec D12), read fresh here on every retarget so it
+        # tracks selection changes, side flips, and a reset's own aftermath
+        # (MainWindow re-syncs this same target after executing the command).
+        self._reset_uvs_btn.setEnabled(stored_uvs is not None)
 
     def set_selected_face(self, face_id: int | None) -> None:
         """MainWindow's selection hook (M7.5b Task 10 fix round 1).
