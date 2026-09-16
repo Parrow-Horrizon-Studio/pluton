@@ -126,11 +126,13 @@ def read_obj_texture_bytes(path, doc) -> dict[str, bytes]:
     missing, unreadable or outside the document's directory is skipped rather
     than failing the import. The caller decides what to do with an empty result.
     """
-    base = Path(path).parent
+    base = Path(path).parent.resolve()
     out: dict[str, bytes] = {}
     for name, rel in doc.material_textures.items():
         try:
             candidate = (base / rel).resolve()
+            if not candidate.is_relative_to(base):
+                continue
             if not candidate.is_file():
                 continue
             out[name] = candidate.read_bytes()
@@ -176,15 +178,21 @@ def _ensure_materials(materials, model, texture_bytes=None, decoder=None) -> dic
     if not texture_bytes or decoder is None:
         return name_to_id
 
+    existing_textures = {t.name: t for t in model.textures.textures()}
     for name, data in texture_bytes.items():
         mid = name_to_id.get(name)
         if mid is None:
+            continue
+        existing_tex = existing_textures.get(name)
+        if existing_tex is not None and existing_tex.data == bytes(data):
+            model.materials.edit(mid, texture_id=existing_tex.id)
             continue
         decoded = decoder(data)
         if decoded is None:
             continue  # unreadable image: the material stays untextured
         image_format, width, height, has_transparency = decoded
         tex = model.textures.add(name, data, image_format, width, height, has_transparency)
+        existing_textures[tex.name] = tex
         model.materials.edit(mid, texture_id=tex.id)
     return name_to_id
 

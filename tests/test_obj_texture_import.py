@@ -49,6 +49,45 @@ def test_a_missing_image_file_is_skipped_not_fatal(tmp_path):
     assert read_obj_texture_bytes(obj, doc) == {}
 
 
+def test_a_dotdot_texture_outside_the_document_directory_is_skipped(tmp_path):
+    doc_dir = tmp_path / "proj"
+    doc_dir.mkdir()
+    obj = doc_dir / "m.obj"
+    obj.write_text(
+        "mtllib m.mtl\nv 0 0 0\nv 1 0 0\nv 1 1 0\nvt 0 0\nvt 1 0\nvt 1 1\n"
+        "usemtl brick\nf 1/1 2/2 3/3\n",
+        encoding="utf-8",
+    )
+    (doc_dir / "m.mtl").write_text(
+        "newmtl brick\nKd 1 1 1\nmap_Kd ../secret.png\n", encoding="utf-8"
+    )
+    # The real file exists, one level above the document directory, so this
+    # proves containment rather than merely proving the file was absent.
+    (tmp_path / "secret.png").write_bytes(FAKE_PNG)
+    doc = parse_obj(obj.read_text(), (doc_dir / "m.mtl").read_text())
+    assert read_obj_texture_bytes(obj, doc) == {}
+
+
+def test_an_absolute_path_texture_outside_the_document_directory_is_skipped(tmp_path):
+    doc_dir = tmp_path / "proj"
+    doc_dir.mkdir()
+    obj = doc_dir / "m.obj"
+    outside_dir = tmp_path / "outside"
+    outside_dir.mkdir()
+    abs_target = outside_dir / "secret.png"
+    abs_target.write_bytes(FAKE_PNG)
+    obj.write_text(
+        "mtllib m.mtl\nv 0 0 0\nv 1 0 0\nv 1 1 0\nvt 0 0\nvt 1 0\nvt 1 1\n"
+        "usemtl brick\nf 1/1 2/2 3/3\n",
+        encoding="utf-8",
+    )
+    (doc_dir / "m.mtl").write_text(
+        f"newmtl brick\nKd 1 1 1\nmap_Kd {abs_target}\n", encoding="utf-8"
+    )
+    doc = parse_obj(obj.read_text(), (doc_dir / "m.mtl").read_text())
+    assert read_obj_texture_bytes(obj, doc) == {}
+
+
 def test_an_imported_texture_lands_in_the_library(tmp_path):
     obj = _write_obj_tree(tmp_path)
     doc = parse_obj(obj.read_text(), (tmp_path / "m.mtl").read_text())
@@ -93,6 +132,22 @@ def test_import_without_a_decoder_imports_geometry_and_no_textures(tmp_path):
     result = build_obj_into_model(doc, model, model.root)
     assert model.textures.textures() == []
     assert result.summary.faces_imported == 1
+
+
+def test_reimporting_the_same_document_does_not_duplicate_the_texture(tmp_path):
+    obj = _write_obj_tree(tmp_path)
+    doc = parse_obj(obj.read_text(), (tmp_path / "m.mtl").read_text())
+    model = Model()
+    build_obj_into_model(
+        doc, model, model.root, texture_bytes={"brick": FAKE_PNG}, decoder=_stub_decoder
+    )
+    build_obj_into_model(
+        doc, model, model.root, texture_bytes={"brick": FAKE_PNG}, decoder=_stub_decoder
+    )
+    textures = model.textures.textures()
+    assert len(textures) == 1
+    brick = next(m for m in model.materials.materials() if m.name == "brick")
+    assert brick.texture_id == textures[0].id
 
 
 def test_the_io_package_imports_no_qt():
