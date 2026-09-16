@@ -17,6 +17,7 @@ from pluton.io.errors import PlutonFormatError
 class ObjFace:
     vertex_indices: tuple[int, ...]  # 0-based, into ObjDocument.vertices
     material: str | None = None  # sanitized material name, or None (unpainted)
+    uv_indices: tuple[int, ...] | None = None  # 0-based into ObjDocument.uvs, or None
 
 
 @dataclass(frozen=True)
@@ -31,6 +32,7 @@ class ObjDocument:
     objects: tuple[ObjObject, ...]
     materials: dict[str, tuple[float, float, float]] = field(default_factory=dict)
     material_textures: dict[str, str] = field(default_factory=dict)
+    uvs: tuple[tuple[float, float], ...] = ()
     has_object_tags: bool = False
 
 
@@ -125,6 +127,7 @@ def parse_obj(obj_text: str, mtl_text: str | None) -> ObjDocument:
     on a structurally invalid face index."""
     materials, material_textures = _parse_mtl(mtl_text) if mtl_text else ({}, {})
     vertices: list[tuple[float, float, float]] = []
+    uvs: list[tuple[float, float]] = []
     objects: list[ObjObject] = []
     has_object_tags = False
     current_name: str | None = None
@@ -149,6 +152,13 @@ def parse_obj(obj_text: str, mtl_text: str | None) -> ObjDocument:
                 vertices.append((float(parts[1]), float(parts[2]), float(parts[3])))
             except (IndexError, ValueError) as e:
                 raise PlutonFormatError(f"bad vertex line: {line!r}") from e
+        elif tag == "vt":
+            try:
+                u = float(parts[1])
+                v = float(parts[2]) if len(parts) > 2 else 0.0
+            except (IndexError, ValueError):
+                continue  # a malformed vt is skipped, not fatal: faces fall back
+            uvs.append((u, v))
         elif tag in ("o", "g"):
             flush()
             has_object_tags = True
@@ -158,17 +168,42 @@ def parse_obj(obj_text: str, mtl_text: str | None) -> ObjDocument:
             current_material = parts[1] if len(parts) > 1 else None
         elif tag == "f":
             idx: list[int] = []
+            uv_idx: list[int] = []
+            uv_ok = True
             for token in parts[1:]:
-                vtok = token.split("/")[0]
+                fields = token.split("/")
                 try:
-                    vi = int(vtok)
+                    vi = int(fields[0])
                 except ValueError as e:
                     raise PlutonFormatError(f"bad face index {token!r}") from e
                 vi = len(vertices) + vi if vi < 0 else vi - 1  # relative or 1-based
                 if not (0 <= vi < len(vertices)):
                     raise PlutonFormatError(f"face index out of range: {token!r}")
                 idx.append(vi)
-            current_faces.append(ObjFace(vertex_indices=tuple(idx), material=current_material))
+
+                # A UV is optional per corner. Anything wrong with it drops the
+                # whole face's UVs rather than raising: the geometry is still
+                # good and that face can fall back to the plane projection.
+                if not uv_ok or len(fields) < 2 or not fields[1]:
+                    uv_ok = False
+                    continue
+                try:
+                    ti = int(fields[1])
+                except ValueError:
+                    uv_ok = False
+                    continue
+                ti = len(uvs) + ti if ti < 0 else ti - 1
+                if not (0 <= ti < len(uvs)):
+                    uv_ok = False
+                    continue
+                uv_idx.append(ti)
+            current_faces.append(
+                ObjFace(
+                    vertex_indices=tuple(idx),
+                    material=current_material,
+                    uv_indices=tuple(uv_idx) if uv_ok and len(uv_idx) == len(idx) else None,
+                )
+            )
         # mtllib / vn / vt / s / everything else: ignored
     flush()
     if not objects:
@@ -178,5 +213,6 @@ def parse_obj(obj_text: str, mtl_text: str | None) -> ObjDocument:
         objects=tuple(objects),
         materials=materials,
         material_textures=material_textures,
+        uvs=tuple(uvs),
         has_object_tags=has_object_tags,
     )

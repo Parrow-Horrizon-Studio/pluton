@@ -47,3 +47,71 @@ def test_a_malformed_map_kd_with_no_filename_is_ignored():
     mtl = "newmtl brick\nmap_Kd\n"
     doc = parse_obj("v 0 0 0\n", mtl)
     assert doc.material_textures == {}
+
+
+def test_vt_pool_is_captured_in_order():
+    obj = "v 0 0 0\nv 1 0 0\nv 1 1 0\nvt 0 0\nvt 1 0\nvt 1 1\nf 1/1 2/2 3/3\n"
+    doc = parse_obj(obj, None)
+    assert doc.uvs == ((0.0, 0.0), (1.0, 0.0), (1.0, 1.0))
+
+
+def test_face_uv_indices_are_zero_based_and_parallel():
+    obj = "v 0 0 0\nv 1 0 0\nv 1 1 0\nvt 0 0\nvt 1 0\nvt 1 1\nf 1/1 2/2 3/3\n"
+    doc = parse_obj(obj, None)
+    face = doc.objects[0].faces[0]
+    assert face.vertex_indices == (0, 1, 2)
+    assert face.uv_indices == (0, 1, 2)
+
+
+def test_uv_indices_need_not_match_vertex_indices():
+    # The seam case: two corners share a vertex but not a UV.
+    obj = "v 0 0 0\nv 1 0 0\nv 1 1 0\nvt 0 0\nvt 1 0\nvt 0.5 0.9\nf 1/3 2/1 3/2\n"
+    doc = parse_obj(obj, None)
+    face = doc.objects[0].faces[0]
+    assert face.vertex_indices == (0, 1, 2)
+    assert face.uv_indices == (2, 0, 1)
+
+
+def test_a_face_with_no_vt_has_none():
+    obj = "v 0 0 0\nv 1 0 0\nv 1 1 0\nf 1 2 3\n"
+    doc = parse_obj(obj, None)
+    assert doc.objects[0].faces[0].uv_indices is None
+
+
+def test_the_v_slash_slash_vn_form_has_no_uvs():
+    obj = "v 0 0 0\nv 1 0 0\nv 1 1 0\nvn 0 0 1\nf 1//1 2//1 3//1\n"
+    doc = parse_obj(obj, None)
+    assert doc.objects[0].faces[0].uv_indices is None
+
+
+def test_the_v_slash_vt_slash_vn_form_keeps_the_uv():
+    obj = "v 0 0 0\nv 1 0 0\nv 1 1 0\nvt 0 0\nvt 1 0\nvt 1 1\nvn 0 0 1\nf 1/1/1 2/2/1 3/3/1\n"
+    doc = parse_obj(obj, None)
+    assert doc.objects[0].faces[0].uv_indices == (0, 1, 2)
+
+
+def test_a_face_with_uvs_on_only_some_corners_gets_none():
+    obj = "v 0 0 0\nv 1 0 0\nv 1 1 0\nvt 0 0\nvt 1 0\nf 1/1 2/2 3\n"
+    doc = parse_obj(obj, None)
+    assert doc.objects[0].faces[0].uv_indices is None
+
+
+def test_negative_vt_indices_are_relative_to_the_pool():
+    obj = "v 0 0 0\nv 1 0 0\nv 1 1 0\nvt 0 0\nvt 1 0\nvt 1 1\nf 1/-3 2/-2 3/-1\n"
+    doc = parse_obj(obj, None)
+    assert doc.objects[0].faces[0].uv_indices == (0, 1, 2)
+
+
+def test_an_out_of_range_vt_index_drops_the_face_uvs_rather_than_raising():
+    # A bad VERTEX index is a structural error and raises; a bad UV index is
+    # recoverable by projecting that face instead.
+    obj = "v 0 0 0\nv 1 0 0\nv 1 1 0\nvt 0 0\nf 1/1 2/9 3/1\n"
+    doc = parse_obj(obj, None)
+    assert doc.objects[0].faces[0].uv_indices is None
+    assert doc.objects[0].faces[0].vertex_indices == (0, 1, 2)
+
+
+def test_a_three_dimensional_vt_keeps_only_u_and_v():
+    obj = "v 0 0 0\nv 1 0 0\nv 1 1 0\nvt 0 0 0\nvt 1 0 0\nvt 1 1 0\nf 1/1 2/2 3/3\n"
+    doc = parse_obj(obj, None)
+    assert doc.uvs == ((0.0, 0.0), (1.0, 0.0), (1.0, 1.0))
