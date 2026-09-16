@@ -119,6 +119,26 @@ def read_obj_document(path) -> ObjDocument:
     return parse_obj(obj_text, mtl_text)
 
 
+def read_obj_texture_bytes(path, doc) -> dict[str, bytes]:
+    """Material name to image bytes, for every `map_Kd` resolvable beside the .obj.
+
+    Best-effort in the same shape as the .mtl sibling lookup: an image that is
+    missing, unreadable or outside the document's directory is skipped rather
+    than failing the import. The caller decides what to do with an empty result.
+    """
+    base = Path(path).parent
+    out: dict[str, bytes] = {}
+    for name, rel in doc.material_textures.items():
+        try:
+            candidate = (base / rel).resolve()
+            if not candidate.is_file():
+                continue
+            out[name] = candidate.read_bytes()
+        except (OSError, ValueError):
+            continue
+    return out
+
+
 @dataclass(frozen=True)
 class ImportSummary:
     objects: int  # groups created (0 for the merge case)
@@ -133,9 +153,15 @@ class BuildResult:
     created_geometry: tuple  # (vertex_ids, edge_ids, face_ids) added to the scene (merge)
 
 
-def _ensure_materials(materials, model) -> dict:
+def _ensure_materials(materials, model, texture_bytes=None, decoder=None) -> dict:
     """Add each OBJ material to the library, reusing an existing one when name AND
-    color already match. Returns name -> material_id."""
+    color already match. Returns name -> material_id.
+
+    When `texture_bytes` and `decoder` are both given, each material with image
+    bytes gains a Texture in the model's library and points at it. Following the
+    same rule as material adds, texture adds are NOT undone by ImportObjCommand:
+    no library add is undoable anywhere in pluton.
+    """
     name_to_id: dict[str, int] = {}
     existing = {m.name: m for m in model.materials.materials()}
     for name, color in materials.items():
@@ -146,6 +172,20 @@ def _ensure_materials(materials, model) -> dict:
             new = model.materials.add_custom(name, color)
             name_to_id[name] = new.id
             existing[new.name] = new
+
+    if not texture_bytes or decoder is None:
+        return name_to_id
+
+    for name, data in texture_bytes.items():
+        mid = name_to_id.get(name)
+        if mid is None:
+            continue
+        decoded = decoder(data)
+        if decoded is None:
+            continue  # unreadable image: the material stays untextured
+        image_format, width, height, has_transparency = decoded
+        tex = model.textures.add(name, data, image_format, width, height, has_transparency)
+        model.materials.edit(mid, texture_id=tex.id)
     return name_to_id
 
 
@@ -179,11 +219,13 @@ def _snapshot_ids(mesh):
     )
 
 
-def build_obj_into_model(doc: ObjDocument, model, target_context) -> BuildResult:
+def build_obj_into_model(
+    doc: ObjDocument, model, target_context, texture_bytes=None, decoder=None
+) -> BuildResult:
     """Build an ObjDocument into the model. Adaptive: has_object_tags -> one group
     per object in target_context; else merge into target_context.mesh. Best-effort
     face building. Returns the created ids for undo."""
-    name_to_id = _ensure_materials(doc.materials, model)
+    name_to_id = _ensure_materials(doc.materials, model, texture_bytes, decoder)
 
     if doc.has_object_tags:
         created_instances: list = []

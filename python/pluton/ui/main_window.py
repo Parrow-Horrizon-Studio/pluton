@@ -31,6 +31,7 @@ from pluton.io import (
     save_document,
 )
 from pluton.io.document_codec import CameraState
+from pluton.io.obj_io import read_obj_texture_bytes
 from pluton.model import Model
 from pluton.model.model_queries import instance_path
 from pluton.model.tag import TagLibrary
@@ -83,6 +84,7 @@ from pluton.ui.window_state import (
     save_window_state,
 )
 from pluton.viewport.render_style import FaceStyle, RenderStyle
+from pluton.viewport.texture_cache import decode_image, sniff_format
 from pluton.viewport.view_animator import ViewAnimator
 from pluton.viewport.viewport_widget import ViewportWidget
 from pluton.views.capture import apply_tags_and_style, capture_view
@@ -90,6 +92,19 @@ from pluton.views.capture import apply_tags_and_style, capture_view
 # M7.5b Task 11 (#78): container thumbnails are for a file browser preview, so
 # the long edge is capped well below full viewport resolution.
 _THUMBNAIL_MAX_EDGE = 512
+
+
+def _obj_texture_decoder(data: bytes):
+    """Adapt texture_cache's decoder to the Qt-free shape pluton/io expects."""
+    decoded = decode_image(data)
+    if decoded is None:
+        return None
+    return (
+        sniff_format(data) or "png",
+        decoded.width,
+        decoded.height,
+        decoded.has_transparency,
+    )
 
 
 class MainWindow(QMainWindow):
@@ -1581,9 +1596,15 @@ class MainWindow(QMainWindow):
 
             QMessageBox.critical(self, "Import failed", str(e))
             return
+        texture_bytes = read_obj_texture_bytes(path, doc)
         from pluton.commands.obj_commands import ImportObjCommand
 
-        cmd = ImportObjCommand(doc, self._model.active_context)
+        cmd = ImportObjCommand(
+            doc,
+            self._model.active_context,
+            texture_bytes=texture_bytes,
+            decoder=_obj_texture_decoder,
+        )
         self._command_stack.execute(cmd, self._model)
         s = cmd.summary
         msg = f"Imported {s.faces_imported} faces"

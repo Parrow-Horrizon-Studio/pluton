@@ -14,14 +14,18 @@ class ImportObjCommand(Command):
 
     name = "Import OBJ"
 
-    def __init__(self, doc, target_context) -> None:
+    def __init__(self, doc, target_context, texture_bytes=None, decoder=None) -> None:
         self._doc = doc
         self._target = target_context
+        self._texture_bytes = texture_bytes
+        self._decoder = decoder
         self._result = None
         self.summary = None
 
     def do(self, model) -> None:
-        self._result = build_obj_into_model(self._doc, model, self._target)
+        self._result = build_obj_into_model(
+            self._doc, model, self._target, self._texture_bytes, self._decoder
+        )
         self.summary = self._result.summary
 
     def undo(self, model) -> None:
