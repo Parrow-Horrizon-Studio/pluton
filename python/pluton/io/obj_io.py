@@ -35,14 +35,44 @@ def _unique_name(base: str, used: set[str]) -> str:
     return candidate
 
 
-def model_to_objdoc(model) -> ObjDocument:
+def model_to_objdoc(model, resolver=None) -> ObjDocument:
     """Flatten the scene graph to a world-space ObjDocument (one object per node
-    with geometry). Never mutates the model."""
+    with geometry). Never mutates the model.
+
+    `resolver` resolves a face's front-side UVs (Task 6's `resolve_face_uvs`
+    shape: `resolver(mesh, materials, face_id, side) -> np.ndarray`). It is
+    injected rather than imported here because `pluton/io` may not reach Qt,
+    and `pluton.viewport` does (through the Qt-backed texture loader it uses
+    for GPU upload). With no resolver, no `vt`s are produced and every face's
+    `uv_indices` stays None.
+    """
     vertices: list[tuple[float, float, float]] = []
     objects: list[ObjObject] = []
     materials: dict[str, tuple[float, float, float]] = {}
     used_names: set[str] = set()
     default_id = model.materials.DEFAULT_ID
+
+    uv_pool: list[tuple[float, float]] = []
+    uv_lookup: dict[tuple[int, int], int] = {}
+
+    def _uv_indices_for(mesh, fid):
+        """Resolve this face's UVs and intern them into the shared vt pool."""
+        if resolver is None:
+            return None
+        try:
+            resolved = resolver(mesh, getattr(model, "materials", None), fid, Side.FRONT)
+        except (KeyError, ValueError):
+            return None
+        out = []
+        for u, v in np.asarray(resolved, dtype=np.float64).reshape(-1, 2):
+            key = (round(float(u), 6), round(float(v), 6))
+            idx = uv_lookup.get(key)
+            if idx is None:
+                idx = len(uv_pool)
+                uv_lookup[key] = idx
+                uv_pool.append(key)
+            out.append(idx)
+        return tuple(out)
 
     for definition, world in model.traverse():
         mesh = definition.mesh
@@ -59,19 +89,34 @@ def model_to_objdoc(model) -> ObjDocument:
         for f in mesh.faces_iter():
             loop = tuple(idmap[vid] for vid in f.loop_vertex_ids)
             mat_id = mesh.face_material(f.id)
+            uv_indices = _uv_indices_for(mesh, f.id)
             if mat_id != default_id:
                 mat = model.materials.get(mat_id)
                 mname = sanitize_material_name(mat.name)
                 materials[mname] = mat.base_color
-                faces.append(ObjFace(loop, mname))
+                faces.append(ObjFace(loop, mname, uv_indices=uv_indices))
             else:
-                faces.append(ObjFace(loop, None))
+                faces.append(ObjFace(loop, None, uv_indices=uv_indices))
         objects.append(ObjObject(_unique_name(definition.name, used_names), tuple(faces)))
+
+    material_textures: dict[str, str] = {}
+    for m in model.materials.materials():
+        mname = sanitize_material_name(m.name)
+        if mname not in materials:
+            continue  # only materials actually used by an exported face
+        if m.texture_id is None:
+            continue
+        tex = model.textures.get(m.texture_id)
+        if tex is None:
+            continue
+        material_textures[mname] = f"{mname}.{tex.image_format}"
 
     return ObjDocument(
         vertices=tuple(vertices),
         objects=tuple(objects),
         materials=materials,
+        material_textures=material_textures,
+        uvs=tuple(uv_pool),
         has_object_tags=bool(objects),
     )
 
@@ -86,16 +131,48 @@ def _atomic_write_text(path: Path, text: str) -> None:
             tmp.unlink()
 
 
+def _atomic_write_bytes(path: Path, data: bytes) -> None:
+    tmp = path.with_name(path.name + ".tmp")
+    try:
+        tmp.write_bytes(data)
+        os.replace(tmp, path)
+    finally:
+        if tmp.exists():
+            tmp.unlink()
+
+
 def export_obj(path, model) -> None:
     """Write the model to `path` as OBJ, with a sibling `<stem>.mtl` if it has
-    painted materials. Each file is written atomically (temp + os.replace)."""
+    painted materials, plus a sibling image file for each textured material.
+    Each file is written atomically (temp + os.replace).
+
+    `resolve_face_uvs` is imported here, lazily, rather than at module scope:
+    `pluton/io` must not import `pluton.viewport` at import time, since that
+    package reaches Qt through the GPU-side texture loader it uses for upload.
+    `uv_resolve.py` itself is Qt-free (numpy and pluton.scene only), so
+    importing it inside this function keeps `pluton.io.obj_io` importable
+    with no Qt loaded, while still giving every caller of `export_obj` real
+    UVs with no extra argument.
+    """
+    from pluton.viewport.uv_resolve import resolve_face_uvs
+
     path = Path(path)
-    doc = model_to_objdoc(model)
+    doc = model_to_objdoc(model, resolver=resolve_face_uvs)
     mtl_name = path.stem + ".mtl"
     obj_text, mtl_text = write_obj(doc, mtl_name)
     _atomic_write_text(path, obj_text)
     if mtl_text is not None:
         _atomic_write_text(path.with_name(mtl_name), mtl_text)
+
+    for m in model.materials.materials():
+        if m.texture_id is None:
+            continue
+        tex = model.textures.get(m.texture_id)
+        if tex is None:
+            continue
+        name = f"{sanitize_material_name(m.name)}.{tex.image_format}"
+        if name in doc.material_textures.values():
+            _atomic_write_bytes(path.with_name(name), tex.data)
 
 
 def read_obj_document(path) -> ObjDocument:
