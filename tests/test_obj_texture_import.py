@@ -150,11 +150,51 @@ def test_reimporting_the_same_document_does_not_duplicate_the_texture(tmp_path):
     assert brick.texture_id == textures[0].id
 
 
+def test_reusing_a_material_with_a_different_texture_does_not_retexture_it(tmp_path):
+    """Finding 1 (M7.5c-2 review): a material reused by name+color that
+    already carries a texture must never be repointed at the import's image.
+    That library edit is not undone by ImportObjCommand, so it would
+    silently retexture every pre-existing face already painted with it. The
+    import should get its own material instead."""
+    obj = _write_obj_tree(tmp_path, map_kd="brick_v2.png")
+    doc = parse_obj(obj.read_text(), (tmp_path / "m.mtl").read_text())
+    model = Model()
+
+    # A pre-existing "brick" material with the color the import will match,
+    # already textured with a different image than the one being imported.
+    mat = model.materials.add_custom("brick", (1.0, 1.0, 1.0))
+    old_tex = model.textures.add("brick", b"\x89PNG\r\n\x1a\n-old-bytes", "png", 2, 2, False)
+    model.materials.edit(mat.id, texture_id=old_tex.id)
+
+    result = build_obj_into_model(
+        doc, model, model.root, texture_bytes={"brick": FAKE_PNG}, decoder=_stub_decoder
+    )
+
+    # The pre-existing material is untouched.
+    unchanged = model.materials.get(mat.id)
+    assert unchanged.texture_id == old_tex.id
+
+    # The imported face got its own material, textured with the new image.
+    fid = result.created_geometry[2][0]
+    new_mid = model.root.mesh.face_material(fid)
+    assert new_mid != mat.id
+    new_mat = model.materials.get(new_mid)
+    assert new_mat.texture_id is not None
+    new_tex = model.textures.get(new_mat.texture_id)
+    assert new_tex.data == FAKE_PNG
+
+
 def test_the_io_package_imports_no_qt():
-    """Spec D7: pluton/io stays Qt-free so its tests need no QApplication."""
+    """Spec D7: pluton/io stays Qt-free so its tests need no QApplication.
+
+    The scanned root is derived from this test file's own location, not the
+    cwd: a relative "python/pluton/io" glob silently returns nothing (so the
+    assertion passes vacuously) when pytest is run from anywhere other than
+    the repo root (a reviewer confirmed this running from F:/tmp).
+    """
     import pathlib
 
-    root = pathlib.Path("python/pluton/io")
+    root = pathlib.Path(__file__).resolve().parent.parent / "python" / "pluton" / "io"
     offenders = [
         p.name
         for p in root.glob("*.py")

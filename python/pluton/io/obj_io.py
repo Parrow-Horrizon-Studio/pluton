@@ -251,6 +251,13 @@ def _ensure_materials(materials, model, texture_bytes=None, decoder=None) -> dic
     bytes gains a Texture in the model's library and points at it. Following the
     same rule as material adds, texture adds are NOT undone by ImportObjCommand:
     no library add is undoable anywhere in pluton.
+
+    A reused material (name+color match) that already carries a *different*
+    texture is never repointed at the import's image: that library edit is
+    not undone by ImportObjCommand, so it would silently retexture every
+    pre-existing face already painted with it. Such an import gets its own
+    new material (and, if the bytes are new, its own new texture) instead,
+    named via `_unique_name` like every other collision in this module.
     """
     name_to_id: dict[str, int] = {}
     existing = {m.name: m for m in model.materials.materials()}
@@ -267,20 +274,49 @@ def _ensure_materials(materials, model, texture_bytes=None, decoder=None) -> dic
         return name_to_id
 
     existing_textures = {t.name: t for t in model.textures.textures()}
+
+    def _find_or_decode_texture(tex_name: str, data: bytes):
+        """A Texture for `data`: the library entry named `tex_name` if its
+        bytes already match, else a freshly decoded+added one. None if the
+        bytes are undecodable."""
+        cached = existing_textures.get(tex_name)
+        if cached is not None and cached.data == bytes(data):
+            return cached
+        decoded = decoder(data)
+        if decoded is None:
+            return None
+        image_format, width, height, has_transparency = decoded
+        tex = model.textures.add(tex_name, data, image_format, width, height, has_transparency)
+        existing_textures[tex.name] = tex
+        return tex
+
     for name, data in texture_bytes.items():
         mid = name_to_id.get(name)
         if mid is None:
             continue
-        existing_tex = existing_textures.get(name)
-        if existing_tex is not None and existing_tex.data == bytes(data):
-            model.materials.edit(mid, texture_id=existing_tex.id)
+        mat = model.materials.get(mid)
+        current = model.textures.get(mat.texture_id) if mat.texture_id is not None else None
+        if current is not None and current.data == bytes(data):
+            continue  # already textured with exactly these bytes
+
+        if mat.texture_id is not None:
+            # `mat` is a reused material that already carries a different
+            # texture (finding 1). Give the import its own material so the
+            # pre-existing faces painted with `mat` are left alone.
+            new_tex_name = _unique_name(name, set(existing_textures))
+            tex = _find_or_decode_texture(new_tex_name, data)
+            if tex is None:
+                continue  # unreadable image: faces stay on the shared material
+            new_name = _unique_name(name, set(existing))
+            new_mat = model.materials.add_custom(new_name, mat.base_color)
+            existing[new_mat.name] = new_mat
+            model.materials.edit(new_mat.id, texture_id=tex.id)
+            name_to_id[name] = new_mat.id
             continue
-        decoded = decoder(data)
-        if decoded is None:
+
+        tex = _find_or_decode_texture(name, data)
+        if tex is None:
             continue  # unreadable image: the material stays untextured
-        image_format, width, height, has_transparency = decoded
-        tex = model.textures.add(name, data, image_format, width, height, has_transparency)
-        existing_textures[tex.name] = tex
         model.materials.edit(mid, texture_id=tex.id)
     return name_to_id
 
@@ -309,7 +345,19 @@ def _add_faces(mesh, faces, localmap, name_to_id, uv_pool=()) -> tuple[int, int]
             mid = name_to_id.get(face.material)
             if mid is not None:
                 mesh.set_face_material(fid, mid)
-        if face.uv_indices is not None and uv_pool:
+        # A duplicate vertex in the built loop (two `v` rows welded to the
+        # same mesh vertex by Scene.add_vertex's exact-position dedupe, e.g.
+        # loop [0, 1, 2, 1, 3]) must never get stored UVs. face_uvs is
+        # parallel to the loop, but Scene.face_triangle_loop_indices maps
+        # vertex_id -> loop_index, so the duplicate's later occurrence
+        # silently overwrites the earlier one there while resolve_face_uvs
+        # and the exporter walk the loop in order: the renderer would then
+        # sample a different corner than everything else agrees on (finding
+        # 2). Do not "fix" this by guarding it in Scene.set_face_uvs
+        # instead: that is stage-1 code and import is the only path that can
+        # create such a face with stored UVs today.
+        pinched = len(set(loop)) != len(loop)
+        if face.uv_indices is not None and uv_pool and not pinched:
             try:
                 corner_uvs = [uv_pool[t] for t in face.uv_indices]
                 for side in (Side.FRONT, Side.BACK):

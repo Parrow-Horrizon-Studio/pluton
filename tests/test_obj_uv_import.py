@@ -111,6 +111,36 @@ def test_real_v_row_duplicates_weld_to_one_kernel_vertex():
     np.testing.assert_allclose(uv_b[0], [0.25, 0.75], rtol=1e-6)
 
 
+def test_a_pinched_face_imports_geometry_but_gets_no_stored_uvs():
+    # Finding 2 (M7.5c-2 review): unlike the two-face case above, here the
+    # SAME face names two distinct `v` rows (2 and 4) that weld to one
+    # kernel vertex, e.g. loop [0, 1, 2, 1, 3]. Scene.face_triangle_loop_
+    # indices builds a {vertex_id: loop_index} map, so the duplicate's later
+    # occurrence silently overwrites the earlier one there, while
+    # resolve_face_uvs and the exporter walk the loop in order and disagree
+    # with the renderer. The face must still import (geometry + material),
+    # it just falls back to the plane projection like any face whose UV data
+    # cannot be honored. Do NOT fix this by guarding it in
+    # Scene.set_face_uvs instead: that is stage-1 code, and import is the
+    # only path that can create such a face with stored UVs today.
+    obj = (
+        "v 0 0 0\nv 1 0 0\nv 2 0 0\nv 1 0 0\nv 0 1 0\n"
+        "vt 0 0\nvt 1 0\nvt 1 1\nvt 0.5 0.9\nvt 0 1\n"
+        "f 1/1 2/2 3/3 4/4 5/5\n"
+    )
+    doc = parse_obj(obj, None)
+    model = Model()
+    result = build_obj_into_model(doc, model, model.root)
+
+    assert result.summary.faces_imported == 1
+    assert result.summary.faces_skipped == 0
+    fid = next(iter(model.root.mesh.faces_iter())).id
+    loop = model.root.mesh.face_loop(fid)
+    assert len(set(loop)) < len(loop)  # confirms the pinch actually happened
+    assert model.root.mesh.face_uvs(fid, Side.FRONT) is None
+    assert model.root.mesh.face_uvs(fid, Side.BACK) is None
+
+
 def test_a_mixed_document_stores_uvs_only_where_they_exist():
     obj = (
         "v 0 0 0\nv 1 0 0\nv 1 1 0\n"
