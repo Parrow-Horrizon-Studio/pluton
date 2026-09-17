@@ -256,8 +256,11 @@ def _ensure_materials(materials, model, texture_bytes=None, decoder=None) -> dic
     texture is never repointed at the import's image: that library edit is
     not undone by ImportObjCommand, so it would silently retexture every
     pre-existing face already painted with it. Such an import gets its own
-    new material (and, if the bytes are new, its own new texture) instead,
-    named via `_unique_name` like every other collision in this module.
+    new material instead, named via `_unique_name` like every other
+    collision in this module - unless an earlier colliding import already
+    created exactly the material+texture this one needs, in which case that
+    one is reused so repeated imports of the same colliding document do not
+    pile up duplicate materials and duplicate image blobs.
     """
     name_to_id: dict[str, int] = {}
     existing = {m.name: m for m in model.materials.materials()}
@@ -273,21 +276,23 @@ def _ensure_materials(materials, model, texture_bytes=None, decoder=None) -> dic
     if not texture_bytes or decoder is None:
         return name_to_id
 
-    existing_textures = {t.name: t for t in model.textures.textures()}
+    existing_textures = list(model.textures.textures())
 
     def _find_or_decode_texture(tex_name: str, data: bytes):
-        """A Texture for `data`: the library entry named `tex_name` if its
-        bytes already match, else a freshly decoded+added one. None if the
-        bytes are undecodable."""
-        cached = existing_textures.get(tex_name)
-        if cached is not None and cached.data == bytes(data):
-            return cached
+        """A Texture for `data`: any library entry whose bytes already match
+        it (name never participates in that match: identical bytes are the
+        same image whatever it is called), else a freshly decoded+added one
+        named `tex_name`. None if the bytes are undecodable."""
+        data = bytes(data)
+        for cached in existing_textures:
+            if cached.data == data:
+                return cached
         decoded = decoder(data)
         if decoded is None:
             return None
         image_format, width, height, has_transparency = decoded
         tex = model.textures.add(tex_name, data, image_format, width, height, has_transparency)
-        existing_textures[tex.name] = tex
+        existing_textures.append(tex)
         return tex
 
     for name, data in texture_bytes.items():
@@ -303,10 +308,21 @@ def _ensure_materials(materials, model, texture_bytes=None, decoder=None) -> dic
             # `mat` is a reused material that already carries a different
             # texture (finding 1). Give the import its own material so the
             # pre-existing faces painted with `mat` are left alone.
-            new_tex_name = _unique_name(name, set(existing_textures))
-            tex = _find_or_decode_texture(new_tex_name, data)
+            tex_name = _unique_name(name, {t.name for t in existing_textures})
+            tex = _find_or_decode_texture(tex_name, data)
             if tex is None:
                 continue  # unreadable image: faces stay on the shared material
+            reused = next(
+                (
+                    cand
+                    for cand in model.materials.materials()
+                    if cand.texture_id == tex.id and tuple(cand.base_color) == tuple(mat.base_color)
+                ),
+                None,
+            )
+            if reused is not None:
+                name_to_id[name] = reused.id
+                continue
             new_name = _unique_name(name, set(existing))
             new_mat = model.materials.add_custom(new_name, mat.base_color)
             existing[new_mat.name] = new_mat

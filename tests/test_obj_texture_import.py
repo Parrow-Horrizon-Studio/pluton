@@ -184,6 +184,37 @@ def test_reusing_a_material_with_a_different_texture_does_not_retexture_it(tmp_p
     assert new_tex.data == FAKE_PNG
 
 
+def test_reimporting_a_colliding_document_three_times_does_not_pile_up_materials_or_textures(
+    tmp_path,
+):
+    """Re-review fix: the first cut of finding 1 minted a fresh `_unique_name`
+    every time the OBJ's "brick" collided with the pre-existing one, because
+    the name lookup only ever matched the pre-existing material, never the
+    "brick.001" a previous colliding import had already created with these
+    exact bytes. Three imports of the same colliding document must land on
+    the same second material+texture pair, not one new pair per import."""
+    obj = _write_obj_tree(tmp_path, map_kd="brick_v2.png")
+    doc = parse_obj(obj.read_text(), (tmp_path / "m.mtl").read_text())
+    model = Model()
+
+    mat = model.materials.add_custom("brick", (1.0, 1.0, 1.0))
+    old_tex = model.textures.add("brick", b"\x89PNG\r\n\x1a\n-old-bytes", "png", 2, 2, False)
+    model.materials.edit(mat.id, texture_id=old_tex.id)
+
+    for _ in range(3):
+        build_obj_into_model(
+            doc, model, model.root, texture_bytes={"brick": FAKE_PNG}, decoder=_stub_decoder
+        )
+
+    textured = [m for m in model.materials.materials() if m.texture_id is not None]
+    assert len(textured) == 2  # the original "brick" plus one for the collision
+    assert len(model.textures.textures()) == 2
+
+    # The pre-existing material must still be exactly as it was.
+    unchanged = model.materials.get(mat.id)
+    assert unchanged.texture_id == old_tex.id
+
+
 def test_the_io_package_imports_no_qt():
     """Spec D7: pluton/io stays Qt-free so its tests need no QApplication.
 
