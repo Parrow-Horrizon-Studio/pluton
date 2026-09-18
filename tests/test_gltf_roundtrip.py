@@ -1,9 +1,18 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 import numpy as np
 from pluton.io.gltf_export import export_gltf
-from pluton.io.gltf_import import build_gltf_into_model, read_gltf_scene
+from pluton.io.gltf_import import build_gltf_into_model, read_gltf_scene, read_gltf_texture_bytes
 from pluton.model.model import Model
+
+DATA = Path(__file__).parent / "data" / "gltf"
+
+
+def _decoder(data):
+    """The Qt-free decoder shape pluton/io expects, for a 4x4 opaque PNG."""
+    return ("png", 4, 4, False)
 
 
 def _up_quad_model():
@@ -42,3 +51,29 @@ def test_gltf_roundtrip_writes_and_reads(tmp_path):
     export_gltf(_up_quad_model(), str(tmp_path / "rt.gltf"))
     scene = read_gltf_scene(str(tmp_path / "rt.gltf"))
     assert len(scene.meshes) >= 1
+
+
+def test_a_textured_glb_survives_import_then_export_then_import(tmp_path):
+    """The one test that fails if only one side of the V flip landed.
+
+    Import applies v -> 1 - v and export applies it again, so the two must
+    cancel. Comparing the re-imported UVs to the ORIGINAL file's, not to the
+    in-model ones, is what makes that visible.
+    """
+    original = read_gltf_scene(DATA / "textured_box.glb")
+    model = Model()
+    build_gltf_into_model(
+        original,
+        model,
+        model.root,
+        texture_bytes=read_gltf_texture_bytes(DATA / "textured_box.glb", original),
+        decoder=_decoder,
+    )
+    out = tmp_path / "rt.glb"
+    export_gltf(model, out)
+    again = read_gltf_scene(out)
+
+    before = sorted((round(u, 5), round(v, 5)) for u, v in original.meshes[0].uvs)
+    after = sorted((round(u, 5), round(v, 5)) for u, v in again.meshes[0].uvs)
+    assert before == after, "a single missing or doubled v flip shows up here"
+    assert again.images and again.images[0].data == original.images[0].data

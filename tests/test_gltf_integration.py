@@ -28,6 +28,21 @@ def test_draco_box_decodes_CI_GATE():  # noqa: N802 (name is the permanent CI ga
     assert len(s.meshes[0].triangles) > 0, "Draco decode produced no geometry"
 
 
+def test_avocado_draco_uvs_decode_CI_GATE():  # noqa: N802 (permanent CI gate marker)
+    """PERMANENT GATE: Assimp must decode KHR_draco_mesh_compression INCLUDING
+    TEXCOORD_0. Never skip, never xfail.
+
+    draco_box.glb stays as the geometry-only gate. It declares NORMAL and
+    POSITION only, so it passes perfectly while UV extraction is completely
+    broken, which is exactly the hole this test closes.
+    """
+    s = core.import_gltf(str(DATA / "avocado_draco.glb"))
+    assert len(s.meshes) >= 1
+    assert len(s.meshes[0].triangles) > 0, "Draco decode produced no geometry"
+    assert len(s.meshes[0].uvs) == len(s.meshes[0].positions), "Draco decoded no TEXCOORD_0"
+    assert len(s.images) == 1 and s.images[0].data, "the embedded base colour image is missing"
+
+
 def test_assimp_already_flips_v_CI_GATE():  # noqa: N802 (permanent CI gate marker)
     """PERMANENT GATE: Assimp's glTF2 importer applies 1 - v itself. Never skip.
 
