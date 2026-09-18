@@ -29,8 +29,9 @@ def _zup_to_yup() -> np.ndarray:
 
 def _definition_primitives(defn, gltf_material_for):
     """Triangulate the definition's faces (kernel earcut, concave-safe),
-    grouped by material into (positions, indices, gltf_material_index|None)
-    primitives."""
+    grouped by material into (positions, uvs|None, indices,
+    gltf_material_index|None) primitives. UV resolution is Task 6's work;
+    this stage always passes None."""
     mesh = defn.mesh
     verts = list(mesh.vertices_iter())
     if not verts:
@@ -45,7 +46,7 @@ def _definition_primitives(defn, gltf_material_for):
         gmat = gltf_material_for(mesh.face_material(f.id))
         for a, b, c in f.triangles:  # kernel earcut triangulation (concave-safe)
             by_mat[gmat].extend([idmap[int(a)], idmap[int(b)], idmap[int(c)]])
-    return [(positions, indices, gmat) for gmat, indices in by_mat.items()]
+    return [(positions, None, indices, gmat) for gmat, indices in by_mat.items()]
 
 
 def model_to_gltf(model) -> GltfAsset:
@@ -108,7 +109,7 @@ def export_gltf(model, path) -> None:
     asset = model_to_gltf(model)
     if path.suffix.lower() == ".gltf":
         bin_name = path.stem + ".bin"
-        json_text, bin_bytes = asset.write_gltf(bin_name)
+        json_text, bin_bytes, _sidecars = asset.write_gltf(bin_name)
         _atomic_write_bytes(path, json_text.encode("utf-8"))
         _atomic_write_bytes(path.with_name(bin_name), bin_bytes)
     else:

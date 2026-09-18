@@ -22,6 +22,8 @@ _GLB_MAGIC = 0x46546C67
 _CHUNK_JSON = 0x4E4F534A
 _CHUNK_BIN = 0x004E4942
 
+_IMAGE_MIME = {"png": "image/png", "jpeg": "image/jpeg", "jpg": "image/jpeg"}
+
 
 def _pad4(n: int) -> int:
     return (4 - (n % 4)) % 4
@@ -36,32 +38,33 @@ class GltfAsset:
     meshes: list = field(default_factory=list)
     nodes: list = field(default_factory=list)
     scene_roots: list = field(default_factory=list)
+    images: list = field(default_factory=list)
+    textures: list = field(default_factory=list)
+    sidecars: dict = field(default_factory=dict)  # filename -> bytes, .gltf only
 
-    def add_material(self, name, color) -> int:
-        self.materials.append(
-            {
-                "name": name,
-                "pbrMetallicRoughness": {
-                    "baseColorFactor": [float(color[0]), float(color[1]), float(color[2]), 1.0],
-                    "metallicFactor": 0.0,
-                    "roughnessFactor": 1.0,
-                },
-            }
-        )
+    def add_material(self, name, color, texture=None) -> int:
+        pbr = {
+            "baseColorFactor": [float(color[0]), float(color[1]), float(color[2]), 1.0],
+            "metallicFactor": 0.0,
+            "roughnessFactor": 1.0,
+        }
+        if texture is not None:
+            pbr["baseColorTexture"] = {"index": texture}
+        self.materials.append({"name": name, "pbrMetallicRoughness": pbr})
         return len(self.materials) - 1
 
-    def _add_buffer_view(self, data: bytes, target: int) -> int:
+    def _add_buffer_view(self, data: bytes, target: int | None) -> int:
         self._buffer.extend(b"\x00" * _pad4(len(self._buffer)))
         offset = len(self._buffer)
         self._buffer.extend(data)
-        self.buffer_views.append(
-            {
-                "buffer": 0,
-                "byteOffset": offset,
-                "byteLength": len(data),
-                "target": target,
-            }
-        )
+        bv = {
+            "buffer": 0,
+            "byteOffset": offset,
+            "byteLength": len(data),
+        }
+        if target is not None:
+            bv["target"] = target
+        self.buffer_views.append(bv)
         return len(self.buffer_views) - 1
 
     def _add_position_accessor(self, positions) -> int:
@@ -97,18 +100,55 @@ class GltfAsset:
         )
         return len(self.accessors) - 1
 
+    def _add_uv_accessor(self, uvs) -> int:
+        """A VEC2/FLOAT accessor. No min/max: glTF requires those for POSITION
+        only, and a bounding box over texture coordinates means nothing."""
+        data = bytearray()
+        for u, v in uvs:
+            data += struct.pack("<2f", u, v)
+        bv = self._add_buffer_view(bytes(data), _ARRAY_BUFFER)
+        self.accessors.append(
+            {"bufferView": bv, "componentType": _FLOAT, "count": len(uvs), "type": "VEC2"}
+        )
+        return len(self.accessors) - 1
+
     def add_mesh(self, primitives) -> int:
         prims = []
-        for positions, indices, mat in primitives:
+        for positions, uvs, indices, mat in primitives:
             p = {
                 "attributes": {"POSITION": self._add_position_accessor(positions)},
                 "indices": self._add_index_accessor(indices),
             }
+            if uvs is not None:
+                p["attributes"]["TEXCOORD_0"] = self._add_uv_accessor(uvs)
             if mat is not None:
                 p["material"] = mat
             prims.append(p)
         self.meshes.append({"primitives": prims})
         return len(self.meshes) - 1
+
+    def add_image(self, data: bytes, image_format: str, name: str, embed: bool) -> int:
+        """Register an image. `embed` puts the bytes in the buffer (GLB); the
+        alternative records a sibling filename in `sidecars` for the caller to
+        write beside the .gltf, matching how geometry already splits between
+        the two containers."""
+        fmt = str(image_format).lower()
+        mime = _IMAGE_MIME.get(fmt, "image/png")
+        if embed:
+            bv = self._add_buffer_view(bytes(data), None)
+            self.images.append({"name": name, "bufferView": bv, "mimeType": mime})
+        else:
+            filename = f"{name}.{'jpg' if mime == 'image/jpeg' else 'png'}"
+            self.sidecars[filename] = bytes(data)
+            self.images.append({"name": name, "uri": filename})
+        return len(self.images) - 1
+
+    def add_texture(self, image_index: int) -> int:
+        """No sampler: glTF's defaults are REPEAT wrapping and automatic
+        filtering, which is exactly what Pluton's projected UVs need when they
+        run outside 0..1."""
+        self.textures.append({"source": int(image_index)})
+        return len(self.textures) - 1
 
     def add_node(self, name=None, matrix=None, mesh=None, children=None) -> int:
         node: dict = {}
@@ -136,6 +176,10 @@ class GltfAsset:
         }
         if self.materials:
             doc["materials"] = self.materials
+        if self.images:
+            doc["images"] = self.images
+        if self.textures:
+            doc["textures"] = self.textures
         return doc
 
     def write_glb(self) -> bytes:
@@ -153,4 +197,4 @@ class GltfAsset:
     def write_gltf(self, bin_name: str):
         bin_blob = bytes(self._buffer)
         doc = self._json({"byteLength": len(bin_blob), "uri": bin_name})
-        return json.dumps(doc, indent=2), bin_blob
+        return json.dumps(doc, indent=2), bin_blob, dict(self.sidecars)

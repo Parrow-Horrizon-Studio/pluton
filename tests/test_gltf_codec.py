@@ -24,7 +24,7 @@ def _parse_glb(blob: bytes):
 def _asset_with_triangle():
     a = GltfAsset()
     mat = a.add_material("Red", (1.0, 0.0, 0.0))
-    mesh = a.add_mesh([(TRI_POS, TRI_IDX, mat)])
+    mesh = a.add_mesh([(TRI_POS, None, TRI_IDX, mat)])
     node = a.add_node(name="tri", matrix=IDENT16, mesh=mesh, children=None)
     a.scene_roots.append(node)
     return a
@@ -49,10 +49,70 @@ def test_glb_framing_and_structure():
 
 def test_gltf_has_external_buffer_uri():
     a = _asset_with_triangle()
-    json_text, bin_bytes = a.write_gltf("model.bin")
+    json_text, bin_bytes, sidecars = a.write_gltf("model.bin")
     doc = json.loads(json_text)
     assert doc["buffers"][0]["uri"] == "model.bin"
     assert doc["buffers"][0]["byteLength"] == len(bin_bytes)
+    assert sidecars == {}
 
     glb_doc, _ = _parse_glb(a.write_glb())
     assert "uri" not in glb_doc["buffers"][0]
+
+
+def test_uv_accessor_is_vec2_float_with_a_matching_count():
+    a = GltfAsset()
+    uvs = [(0.0, 0.0), (1.0, 0.0), (0.5, 1.0)]
+    a.add_mesh([(TRI_POS, uvs, TRI_IDX, None)])
+    prim = a.meshes[0]["primitives"][0]
+    uv_acc = a.accessors[prim["attributes"]["TEXCOORD_0"]]
+    pos_acc = a.accessors[prim["attributes"]["POSITION"]]
+    assert uv_acc["type"] == "VEC2"
+    assert uv_acc["componentType"] == 5126
+    assert uv_acc["count"] == pos_acc["count"], "glTF requires one index buffer for both"
+
+
+def test_a_primitive_without_uvs_declares_no_texcoord():
+    a = GltfAsset()
+    a.add_mesh([(TRI_POS, None, TRI_IDX, None)])
+    assert "TEXCOORD_0" not in a.meshes[0]["primitives"][0]["attributes"]
+
+
+def test_an_embedded_image_lands_in_the_buffer_with_a_mime_type():
+    a = GltfAsset()
+    idx = a.add_image(b"\x89PNG\r\n\x1a\nxxxx", "png", "brick", embed=True)
+    assert a.images[idx]["mimeType"] == "image/png"
+    assert "bufferView" in a.images[idx]
+    assert "uri" not in a.images[idx]
+    assert a.sidecars == {}
+
+
+def test_a_sidecar_image_gets_a_uri_and_is_handed_back_to_the_caller():
+    a = GltfAsset()
+    idx = a.add_image(b"\x89PNG\r\n\x1a\nxxxx", "png", "brick", embed=False)
+    assert a.images[idx]["uri"] == "brick.png"
+    assert "bufferView" not in a.images[idx]
+    assert a.sidecars == {"brick.png": b"\x89PNG\r\n\x1a\nxxxx"}
+
+
+def test_a_textured_material_carries_base_color_texture_and_factor():
+    """D18: glTF multiplies the two, matching OBJ's Kd plus map_Kd."""
+    a = GltfAsset()
+    img = a.add_image(b"\x89PNG\r\n\x1a\nx", "png", "brick", embed=True)
+    tex = a.add_texture(img)
+    mat = a.add_material("Brick", (0.5, 0.25, 0.125), texture=tex)
+    pbr = a.materials[mat]["pbrMetallicRoughness"]
+    assert pbr["baseColorTexture"] == {"index": tex}
+    assert pbr["baseColorFactor"][:3] == [0.5, 0.25, 0.125]
+    assert a.textures[tex] == {"source": img}
+
+
+def test_json_omits_empty_image_and_texture_arrays():
+    """glTF 2.0 forbids an empty array for these; an untextured export must
+    produce exactly the document it produces today."""
+    a = GltfAsset()
+    a.add_mesh([(TRI_POS, None, TRI_IDX, None)])
+    a.scene_roots.append(a.add_node(name="n", mesh=0))
+    doc = json.loads(a.write_gltf("m.bin")[0])
+    assert "images" not in doc
+    assert "textures" not in doc
+    assert "samplers" not in doc

@@ -107,7 +107,7 @@ def test_export_uses_kernel_triangulation_for_concave_face():
     vpos = {v.id: tuple(round(float(c), 3) for c in v.position) for v in mesh.vertices_iter()}
     face = next(f for f in mesh.faces_iter() if f.id == fid)
     kernel_tris = {frozenset(vpos[int(v)] for v in tri) for tri in face.triangles}
-    positions, indices, _ = _definition_primitives(model.root, lambda mid: None)[0]
+    positions, _uvs, indices, _mat = _definition_primitives(model.root, lambda mid: None)[0]
     export_tris = set()
     for i in range(0, len(indices), 3):
         export_tris.add(frozenset(
