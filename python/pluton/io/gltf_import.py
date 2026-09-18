@@ -17,6 +17,8 @@ import numpy as np
 from pluton.io.errors import PlutonFormatError
 from pluton.io.gltf_scene import GltfImage, GltfMaterial, GltfMesh, GltfNode, GltfSceneData
 from pluton.io.image_paths import read_sibling_image_bytes
+from pluton.io.obj_io import _unique_name
+from pluton.scene.scene import Side
 
 if TYPE_CHECKING:
     from pluton.model.instance import Instance
@@ -294,11 +296,31 @@ def _is_default_material(m) -> bool:
     return m.name in _DEFAULT_MATERIAL_NAMES
 
 
-def _ensure_gltf_materials(materials, model) -> list:
-    """Material id per glTF material index (None for default/unpainted). Real
-    materials deduped by (name, color); add_custom otherwise."""
+def _ensure_gltf_materials(materials, model, texture_bytes=None, decoder=None) -> tuple[list, int]:
+    """Material id per glTF material index (None for default/unpainted), and the
+    count of images that were referenced but could not be applied.
+
+    Real materials deduped by (name, color); add_custom otherwise.
+
+    When `texture_bytes` (material index -> image bytes) and `decoder` are
+    both given, this mirrors obj_io._ensure_materials' texture rules exactly
+    (stage 2 hardened those against three real defects, so this does not
+    invent a second policy):
+
+    1. A texture is deduped by bytes, never by name: identical bytes are the
+       same image whatever it is called.
+    2. A reused material that already carries a *different* texture is never
+       repointed at the import's image -- that library edit is not undone by
+       ImportGltfCommand, so repointing would silently retexture every
+       pre-existing face already painted with it. Such an import gets its own
+       new material via `_unique_name` instead.
+    3. A repeat import of the same colliding document reuses the material and
+       texture it minted last time rather than piling up `Brick.001`,
+       `Brick.002`, and duplicate byte-identical blobs.
+    """
     result: list = []
     existing = {(m.name, tuple(m.base_color)): m for m in model.materials.materials()}
+    used_names = {m.name for m in model.materials.materials()}
     for gm in materials:
         if _is_default_material(gm):
             result.append(None)
@@ -310,13 +332,119 @@ def _ensure_gltf_materials(materials, model) -> list:
         else:
             new = model.materials.add_custom(gm.name, tuple(gm.color))
             existing[key] = new
+            used_names.add(new.name)
             result.append(new.id)
-    return result
+
+    images_skipped = 0
+    if not texture_bytes or decoder is None:
+        return result, images_skipped
+
+    existing_textures = list(model.textures.textures())
+
+    def _find_or_decode_texture(tex_name: str, data: bytes):
+        """A Texture for `data`: any library entry whose bytes already match
+        it (name never participates in that match), else a freshly
+        decoded+added one named `tex_name`. None if the bytes are
+        undecodable."""
+        data = bytes(data)
+        for cached in existing_textures:
+            if cached.data == data:
+                return cached
+        decoded = decoder(data)
+        if decoded is None:
+            return None
+        image_format, width, height, has_transparency = decoded
+        tex = model.textures.add(tex_name, data, image_format, width, height, has_transparency)
+        existing_textures.append(tex)
+        return tex
+
+    for index, data in texture_bytes.items():
+        if not (0 <= index < len(result)):
+            continue
+        mid = result[index]
+        if mid is None:
+            continue
+        mat = model.materials.get(mid)
+        current = model.textures.get(mat.texture_id) if mat.texture_id is not None else None
+        if current is not None and current.data == bytes(data):
+            continue  # already textured with exactly these bytes
+
+        gm_name = materials[index].name
+
+        if mat.texture_id is not None:
+            # `mat` is a reused material that already carries a different
+            # texture (rule 2). Give the import its own material so the
+            # pre-existing faces painted with `mat` are left alone.
+            tex_name = _unique_name(gm_name, {t.name for t in existing_textures})
+            tex = _find_or_decode_texture(tex_name, data)
+            if tex is None:
+                images_skipped += 1
+                continue  # unreadable image: faces stay on the shared material
+            reused = next(
+                (
+                    cand
+                    for cand in model.materials.materials()
+                    if cand.texture_id == tex.id and tuple(cand.base_color) == tuple(mat.base_color)
+                ),
+                None,
+            )
+            if reused is not None:
+                result[index] = reused.id
+                continue
+            new_name = _unique_name(gm_name, used_names)
+            new_mat = model.materials.add_custom(new_name, mat.base_color)
+            existing[(new_mat.name, tuple(new_mat.base_color))] = new_mat
+            used_names.add(new_mat.name)
+            model.materials.edit(new_mat.id, texture_id=tex.id)
+            result[index] = new_mat.id
+            continue
+
+        tex = _find_or_decode_texture(gm_name, data)
+        if tex is None:
+            images_skipped += 1
+            continue  # unreadable image: the material stays untextured
+        model.materials.edit(mid, texture_id=tex.id)
+    return result, images_skipped
 
 
-def _add_triangles(mesh, triangles, localmap, material_id) -> tuple[int, int]:
-    """Best-effort: build each triangle, skipping+counting kernel rejects."""
-    imported = skipped = 0
+def _corner_uvs(uvs, tri):
+    """One glTF triangle's UVs in loop order.
+
+    NO vertical flip happens here, deliberately. glTF's TEXCOORD_0 origin is
+    the image's UPPER left and Pluton's v = 0 is its BOTTOM, but Assimp's
+    glTF2 importer already applies 1 - v before the bridge sees a coordinate,
+    so what arrives is ALREADY in Pluton's convention. Measured on
+    textured_box.glb: the file holds v = [1.0, 1.0, 0.25, 0.25] and
+    import_gltf returns [0.0, 0.0, 0.75, 0.75]. Flipping again here would
+    render every imported texture upside down.
+
+    Export is NOT symmetric with this: model_to_gltf does flip, because it
+    writes through Pluton's own codec rather than through Assimp. See D14.
+    test_assimp_already_flips_v_CI_GATE pins the dependency.
+
+    Returns None when any corner index is out of range, which drops that face
+    to projection rather than failing the import.
+    """
+    out = []
+    for gi in tri:
+        if not 0 <= gi < len(uvs):
+            return None
+        u, v = uvs[gi]
+        out.append((float(u), float(v)))
+    return out
+
+
+def _add_triangles(mesh, triangles, localmap, material_id, uvs=()) -> tuple[int, int, int]:
+    """Best-effort: build each triangle, skipping+counting kernel rejects.
+
+    Returns (imported, skipped, without_uvs). A glTF triangle's corners map
+    onto the kernel loop positionally and in order, so no matching logic is
+    needed. Both sides get the array (spec 1.5): a source format has one UV
+    set per corner and Pluton has two, and writing both means the model reads
+    correctly from either side without import holding an opinion about
+    sidedness.
+    """
+    imported = skipped = without_uvs = 0
     for tri in triangles:
         try:
             loop = [localmap[gi] for gi in tri]
@@ -329,16 +457,29 @@ def _add_triangles(mesh, triangles, localmap, material_id) -> tuple[int, int]:
             continue
         if material_id is not None:
             mesh.set_face_material(fid, material_id)
+        if uvs:
+            corners = _corner_uvs(uvs, tri)
+            if corners is None:
+                without_uvs += 1
+            else:
+                try:
+                    mesh.set_face_uvs(fid, corners, Side.FRONT)
+                    mesh.set_face_uvs(fid, corners, Side.BACK)
+                except ValueError:
+                    # The kernel welds coincident positions, so a triangle
+                    # whose corners collapsed has fewer loop corners than
+                    # glTF vertices. Projection is the honest answer.
+                    without_uvs += 1
         imported += 1
-    return imported, skipped
+    return imported, skipped, without_uvs
 
 
 def _build_mesh_components(scene, model, mat_id_by_index):
     """Build each GltfMesh into a shared Component Definition (built once, later
-    instanced). Returns (meshdefs, imported, skipped, built). meshdefs[i] is a
-    Definition or None (empty or all-faces-skipped mesh)."""
+    instanced). Returns (meshdefs, imported, skipped, without_uvs, built).
+    meshdefs[i] is a Definition or None (empty or all-faces-skipped mesh)."""
     meshdefs: list = []
-    imported = skipped = built = 0
+    imported = skipped = without_uvs = built = 0
     for i, gmesh in enumerate(scene.meshes):
         if not gmesh.positions:
             meshdefs.append(None)
@@ -350,15 +491,16 @@ def _build_mesh_components(scene, model, mat_id_by_index):
         mid = None
         if 0 <= gmesh.material_index < len(mat_id_by_index):
             mid = mat_id_by_index[gmesh.material_index]
-        imp, skp = _add_triangles(defn.mesh, gmesh.triangles, localmap, mid)
+        imp, skp, novu = _add_triangles(defn.mesh, gmesh.triangles, localmap, mid, gmesh.uvs)
         imported += imp
         skipped += skp
+        without_uvs += novu
         if imp == 0:
             meshdefs.append(None)  # unreferenced def is GC'd
             continue
         meshdefs.append(defn)
         built += 1
-    return meshdefs, imported, skipped, built
+    return meshdefs, imported, skipped, without_uvs, built
 
 
 @dataclass(frozen=True)
@@ -367,6 +509,8 @@ class GltfImportSummary:
     meshes: int  # distinct Component meshes built
     faces_imported: int  # faces built into Component meshes (per distinct mesh)
     faces_skipped: int
+    faces_without_uvs: int = 0  # imported, but their UV data was unusable
+    images_skipped: int = 0  # referenced but missing, unreadable or raw texels
 
 
 @dataclass
@@ -383,13 +527,24 @@ def _yup_to_zup() -> np.ndarray:
     )
 
 
-def build_gltf_into_model(scene, model, target_context, root_name="glTF") -> GltfBuildResult:
+def build_gltf_into_model(
+    scene, model, target_context, root_name="glTF", texture_bytes=None, decoder=None
+) -> GltfBuildResult:
     """Build a GltfSceneData into the model under target_context. Preserves the
     node hierarchy (each node -> one object; single-mesh childless nodes collapse
     to a direct shared-Component instance), converts Y-up -> Z-up at the file
-    wrapper, and is best-effort. Returns the single wrapper Instance for undo."""
-    mat_id_by_index = _ensure_gltf_materials(scene.materials, model)
-    meshdefs, imported, skipped, built = _build_mesh_components(scene, model, mat_id_by_index)
+    wrapper, and is best-effort. Returns the single wrapper Instance for undo.
+
+    `texture_bytes` (material index -> image bytes, from read_gltf_texture_bytes)
+    and `decoder` are both optional and default to None so every existing
+    caller is unaffected; when both are given, materials gain textures per
+    `_ensure_gltf_materials`."""
+    mat_id_by_index, images_skipped = _ensure_gltf_materials(
+        scene.materials, model, texture_bytes, decoder
+    )
+    meshdefs, imported, skipped, without_uvs, built = _build_mesh_components(
+        scene, model, mat_id_by_index
+    )
 
     wrapper = model.new_definition(root_name or "glTF", is_group=True)
     has_children = {n.parent for n in scene.nodes if n.parent >= 0}
@@ -419,6 +574,11 @@ def build_gltf_into_model(scene, model, target_context, root_name="glTF") -> Glt
     target_context.children.append(root_instance)
 
     summary = GltfImportSummary(
-        nodes=len(scene.nodes), meshes=built, faces_imported=imported, faces_skipped=skipped
+        nodes=len(scene.nodes),
+        meshes=built,
+        faces_imported=imported,
+        faces_skipped=skipped,
+        faces_without_uvs=without_uvs,
+        images_skipped=images_skipped,
     )
     return GltfBuildResult(summary=summary, root_instance=root_instance)

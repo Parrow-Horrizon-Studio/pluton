@@ -27,6 +27,7 @@ from pluton.io import (
     export_obj,
     load_document,
     read_gltf_scene,
+    read_gltf_texture_bytes,
     read_obj_document,
     save_document,
 )
@@ -94,7 +95,7 @@ from pluton.views.capture import apply_tags_and_style, capture_view
 _THUMBNAIL_MAX_EDGE = 512
 
 
-def _obj_texture_decoder(data: bytes):
+def _texture_decoder(data: bytes):
     """Adapt texture_cache's decoder to the Qt-free shape pluton/io expects."""
     decoded = decode_image(data)
     if decoded is None:
@@ -1626,7 +1627,7 @@ class MainWindow(QMainWindow):
             doc,
             self._model.active_context,
             texture_bytes=texture_bytes,
-            decoder=_obj_texture_decoder,
+            decoder=_texture_decoder,
         )
         self._command_stack.execute(cmd, self._model)
         s = cmd.summary
@@ -1666,14 +1667,25 @@ class MainWindow(QMainWindow):
 
             QMessageBox.critical(self, "Import failed", str(e))
             return
+        texture_bytes = read_gltf_texture_bytes(path, scene)
         from pluton.commands.gltf_commands import ImportGltfCommand
 
-        cmd = ImportGltfCommand(scene, self._model.active_context, root_name=Path(path).stem)
+        cmd = ImportGltfCommand(
+            scene,
+            self._model.active_context,
+            root_name=Path(path).stem,
+            texture_bytes=texture_bytes,
+            decoder=_texture_decoder,
+        )
         self._command_stack.execute(cmd, self._model)
         s = cmd.summary
         msg = f"Imported {s.faces_imported} faces in {s.nodes} object(s)"
         if s.faces_skipped:
             msg += f" (skipped {s.faces_skipped} faces)"
+        if s.faces_without_uvs:
+            msg += f" ({s.faces_without_uvs} without UVs)"
+        if s.images_skipped:
+            msg += f" ({s.images_skipped} image(s) skipped)"
         self._status_bar.set_message(msg)
         self._refresh_breadcrumb()
         self._viewport.update()

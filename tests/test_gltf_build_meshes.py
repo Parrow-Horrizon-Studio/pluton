@@ -14,10 +14,10 @@ def _scene(meshes, materials=()):
 def test_valid_mesh_builds_one_component_with_one_face():
     scene = _scene([GltfMesh(positions=TRI, triangles=((0, 1, 2),), material_index=-1)])
     model = Model()
-    mats = _ensure_gltf_materials(scene.materials, model)
-    meshdefs, imported, skipped, built = _build_mesh_components(scene, model, mats)
+    mats, _images_skipped = _ensure_gltf_materials(scene.materials, model)
+    meshdefs, imported, skipped, without_uvs, built = _build_mesh_components(scene, model, mats)
     assert built == 1
-    assert imported == 1 and skipped == 0
+    assert imported == 1 and skipped == 0 and without_uvs == 0
     assert meshdefs[0] is not None
     assert not meshdefs[0].is_group  # a Component
     assert len(list(meshdefs[0].mesh.faces_iter())) == 1
@@ -26,8 +26,8 @@ def test_valid_mesh_builds_one_component_with_one_face():
 def test_degenerate_triangle_is_skipped_and_component_dropped():
     scene = _scene([GltfMesh(positions=TRI, triangles=((0, 0, 1),), material_index=-1)])
     model = Model()
-    mats = _ensure_gltf_materials(scene.materials, model)
-    meshdefs, imported, skipped, built = _build_mesh_components(scene, model, mats)
+    mats, _images_skipped = _ensure_gltf_materials(scene.materials, model)
+    meshdefs, imported, skipped, without_uvs, built = _build_mesh_components(scene, model, mats)
     assert imported == 0 and skipped == 1
     assert meshdefs[0] is None and built == 0
 
@@ -39,7 +39,7 @@ def test_material_is_deduped_and_applied():
         materials=[mat],
     )
     model = Model()
-    mats = _ensure_gltf_materials(scene.materials, model)
+    mats, _images_skipped = _ensure_gltf_materials(scene.materials, model)
     assert mats[0] is not None
     meshdefs, *_ = _build_mesh_components(scene, model, mats)
     fid = next(iter(meshdefs[0].mesh.faces_iter())).id
@@ -49,4 +49,4 @@ def test_material_is_deduped_and_applied():
 def test_default_material_maps_to_none():
     mat = GltfMaterial(name="DefaultMaterial", color=(0.8, 0.8, 0.8))
     model = Model()
-    assert _ensure_gltf_materials((mat,), model) == [None]
+    assert _ensure_gltf_materials((mat,), model) == ([None], 0)

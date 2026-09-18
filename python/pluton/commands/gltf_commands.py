@@ -14,16 +14,25 @@ class ImportGltfCommand(Command):
 
     name = "Import glTF"
 
-    def __init__(self, scene, target_context, root_name="glTF") -> None:
+    def __init__(
+        self, scene, target_context, root_name="glTF", texture_bytes=None, decoder=None
+    ) -> None:
         self._scene = scene
         self._target = target_context
         self._root_name = root_name
+        self._texture_bytes = texture_bytes
+        self._decoder = decoder
         self._result = None
         self.summary = None
 
     def do(self, model) -> None:
         self._result = build_gltf_into_model(
-            self._scene, model, self._target, root_name=self._root_name
+            self._scene,
+            model,
+            self._target,
+            root_name=self._root_name,
+            texture_bytes=self._texture_bytes,
+            decoder=self._decoder,
         )
         self.summary = self._result.summary
 
