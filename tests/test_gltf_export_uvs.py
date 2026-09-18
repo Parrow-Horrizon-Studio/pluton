@@ -2,10 +2,11 @@
 
 import json
 import struct
+from pathlib import Path
 
 import numpy as np
 
-from pluton.io.gltf_export import model_to_gltf
+from pluton.io.gltf_export import export_gltf, model_to_gltf
 from pluton.model.model import Model
 from pluton.scene.scene import Side
 from pluton.viewport.uv_resolve import resolve_face_uvs as _resolver
@@ -252,3 +253,84 @@ def test_a_textured_material_gates_uvs_on_even_with_nothing_stored():
     asset = model_to_gltf(model, resolver=_resolver)
     doc, _read = _decode(asset)
     assert "TEXCOORD_0" in doc["meshes"][0]["primitives"][0]["attributes"]
+
+
+def test_glb_embeds_the_texture_image_in_the_buffer(tmp_path):
+    model = _textured_model()
+    export_gltf(model, tmp_path / "out.glb")
+    assert list(tmp_path.iterdir()) == [tmp_path / "out.glb"], "a GLB must be self-contained"
+    doc = _glb_json(tmp_path / "out.glb")
+    assert "bufferView" in doc["images"][0]
+    assert doc["materials"][0]["pbrMetallicRoughness"]["baseColorTexture"]["index"] == 0
+
+
+def test_gltf_writes_the_image_as_a_sibling(tmp_path):
+    model = _textured_model()
+    export_gltf(model, tmp_path / "out.gltf")
+    doc = json.loads((tmp_path / "out.gltf").read_text(encoding="utf-8"))
+    uri = doc["images"][0]["uri"]
+    assert (tmp_path / uri).is_file()
+    assert (tmp_path / uri).read_bytes() == _the_texture_bytes(model), "original bytes, no re-encode"
+    assert not list(tmp_path.glob("*.tmp")), "atomic write left a temp file behind"
+
+
+def test_an_untextured_model_writes_no_image_files(tmp_path):
+    export_gltf(_plain_model(), tmp_path / "out.gltf")
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["out.bin", "out.gltf"]
+
+
+def test_only_materials_actually_used_by_an_exported_face_get_images(tmp_path):
+    """A library texture on a material nothing is painted with must not be
+    written. OBJ's exporter already filters this way, and gltf_material_for is
+    only ever called for a material some face carries, so this pins that the
+    filter really is free rather than accidentally absent."""
+    model = _textured_model()
+    unused = model.materials.add_custom("Unused", (0.0, 1.0, 0.0))
+    stray = model.textures.add("stray", b"\x89PNG\r\n\x1a\nzzz", "png", 2, 2, False)
+    model.materials.edit(unused.id, texture_id=stray.id)
+
+    export_gltf(model, tmp_path / "out.gltf")
+    doc = json.loads((tmp_path / "out.gltf").read_text(encoding="utf-8"))
+    assert len(doc["images"]) == 1
+    assert not any(p.name.startswith("stray") for p in tmp_path.iterdir())
+
+
+def test_gltf_export_is_importable_with_no_qt_loaded():
+    """D7. A string scan for 'PySide6' passes against a lazy import that still
+    fires at call time, so this actually runs one."""
+    import subprocess
+    import sys
+
+    code = (
+        "import sys; import pluton.io.gltf_export; "
+        "assert not [m for m in sys.modules if m.startswith('PySide6')], "
+        "sorted(m for m in sys.modules if m.startswith('PySide6'))"
+    )
+    subprocess.run([sys.executable, "-c", code], check=True)
+
+
+_PNG = b"\x89PNG\r\n\x1a\nnot-really-decoded-here"
+
+
+def _textured_model():
+    """A quad on one material carrying one texture."""
+    model, fids = _two_faces_sharing_an_edge()
+    mid = _only_definition(model).mesh.face_material(fids[0])
+    tex = model.textures.add("brick", _PNG, "png", 4, 4, False)
+    model.materials.edit(mid, texture_id=tex.id)
+    return model
+
+
+def _the_texture_bytes(model):
+    return next(t for t in model.textures.textures() if t.name == "brick").data
+
+
+def _plain_model():
+    """Geometry with no textures and no stored UVs anywhere."""
+    return _two_material_model()
+
+
+def _glb_json(path):
+    b = Path(path).read_bytes()
+    length, _kind = struct.unpack_from("<II", b, 12)
+    return json.loads(b[20 : 20 + length])

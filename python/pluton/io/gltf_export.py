@@ -20,6 +20,14 @@ from pluton.io.gltf_codec import GltfAsset
 from pluton.scene.scene import Side
 
 
+def _sanitize_image_name(name: str) -> str:
+    """Collapse whitespace the way OBJ's material sanitizer does, for a
+    readable filename stem. This alone does NOT guarantee uniqueness -- two
+    textures can share a name, or sanitize to the same one -- so callers that
+    write a sidecar file must still disambiguate (see `gltf_material_for`)."""
+    return "_".join(str(name).split()) or "image"
+
+
 def _zup_to_yup() -> np.ndarray:
     """Rx(-90°): Pluton Z-up -> glTF Y-up. (x, y, z) -> (x, z, -y)."""
     return np.array(
@@ -109,19 +117,47 @@ def _definition_primitives(defn, gltf_material_for, resolver=None, materials=Non
 
 def model_to_gltf(model, resolver=None, embed_images=True) -> GltfAsset:
     """`resolver` is `uv_resolve.resolve_face_uvs`-shaped; None keeps today's
-    UV-free export. `embed_images` is Task 7's image-writing work; accepted
-    here only so this call's final signature does not change again."""
+    UV-free export. `embed_images` selects the container a textured material's
+    image lands in: True embeds it in the buffer (GLB), False records it as a
+    sidecar for the caller to write beside a .gltf."""
     asset = GltfAsset()
     default_id = model.materials.DEFAULT_ID
     mat_index: dict = {}
     mesh_index: dict = {}
+    texture_index: dict = {}  # Pluton texture id -> gltf texture index
 
     def gltf_material_for(mid):
+        # Called only for a material some face actually carries (Pass 1 of
+        # _definition_primitives), so an untextured or unused material's
+        # texture is never touched: the "used by an exported face" filter
+        # falls out of this for free.
         if mid == default_id:
             return None
         if mid not in mat_index:
             m = model.materials.get(mid)
-            mat_index[mid] = asset.add_material(m.name, m.base_color)
+            texture_idx = None
+            if m.texture_id is not None:
+                texture_idx = texture_index.get(m.texture_id)
+                if texture_idx is None:
+                    tex = model.textures.get(m.texture_id)
+                    if tex is not None:
+                        # Memoised by Pluton texture id, so two materials that
+                        # share one texture embed/write it once. Two DIFFERENT
+                        # textures can still sanitize to the same name (both
+                        # imported as "diffuse.png", say); appending the
+                        # texture's own id -- unique by construction in
+                        # TextureLibrary -- keeps the sidecar filename unique
+                        # too, so a later image never silently overwrites an
+                        # earlier one under the same key (the OBJ exporter's
+                        # #119, for the same family of bug over material
+                        # names rather than texture names).
+                        image_name = f"{_sanitize_image_name(tex.name)}_{tex.id}"
+                        image_idx = asset.add_image(
+                            tex.data, tex.image_format, image_name, embed=embed_images
+                        )
+                        texture_idx = asset.add_texture(image_idx)
+                        texture_index[m.texture_id] = texture_idx
+            mat_index[mid] = asset.add_material(m.name, m.base_color, texture=texture_idx)
         return mat_index[mid]
 
     def mesh_for(defn):
@@ -166,14 +202,28 @@ def _atomic_write_bytes(path: Path, data: bytes) -> None:
 
 
 def export_gltf(model, path) -> None:
-    """Write the whole model to `path`. `.gltf` -> JSON + a sibling `.bin`;
-    any other suffix (incl. `.glb`) -> a single binary GLB. Atomic writes."""
+    """Write the whole model to `path`. `.gltf` -> JSON + a sibling `.bin` +
+    one sibling image per textured material; any other suffix (incl. `.glb`)
+    -> a single self-contained binary GLB. Every file atomic.
+
+    `resolve_face_uvs` is imported here, lazily, for the reason `export_obj`
+    documents: `pluton/io` must not import `pluton.viewport` at module scope
+    because that package reaches Qt through the GPU-side texture loader.
+    `uv_resolve.py` is itself Qt-free, so importing it inside this function
+    keeps `pluton.io.gltf_export` importable with no Qt loaded while still
+    giving every caller real UVs with no extra argument.
+    """
+    from pluton.viewport.uv_resolve import resolve_face_uvs
+
     path = Path(path)
-    asset = model_to_gltf(model)
-    if path.suffix.lower() == ".gltf":
+    is_gltf = path.suffix.lower() == ".gltf"
+    asset = model_to_gltf(model, resolver=resolve_face_uvs, embed_images=not is_gltf)
+    if is_gltf:
         bin_name = path.stem + ".bin"
-        json_text, bin_bytes, _sidecars = asset.write_gltf(bin_name)
+        json_text, bin_bytes, sidecars = asset.write_gltf(bin_name)
         _atomic_write_bytes(path, json_text.encode("utf-8"))
         _atomic_write_bytes(path.with_name(bin_name), bin_bytes)
+        for filename, data in sidecars.items():
+            _atomic_write_bytes(path.with_name(filename), data)
     else:
         _atomic_write_bytes(path, asset.write_glb())
