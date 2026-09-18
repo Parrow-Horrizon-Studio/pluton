@@ -64,8 +64,16 @@ class MakeGroupCommand(Command):
             idmap[v] = defn.mesh.add_vertex(pos)
         for _e, v1, v2 in edges:
             defn.mesh.add_edge(idmap[v1], idmap[v2])
-        for _f, loop in faces:
-            defn.mesh.add_face_from_loop([idmap[v] for v in loop])
+        for f, loop in faces:
+            nf = defn.mesh.add_face_from_loop([idmap[v] for v in loop])
+            # add_face_from_loop mints a fresh id in a fresh Scene, so the
+            # face's material, placement and stored UVs do not come with it.
+            # Without this, grouping painted geometry silently un-paints it,
+            # and grouping an imported model strips the UVs that were the
+            # whole point of importing it (#114). Undo needs no counterpart:
+            # it restores the ORIGINAL face ids in the parent, whose entries
+            # were never removed.
+            defn.mesh.copy_face_attributes_from(parent_scene, f, nf)
 
         # 3. Remove lifted geometry from the parent (faces, then edges, then verts).
         for f, _loop in faces:

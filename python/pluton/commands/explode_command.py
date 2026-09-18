@@ -36,6 +36,11 @@ class ExplodeInstanceCommand(Command):
         new_faces = []
         for f in defn.mesh.faces_iter():
             nf = parent_scene.add_face_from_loop([idmap[v] for v in f.loop_vertex_ids])
+            # The inverse of the lift MakeGroupCommand performs, with the same
+            # gap: a fresh face id carries no material, placement or stored
+            # UVs (#114). The instance transform moves positions only, so the
+            # copy is verbatim; texture coordinates are not in world space.
+            parent_scene.copy_face_attributes_from(defn.mesh, f.id, nf)
             new_faces.append(nf)
         self._baked = (new_vids, new_eids, new_faces)
 

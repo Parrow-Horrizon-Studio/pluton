@@ -111,7 +111,12 @@ class Model:
         for e in definition.mesh.edges_iter():
             clone.mesh.add_edge(idmap[e.v1_id], idmap[e.v2_id])
         for f in definition.mesh.faces_iter():
-            clone.mesh.add_face_from_loop([idmap[v] for v in f.loop_vertex_ids])
+            nf = clone.mesh.add_face_from_loop([idmap[v] for v in f.loop_vertex_ids])
+            # A deep copy includes the face's material, texture placement and
+            # stored UVs. add_face_from_loop mints a fresh id and carries none
+            # of them, so without this Make Unique hands the user an
+            # unpainted copy of a painted component (#114's family).
+            clone.mesh.copy_face_attributes_from(definition.mesh, f.id, nf)
         for child in definition.children:
             new_child = self.new_instance(child.definition, child.transform)
             new_child.tag_id = child.tag_id

@@ -527,6 +527,51 @@ class Scene:
             )
         return result
 
+    def copy_face_attributes_from(self, source: Scene, src_fid: int, dst_fid: int) -> None:
+        """Copy one face's sidecars from another Scene onto a face of this one.
+
+        For a face rebuilt VERBATIM in a different Scene: same corners, same
+        order, same plane, a brand new id. That is what Make Group and Explode
+        do, replaying geometry through `add_face_from_loop`, which mints a
+        fresh id and carries nothing with it. Without this every lift silently
+        un-paints the geometry it moves (#114).
+
+        Materials and placements copy as they are. Stored UVs are parallel to
+        the loop, so they copy only when both loops have the same length; a
+        mismatch means the face was not in fact rebuilt verbatim, and dropping
+        the array returns that face to the projection rather than mapping
+        corners that do not correspond.
+
+        Nothing is written for an attribute the source does not have. Writing
+        a default would make every lifted face look painted to
+        `faces_with_material`, which drives the user-facing "used on N faces"
+        count.
+
+        This is the verbatim sibling of `_transfer_face_attributes`, which
+        handles the one case where a rebuilt face's loop GREW: a split inserts
+        a corner and interpolates a UV for it. Merges are handled by neither,
+        deliberately (decision D4a: two candidate sources, no defensible
+        winner).
+        """
+        src_fid = int(src_fid)
+        dst_fid = int(dst_fid)
+        loops_match = len(source.face_loop(src_fid)) == len(self.face_loop(dst_fid))
+
+        for side in (Side.FRONT, Side.BACK):
+            material = source._materials_for(side).get(src_fid)
+            if material is not None:
+                self._materials_for(side)[dst_fid] = material
+
+            placement = source._placements_for(side).get(src_fid)
+            if placement is not None:
+                self._placements_for(side)[dst_fid] = placement
+
+            stored = source._uvs_for(side).get(src_fid)
+            if stored is not None and loops_match:
+                self._uvs_for(side)[dst_fid] = np.array(stored, dtype=np.float32)
+
+        self._render_dirty = True
+
     def _transfer_face_attributes(
         self,
         old_fid: int,
