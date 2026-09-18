@@ -144,6 +144,53 @@ def test_an_undecodable_image_leaves_the_material_untextured_and_counts_it():
     assert result.summary.images_skipped == 1
 
 
+def test_an_image_dropped_upstream_is_counted_even_with_empty_texture_bytes():
+    """read_gltf_texture_bytes DROPS an entry entirely (never a placeholder)
+    for an image that is missing, unreadable, outside the containment
+    directory, or raw texels with no encoded form. So a document that lost
+    every one of its images hands back an EMPTY texture_bytes dict, and
+    `not {}` is True -- the trap this test pins is treating that as "nothing
+    was attempted" instead of "everything referenced was lost".
+    """
+    model = Model()
+    mat = GltfMaterial("Brick", (1.0, 1.0, 1.0), texture_index=-1, texture_uri="missing.png")
+    scene = _scene(materials=(mat,), material_index=0)
+    result = build_gltf_into_model(scene, model, model.root, texture_bytes={}, decoder=_decoder)
+    mats = [m for m in model.materials.materials() if m.name == "Brick"]
+    assert mats[0].texture_id is None
+    assert result.summary.images_skipped == 1
+
+
+def test_an_upstream_drop_and_a_decode_failure_both_reach_the_counter():
+    """Two different causes of 'this material stayed untextured' must both
+    land in images_skipped, so one cause discovered first in testing does
+    not mask a regression in the other."""
+    model = Model()
+    dropped = GltfMaterial("Dropped", (1.0, 0.0, 0.0), texture_index=-1, texture_uri="missing.png")
+    undecodable = GltfMaterial("Undecodable", (0.0, 1.0, 0.0), texture_index=1, texture_uri="")
+    mesh = GltfMesh(positions=_POS, triangles=_TRIS, material_index=0)
+    node = GltfNode(name="N", parent=-1, transform=tuple(np.eye(4).flatten()), mesh_indices=(0,))
+    scene = GltfSceneData(nodes=(node,), meshes=(mesh,), materials=(dropped, undecodable))
+    result = build_gltf_into_model(
+        scene,
+        model,
+        model.root,
+        texture_bytes={1: b"not an image"},
+        decoder=lambda d: None,
+    )
+    assert result.summary.images_skipped == 2
+
+
+def test_a_material_with_no_texture_reference_is_never_counted():
+    """Discriminates against the count degenerating into 'number of
+    materials': a plain, never-textured material must contribute 0."""
+    model = Model()
+    mat = GltfMaterial("Plain", (0.5, 0.5, 0.5))  # texture_index=-1, texture_uri="" (defaults)
+    scene = _scene(materials=(mat,), material_index=0)
+    result = build_gltf_into_model(scene, model, model.root, texture_bytes={}, decoder=_decoder)
+    assert result.summary.images_skipped == 0
+
+
 def test_reimporting_the_same_document_does_not_pile_up_textures():
     """The accumulation regression stage 2 shipped and then fixed in OBJ."""
     model = Model()

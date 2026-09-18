@@ -335,7 +335,27 @@ def _ensure_gltf_materials(materials, model, texture_bytes=None, decoder=None) -
             used_names.add(new.name)
             result.append(new.id)
 
-    images_skipped = 0
+    # A material can lose its texture before it ever reaches the loop below:
+    # read_gltf_texture_bytes drops an entry entirely when the image is
+    # missing, unreadable, outside the containment directory, or (D17)
+    # raw texels with no encoded form. That makes `texture_bytes` an
+    # already-filtered map, so a dropped image must be counted here, against
+    # the full material list, before the `not texture_bytes` early return
+    # below -- otherwise a document that lost every one of its images (the
+    # single most common real-world break: a .gltf shipped without its
+    # texture folder) hands back an EMPTY dict, `not {}` is True, and this
+    # function returns 0 skipped for a model that imports fully untextured.
+    # Gated on an attempt having actually been made (`is not None` on both),
+    # so a caller that never wired up texture import (several existing tests)
+    # is not scored as having skipped every textured material.
+    dropped_upstream = 0
+    if texture_bytes is not None and decoder is not None:
+        for index, gm in enumerate(materials):
+            has_texture_ref = gm.texture_index >= 0 or bool(gm.texture_uri)
+            if has_texture_ref and not texture_bytes.get(index):
+                dropped_upstream += 1
+
+    images_skipped = dropped_upstream
     if not texture_bytes or decoder is None:
         return result, images_skipped
 
