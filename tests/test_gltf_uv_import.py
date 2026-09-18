@@ -206,3 +206,55 @@ def test_reimporting_the_same_document_does_not_pile_up_textures():
         m for m in model.materials.materials() if m.name == "Brick" or m.name.startswith("Brick.")
     ]
     assert len(brick_named) == 1
+
+
+def test_a_material_colliding_with_a_differently_textured_one_mints_a_new_material():
+    """Finding 7 (M7.5c-3 whole-branch review): the ledger left this branch
+    untested, reasoning it was "structurally identical to OBJ's proven
+    code" (test_obj_texture_import.py's
+    test_reusing_a_material_with_a_different_texture_does_not_retexture_it
+    and its three-import sequel). It is not identical: `_ensure_gltf_materials`
+    searches for a reusable minted material by `(texture_id, base_color)`, a
+    key OBJ's equivalent code does not use, and it is roughly 25 lines of new
+    branching logic the OBJ test cannot exercise. This pins the same
+    accumulation bug stage 2 shipped and then fixed for OBJ, on the glTF
+    side: a name+color collision with a material that already carries a
+    DIFFERENT texture must mint a new material rather than repoint the
+    existing one (which would silently retexture every pre-existing face
+    painted with it), and a repeat import of the same colliding document
+    must reuse that minted material rather than piling up a third one."""
+    model = Model()
+    scene = _textured_scene()  # GltfMaterial("Brick", (1.0, 1.0, 1.0), texture_index=0)
+
+    # A pre-existing "Brick" material with the name+color the import will
+    # collide on, already textured with a DIFFERENT image than the one this
+    # import carries.
+    old_mat = model.materials.add_custom("Brick", (1.0, 1.0, 1.0))
+    old_tex = model.textures.add("Brick", b"\x89PNG\r\n\x1a\n-old-bytes", "png", 2, 2, False)
+    model.materials.edit(old_mat.id, texture_id=old_tex.id)
+
+    build_gltf_into_model(
+        scene, model, model.root, texture_bytes={0: scene.images[0].data}, decoder=_decoder
+    )
+
+    # The pre-existing material is untouched: never repointed at the new image.
+    unchanged = model.materials.get(old_mat.id)
+    assert unchanged.texture_id == old_tex.id
+
+    # The import got its own new material, textured with the NEW image.
+    textured = [m for m in model.materials.materials() if m.texture_id is not None]
+    assert len(textured) == 2, "the original Brick plus one minted for the collision"
+    new_mat = next(m for m in textured if m.id != old_mat.id)
+    new_tex = model.textures.get(new_mat.texture_id)
+    assert new_tex.data == scene.images[0].data
+
+    # A second, identical import reuses the minted material+texture rather
+    # than piling up a third material and a duplicate byte-identical image.
+    build_gltf_into_model(
+        scene, model, model.root, texture_bytes={0: scene.images[0].data}, decoder=_decoder
+    )
+    textured_after = [m for m in model.materials.materials() if m.texture_id is not None]
+    assert len(textured_after) == 2
+    assert len(list(model.textures.textures())) == 2
+    still_unchanged = model.materials.get(old_mat.id)
+    assert still_unchanged.texture_id == old_tex.id
