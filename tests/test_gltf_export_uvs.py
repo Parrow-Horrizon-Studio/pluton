@@ -334,3 +334,63 @@ def _glb_json(path):
     b = Path(path).read_bytes()
     length, _kind = struct.unpack_from("<II", b, 12)
     return json.loads(b[20 : 20 + length])
+
+
+def test_two_materials_sharing_one_texture_embed_it_once():
+    """The memoisation contract this task's brief calls out: keyed on Pluton
+    texture id, not material id, so two DIFFERENT materials painted with the
+    SAME texture must still produce exactly one glTF image/texture pair, both
+    materials' baseColorTexture pointing at it. Nothing else in this file
+    pins this: a future refactor that memoised per-material instead would
+    silently double the embedded bytes on every multi-material textured
+    export, and the suite would stay green."""
+    model, fids = _two_faces_sharing_an_edge()
+    mesh = _only_definition(model).mesh
+    mat_a = model.materials.add_custom("A", (1.0, 0.0, 0.0))
+    mat_b = model.materials.add_custom("B", (0.0, 0.0, 1.0))
+    mesh.set_face_material(fids[0], mat_a.id)
+    mesh.set_face_material(fids[1], mat_b.id)
+    tex = model.textures.add("shared", _PNG, "png", 4, 4, False)
+    model.materials.edit(mat_a.id, texture_id=tex.id)
+    model.materials.edit(mat_b.id, texture_id=tex.id)
+
+    asset = model_to_gltf(model, resolver=_resolver)
+    doc, _read = _decode(asset)
+
+    assert len(doc["images"]) == 1, "one shared texture must embed exactly once"
+    assert len(doc["materials"]) == 2, "both materials must still be exported"
+    for mat in doc["materials"]:
+        assert mat["pbrMetallicRoughness"]["baseColorTexture"]["index"] == 0
+
+
+def test_two_distinct_textures_sharing_a_sanitized_name_do_not_collide(tmp_path):
+    """The exact scenario that motivated appending the texture id to the
+    sidecar filename: two DIFFERENT textures (different bytes, different
+    Pluton ids) that both sanitize to "diffuse", each painted on its own
+    material, both materials used by an exported face. Without the id
+    suffix, `add_image(embed=False)` would write both under the filename
+    "diffuse.png" in `sidecars`, the second call silently overwriting the
+    first -- the OBJ #119 bug, one level down (texture names rather than
+    material names). This is written to fail against that pre-fix scheme:
+    see the task report for the RED run with the suffix removed."""
+    model, fids = _two_faces_sharing_an_edge()
+    mesh = _only_definition(model).mesh
+    mat_a = model.materials.add_custom("A", (1.0, 0.0, 0.0))
+    mat_b = model.materials.add_custom("B", (0.0, 0.0, 1.0))
+    mesh.set_face_material(fids[0], mat_a.id)
+    mesh.set_face_material(fids[1], mat_b.id)
+    tex_a = model.textures.add("diffuse", _PNG, "png", 4, 4, False)
+    tex_b = model.textures.add("diffuse", _PNG + b"-not-the-same-bytes", "png", 4, 4, False)
+    model.materials.edit(mat_a.id, texture_id=tex_a.id)
+    model.materials.edit(mat_b.id, texture_id=tex_b.id)
+
+    export_gltf(model, tmp_path / "out.gltf")
+    doc = json.loads((tmp_path / "out.gltf").read_text(encoding="utf-8"))
+
+    assert len(doc["images"]) == 2
+    uris = [img["uri"] for img in doc["images"]]
+    assert len(set(uris)) == 2, "two distinct textures must not share one sidecar filename"
+
+    written = {uri: (tmp_path / uri).read_bytes() for uri in uris}
+    assert len(written) == 2, "two distinct sidecar files must exist on disk"
+    assert set(written.values()) == {tex_a.data, tex_b.data}, "each file keeps its own bytes"
