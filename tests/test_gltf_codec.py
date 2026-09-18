@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 import struct
 
+import pytest
+
 from pluton.io.gltf_codec import GltfAsset
 
 TRI_POS = [(0.0, 0.0, 0.0), (1.0, 0.0, 0.0), (0.0, 1.0, 0.0)]
@@ -116,3 +118,27 @@ def test_json_omits_empty_image_and_texture_arrays():
     assert "images" not in doc
     assert "textures" not in doc
     assert "samplers" not in doc
+
+
+def test_mismatched_uv_and_position_counts_are_refused():
+    """A glTF primitive indexes POSITION and TEXCOORD_0 through ONE index
+    buffer, so their accessor counts must be equal. Unequal counts produce a
+    file that is invalid by spec but that no validator in this codebase runs.
+
+    Without this guard the only defence lives in the single caller
+    (gltf_export._definition_primitives, which appends to both pools inside
+    one branch), and a reviewer had to hand-trace that control flow to prove
+    the invariant. A future caller will not have that trace. Refusing here
+    turns an unnoticed invalid export into an exception at the point of the
+    mistake.
+    """
+    a = GltfAsset()
+    with pytest.raises(ValueError, match="TEXCOORD_0"):
+        a.add_mesh([(TRI_POS, [(0.0, 0.0), (1.0, 0.0)], TRI_IDX, None)])
+
+
+def test_a_matching_uv_count_is_still_accepted():
+    """The guard must not reject the legitimate case it sits next to."""
+    a = GltfAsset()
+    uvs = [(0.0, 0.0), (1.0, 0.0), (0.5, 1.0)]
+    assert a.add_mesh([(TRI_POS, uvs, TRI_IDX, None)]) == 0

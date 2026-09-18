@@ -113,8 +113,22 @@ class GltfAsset:
         return len(self.accessors) - 1
 
     def add_mesh(self, primitives) -> int:
+        """Each primitive is (positions, uvs|None, indices, material|None).
+
+        A primitive with UVs must supply exactly one per position: glTF indexes
+        POSITION and TEXCOORD_0 through the SAME index buffer, so their accessor
+        counts have to match. Unequal counts assemble happily here and produce a
+        file that is invalid by spec but that nothing in this codebase would
+        reject, so the mistake would only surface in whatever tool opened it.
+        Refusing at the assembly layer puts the error where the caller made it.
+        """
         prims = []
         for positions, uvs, indices, mat in primitives:
+            if uvs is not None and len(uvs) != len(positions):
+                raise ValueError(
+                    f"TEXCOORD_0 has {len(uvs)} entries but POSITION has {len(positions)}; "
+                    "a glTF primitive indexes both through one index buffer"
+                )
             p = {
                 "attributes": {"POSITION": self._add_position_accessor(positions)},
                 "indices": self._add_index_accessor(indices),
