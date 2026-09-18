@@ -8,8 +8,12 @@ reproduce or explain.
 
 Every image here is asymmetric under BOTH a horizontal and a vertical flip.
 glTF's TEXCOORD_0 origin is the image's upper left and Pluton's v = 0 is the
-image's bottom, so import and export both flip v; a fixture symmetric under a
-vertical flip cannot tell a correct flip from a missing one.
+image's bottom, but the V conversion is deliberately asymmetric (D14): import
+performs NO flip, because Assimp's glTF2 importer already applies 1 - v
+before the bridge ever sees a coordinate, and export performs ONE flip,
+because it writes through Pluton's own gltf_codec rather than through Assimp.
+A fixture symmetric under a vertical flip cannot tell a correct flip (or its
+absence) from a missing one, on either side of that asymmetry.
 """
 
 from __future__ import annotations
@@ -196,7 +200,12 @@ def build_textured_box_gltf(bin_name: str) -> tuple[str, bytes]:
 
 _AVOCADO_BASE = (
     "https://raw.githubusercontent.com/KhronosGroup/glTF-Sample-Assets"
-    "/main/Models/Avocado/glTF-Draco/"
+    # Pinned to a commit rather than /main/: the module docstring above and
+    # tests/data/gltf/README.md both claim these fixtures are reproducible
+    # from this committed recipe, which a moving ref would make false the
+    # day upstream edits this path. Confirmed to serve byte-identical
+    # Avocado.gltf/Avocado.bin to /main/ as of 2026-09-18.
+    "/2c541692872556495b23320527def2268b4c69a5/Models/Avocado/glTF-Draco/"
 )
 
 

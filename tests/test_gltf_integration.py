@@ -66,6 +66,20 @@ def test_assimp_already_flips_v_CI_GATE():  # noqa: N802 (permanent CI gate mark
     bin_start = 20 + json_len + 8
     accessor = doc["accessors"][doc["meshes"][0]["primitives"][0]["attributes"]["TEXCOORD_0"]]
     view = doc["bufferViews"][accessor["bufferView"]]
+    # This gate only reads bufferView.byteOffset below; it does not account
+    # for accessor.byteOffset or an interleaved bufferView.byteStride. Both
+    # are absent from the current fixture, so ignoring them is harmless
+    # today, but a silent regeneration that changed the layout would make
+    # this gate compare the wrong bytes instead of failing. Assert the
+    # layout this gate actually knows how to read, so a future fixture that
+    # needs either one fails here by name instead of corrupting the
+    # comparison below.
+    assert accessor.get("byteOffset", 0) == 0, (
+        "gate does not account for accessor.byteOffset; update it before trusting this fixture"
+    )
+    assert "byteStride" not in view, (
+        "gate does not account for an interleaved bufferView.byteStride; update it first"
+    )
     base = bin_start + view.get("byteOffset", 0)
     file_uvs = [struct.unpack_from("<2f", raw, base + i * 8) for i in range(accessor["count"])]
 
