@@ -5,6 +5,7 @@ import struct
 from pathlib import Path
 
 import numpy as np
+import pytest
 
 from pluton.io.gltf_export import export_gltf, model_to_gltf
 from pluton.model.model import Model
@@ -394,3 +395,104 @@ def test_two_distinct_textures_sharing_a_sanitized_name_do_not_collide(tmp_path)
     written = {uri: (tmp_path / uri).read_bytes() for uri in uris}
     assert len(written) == 2, "two distinct sidecar files must exist on disk"
     assert set(written.values()) == {tex_a.data, tex_b.data}, "each file keeps its own bytes"
+
+
+@pytest.mark.parametrize(
+    "texture_name",
+    ["../../pwned", "a:b", "a#b", "!!!!!!"],
+)
+def test_a_hostile_texture_name_exports_a_safe_sidecar(tmp_path, texture_name):
+    """Finding 1 (M7.5c-3 whole-branch review): a texture name is untrusted
+    text -- on import a texture is minted with the name of the source
+    document's own material -- and it becomes both a `Path.with_name`
+    filename and a glTF `image.uri`. Before the fix, '../../pwned' raised
+    ValueError('Invalid name ...') from `Path.with_name` AFTER out.gltf and
+    out.bin were already written, leaving a half-exported document with an
+    unescaped '../../pwned_1.png' URI on disk (see the task report's RED
+    evidence). Every one of these names must now produce a complete export
+    with a safe sidecar filename instead."""
+    model, fids = _two_faces_sharing_an_edge()
+    mesh = _only_definition(model).mesh
+    mid = mesh.face_material(fids[0])
+    tex = model.textures.add(texture_name, _PNG, "png", 4, 4, False)
+    model.materials.edit(mid, texture_id=tex.id)
+
+    out = tmp_path / "out.gltf"
+    export_gltf(model, out)
+
+    doc = json.loads(out.read_text(encoding="utf-8"))
+    uri = doc["images"][0]["uri"]
+    assert "/" not in uri and "\\" not in uri and ":" not in uri
+    assert "#" not in uri and "?" not in uri and "%" not in uri
+    written = tmp_path / uri
+    assert written.is_file()
+    assert written.read_bytes() == _PNG
+    assert not list(tmp_path.glob("*.tmp")), "atomic write left a temp file behind"
+
+
+def test_a_resolver_failure_on_one_face_degrades_that_face_not_the_export():
+    """Finding 6 (M7.5c-3 whole-branch review): OBJ's `_uv_indices_for` wraps
+    its resolver call in `except (KeyError, ValueError)` and degrades that
+    one face to no UV contribution. The glTF path called the resolver bare,
+    so any resolver failure -- including the `zip(..., strict=True)` above
+    turning a stored-UV/loop-length mismatch into a ValueError -- aborted the
+    WHOLE export. `model_to_gltf` itself never touches disk, so this pins the
+    in-memory shape directly: positions and uvs must stay in lockstep and
+    both faces must still be triangulated."""
+    model, fids = _two_faces_sharing_an_edge()
+    mesh = _only_definition(model).mesh
+    mid = mesh.face_material(fids[0])
+    tex = model.textures.add("brick", _PNG, "png", 4, 4, False)
+    model.materials.edit(mid, texture_id=tex.id)
+    failing_fid = fids[0]
+
+    def flaky_resolver(mesh_, materials_, fid, side):
+        if fid == failing_fid:
+            raise ValueError("simulated resolver failure")
+        return _resolver(mesh_, materials_, fid, side)
+
+    asset = model_to_gltf(model, resolver=flaky_resolver)
+    doc, read = _decode(asset)
+    prim = doc["meshes"][0]["primitives"][0]
+    positions = read(prim["attributes"]["POSITION"])
+    uvs = read(prim["attributes"]["TEXCOORD_0"])
+    assert len(positions) == len(uvs), "positions and uvs pools must stay in lockstep"
+    indices = read(prim["indices"])
+    assert len(indices) == 6, "both triangles (both faces) must still be exported"
+
+
+def test_a_resolver_failure_still_produces_a_complete_export_on_disk(tmp_path, monkeypatch):
+    """The disk-write shape of the same fix: `export_gltf` has no resolver
+    parameter of its own (it lazily imports the real `resolve_face_uvs`), so
+    this monkeypatches that import target -- the same lazy `from X import Y`
+    pattern `export_obj` uses, re-resolved on every call -- to prove a
+    resolver failure still yields a complete, valid .gltf + .bin rather than
+    an uncaught exception with partial output already on disk."""
+    import pluton.viewport.uv_resolve as uv_resolve_mod
+
+    model, fids = _two_faces_sharing_an_edge()
+    mesh = _only_definition(model).mesh
+    mid = mesh.face_material(fids[0])
+    tex = model.textures.add("brick", _PNG, "png", 4, 4, False)
+    model.materials.edit(mid, texture_id=tex.id)
+    failing_fid = fids[0]
+    real_resolver = uv_resolve_mod.resolve_face_uvs
+
+    def flaky_resolver(mesh_, materials_, fid, side):
+        if fid == failing_fid:
+            raise ValueError("simulated resolver failure")
+        return real_resolver(mesh_, materials_, fid, side)
+
+    monkeypatch.setattr(uv_resolve_mod, "resolve_face_uvs", flaky_resolver)
+
+    out = tmp_path / "out.gltf"
+    export_gltf(model, out)
+
+    assert out.is_file()
+    assert (tmp_path / "out.bin").is_file()
+    doc = json.loads(out.read_text(encoding="utf-8"))
+    prim = doc["meshes"][0]["primitives"][0]
+    pos_count = doc["accessors"][prim["attributes"]["POSITION"]]["count"]
+    uv_count = doc["accessors"][prim["attributes"]["TEXCOORD_0"]]["count"]
+    assert pos_count == uv_count
+    assert not list(tmp_path.glob("*.tmp")), "atomic write left a temp file behind"

@@ -17,15 +17,20 @@ from pathlib import Path
 import numpy as np
 
 from pluton.io.gltf_codec import GltfAsset
+from pluton.io.image_paths import sanitize_filename_stem
 from pluton.scene.scene import Side
 
 
 def _sanitize_image_name(name: str) -> str:
-    """Collapse whitespace the way OBJ's material sanitizer does, for a
-    readable filename stem. This alone does NOT guarantee uniqueness -- two
+    """A filename- and URI-safe stem for a texture name (image_paths.
+    sanitize_filename_stem): the name becomes both a `Path.with_name`
+    filename and a glTF `image.uri`, and is untrusted -- on import a texture
+    is minted with the name of the source document's own material, arbitrary
+    text from a file someone else authored (see gltf_import.
+    _find_or_decode_texture). This alone does NOT guarantee uniqueness -- two
     textures can share a name, or sanitize to the same one -- so callers that
     write a sidecar file must still disambiguate (see `gltf_material_for`)."""
-    return "_".join(str(name).split()) or "image"
+    return sanitize_filename_stem(str(name), "image")
 
 
 def _zup_to_yup() -> np.ndarray:
@@ -80,21 +85,37 @@ def _definition_primitives(defn, gltf_material_for, resolver=None, materials=Non
         positions, uvs, indices, slot_of = pools[gmat]
         uv_for_vid: dict = {}
         if needs_uvs.get(gmat):
-            resolved = np.asarray(
-                resolver(mesh, materials, f.id, Side.FRONT), dtype=np.float64
-            ).reshape(-1, 2)
-            for lv, (u, v) in zip(f.loop_vertex_ids, resolved, strict=True):
-                # A pinched face repeats a vertex in its loop; first corner
-                # wins, matching what the renderer samples for it. Stage 1's
-                # set_face_uvs refuses to store for such a face at all, so
-                # this only arises for a projected base.
-                #
-                # glTF's TEXCOORD_0 origin is the image's UPPER left and
-                # Pluton's v = 0 is its BOTTOM, so the flip belongs here.
-                # Export writes through Pluton's own codec rather than
-                # Assimp, unlike import: see gltf_import._corner_uvs, whose
-                # docstring explains why import does NOT flip. D14.
-                uv_for_vid.setdefault(int(lv), (float(u), 1.0 - float(v)))
+            try:
+                resolved = np.asarray(
+                    resolver(mesh, materials, f.id, Side.FRONT), dtype=np.float64
+                ).reshape(-1, 2)
+                for lv, (u, v) in zip(f.loop_vertex_ids, resolved, strict=True):
+                    # A pinched face repeats a vertex in its loop; first
+                    # corner wins, matching what the renderer samples for it.
+                    # Stage 1's set_face_uvs refuses to store for such a face
+                    # at all, so this only arises for a projected base.
+                    #
+                    # glTF's TEXCOORD_0 origin is the image's UPPER left and
+                    # Pluton's v = 0 is its BOTTOM, so the flip belongs here.
+                    # Export writes through Pluton's own codec rather than
+                    # Assimp, unlike import: see gltf_import._corner_uvs,
+                    # whose docstring explains why import does NOT flip. D14.
+                    uv_for_vid.setdefault(int(lv), (float(u), 1.0 - float(v)))
+            except (KeyError, ValueError):
+                # Matches obj_io._uv_indices_for's contract: a face whose UVs
+                # cannot be resolved (or whose resolved array's length does
+                # not match its loop, the strict=True zip above) degrades to
+                # no UV contribution for THIS face, rather than raising out
+                # of an export that has already written partial output
+                # (.gltf + .bin, and any earlier sidecar images) to disk.
+                # uv_for_vid stays empty, so every corner below falls through
+                # to the (0.0, 0.0) placeholder, exactly like an untextured
+                # face with nothing stored -- the positions and uvs pools
+                # stay in lockstep because pass 2 unconditionally appends one
+                # uv entry per new position slot whenever needs_uvs[gmat] is
+                # true, whether or not uv_for_vid has anything for that
+                # vertex.
+                uv_for_vid = {}
         for tri in f.triangles:  # kernel earcut triangulation (concave-safe)
             for vid in tri:
                 vid = int(vid)

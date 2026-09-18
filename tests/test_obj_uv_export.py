@@ -2,6 +2,7 @@ import subprocess
 import sys
 
 import numpy as np
+import pytest
 from pluton.io.obj_codec import parse_obj
 from pluton.io.obj_io import export_obj, model_to_objdoc
 from pluton.model.model import Model
@@ -96,6 +97,35 @@ def test_the_texture_image_is_written_beside_the_obj(tmp_path):
     assert image.is_file()
     assert image.read_bytes() == FAKE_PNG
     assert "map_Kd brick.png" in (tmp_path / "m.mtl").read_text(encoding="utf-8")
+
+
+@pytest.mark.parametrize(
+    "material_name",
+    ["../../pwned", "a:b", "a#b", "!!!!!!"],
+)
+def test_a_hostile_material_name_exports_a_safe_sidecar(tmp_path, material_name):
+    """Finding 1 (M7.5c-3 whole-branch review): sanitize_material_name feeds
+    a `Path.with_name` filename for the texture sidecar, and a material name
+    is untrusted text from a file someone else authored (the glTF side of
+    this same defect is pinned in test_gltf_export_uvs.py). The export must
+    complete and the written image filename must be safe."""
+    model, fid = _model_with_stored_uvs()
+    tex = model.textures.add("brick", FAKE_PNG, "png", 4, 8, False)
+    mat = model.materials.add_custom(material_name, (1.0, 1.0, 1.0))
+    model.materials.edit(mat.id, texture_id=tex.id)
+    model.root.mesh.set_face_material(fid, mat.id, Side.FRONT)
+
+    out = tmp_path / "m.obj"
+    export_obj(out, model)
+
+    mtl_text = (tmp_path / "m.mtl").read_text(encoding="utf-8")
+    (map_kd_line,) = [line for line in mtl_text.splitlines() if line.startswith("map_Kd ")]
+    image_name = map_kd_line.removeprefix("map_Kd ").strip()
+    assert "/" not in image_name and "\\" not in image_name and ":" not in image_name
+    assert "#" not in image_name and "?" not in image_name and "%" not in image_name
+    written = tmp_path / image_name
+    assert written.is_file()
+    assert written.read_bytes() == FAKE_PNG
 
 
 def test_a_round_trip_preserves_the_uvs(tmp_path):

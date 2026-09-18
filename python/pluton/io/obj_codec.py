@@ -11,6 +11,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 from pluton.io.errors import PlutonFormatError
+from pluton.io.image_paths import sanitize_filename_stem
 
 
 @dataclass(frozen=True)
@@ -37,8 +38,12 @@ class ObjDocument:
 
 
 def sanitize_material_name(name: str) -> str:
-    """OBJ names are whitespace-delimited tokens; collapse whitespace to '_'."""
-    return "_".join(str(name).split()) or "material"
+    """OBJ names are whitespace-delimited tokens; collapse whitespace to '_',
+    and restrict to filesystem-safe characters (image_paths.sanitize_filename_stem):
+    this name flows into a `Path.with_name` filename for a texture sidecar
+    (obj_io.export_obj), and an OBJ material name is untrusted text from a
+    file someone else authored."""
+    return sanitize_filename_stem(name, "material")
 
 
 def write_obj(doc: ObjDocument, mtl_filename: str = "model.mtl") -> tuple[str, str | None]:
