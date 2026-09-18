@@ -30,8 +30,11 @@ class GltfMesh:
     positions: tuple[tuple[float, float, float], ...]
     triangles: tuple[tuple[int, int, int], ...]
     material_index: int  # -1 = none
-    # Empty, or one entry per position. Still in glTF's convention (origin
-    # upper-left); build_gltf_into_model flips v into Pluton's (D14).
+    # Empty, or one entry per position. ALREADY in Pluton's convention (v = 0
+    # is the image bottom): Assimp's glTF2 importer applies 1 - v before the
+    # bridge sees a coordinate, so import performs no flip of its own. Export
+    # is asymmetric and does flip, because it writes through Pluton's own
+    # codec rather than Assimp. See D14 and test_assimp_already_flips_v_CI_GATE.
     uvs: tuple[tuple[float, float], ...] = ()
 
 
