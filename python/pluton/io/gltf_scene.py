@@ -11,9 +11,18 @@ from dataclasses import dataclass
 
 
 @dataclass(frozen=True)
+class GltfImage:
+    name: str
+    data: bytes  # the image file's ENCODED bytes; empty means raw texels (D17)
+    format_hint: str
+
+
+@dataclass(frozen=True)
 class GltfMaterial:
     name: str
     color: tuple[float, float, float]  # RGB; alpha dropped
+    texture_index: int = -1  # index into GltfSceneData.images, -1 = none
+    texture_uri: str = ""  # an external image filename, unresolved
 
 
 @dataclass(frozen=True)
@@ -21,6 +30,9 @@ class GltfMesh:
     positions: tuple[tuple[float, float, float], ...]
     triangles: tuple[tuple[int, int, int], ...]
     material_index: int  # -1 = none
+    # Empty, or one entry per position. Still in glTF's convention (origin
+    # upper-left); build_gltf_into_model flips v into Pluton's (D14).
+    uvs: tuple[tuple[float, float], ...] = ()
 
 
 @dataclass(frozen=True)
@@ -36,3 +48,4 @@ class GltfSceneData:
     nodes: tuple[GltfNode, ...]
     meshes: tuple[GltfMesh, ...]
     materials: tuple[GltfMaterial, ...]
+    images: tuple[GltfImage, ...] = ()

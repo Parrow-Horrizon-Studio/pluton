@@ -13,6 +13,7 @@ from pathlib import Path
 
 import numpy as np
 
+from pluton.io.image_paths import read_sibling_image_bytes
 from pluton.io.obj_codec import (
     ObjDocument,
     ObjFace,
@@ -214,18 +215,12 @@ def read_obj_texture_bytes(path, doc) -> dict[str, bytes]:
     missing, unreadable or outside the document's directory is skipped rather
     than failing the import. The caller decides what to do with an empty result.
     """
-    base = Path(path).parent.resolve()
+    base = Path(path).parent
     out: dict[str, bytes] = {}
     for name, rel in doc.material_textures.items():
-        try:
-            candidate = (base / rel).resolve()
-            if not candidate.is_relative_to(base):
-                continue
-            if not candidate.is_file():
-                continue
-            out[name] = candidate.read_bytes()
-        except (OSError, ValueError):
-            continue
+        data = read_sibling_image_bytes(base, rel)
+        if data is not None:
+            out[name] = data
     return out
 
 

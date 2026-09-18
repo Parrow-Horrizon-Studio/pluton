@@ -15,7 +15,8 @@ from typing import TYPE_CHECKING
 import numpy as np
 
 from pluton.io.errors import PlutonFormatError
-from pluton.io.gltf_scene import GltfMaterial, GltfMesh, GltfNode, GltfSceneData
+from pluton.io.gltf_scene import GltfImage, GltfMaterial, GltfMesh, GltfNode, GltfSceneData
+from pluton.io.image_paths import read_sibling_image_bytes
 
 if TYPE_CHECKING:
     from pluton.model.instance import Instance
@@ -66,7 +67,12 @@ def read_gltf_scene(path) -> GltfSceneData:
         raise PlutonFormatError(f"Could not import glTF: {e}") from e
 
     materials = tuple(
-        GltfMaterial(name=m.name, color=(m.base_color[0], m.base_color[1], m.base_color[2]))
+        GltfMaterial(
+            name=m.name,
+            color=(m.base_color[0], m.base_color[1], m.base_color[2]),
+            texture_index=int(m.texture_index),
+            texture_uri=str(m.texture_uri),
+        )
         for m in raw.materials
     )
     meshes = tuple(
@@ -74,6 +80,7 @@ def read_gltf_scene(path) -> GltfSceneData:
             positions=tuple((p[0], p[1], p[2]) for p in m.positions),
             triangles=tuple((t[0], t[1], t[2]) for t in m.triangles),
             material_index=m.material_index,
+            uvs=tuple((u[0], u[1]) for u in m.uvs),
         )
         for m in raw.meshes
     )
@@ -86,7 +93,34 @@ def read_gltf_scene(path) -> GltfSceneData:
         )
         for n in raw.nodes
     )
-    return GltfSceneData(nodes=nodes, meshes=meshes, materials=materials)
+    images = tuple(
+        GltfImage(name=i.name, data=bytes(i.data), format_hint=str(i.format_hint))
+        for i in raw.images
+    )
+    return GltfSceneData(nodes=nodes, meshes=meshes, materials=materials, images=images)
+
+
+def read_gltf_texture_bytes(path, scene) -> dict[int, bytes]:
+    """Material index to base-colour image bytes, for every material that has one.
+
+    Two shapes, both best-effort in the same way a missing .mtl is: an
+    EMBEDDED image comes from the scene's own image table, and an EXTERNAL one
+    is read from beside `path` under the containment rule in image_paths. An
+    image that is missing, unreadable, outside the document's directory, or
+    (D17) arrived as raw texels with no encoded form, is skipped. The caller
+    decides what an empty result means.
+    """
+    base = Path(path).parent
+    out: dict[int, bytes] = {}
+    for index, material in enumerate(scene.materials):
+        data: bytes | None = None
+        if 0 <= material.texture_index < len(scene.images):
+            data = scene.images[material.texture_index].data or None
+        elif material.texture_uri:
+            data = read_sibling_image_bytes(base, material.texture_uri)
+        if data:
+            out[index] = data
+    return out
 
 
 def _validate_gltf_file_before_parse(path) -> None:
