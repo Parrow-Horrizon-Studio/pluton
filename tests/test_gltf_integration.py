@@ -28,6 +28,49 @@ def test_draco_box_decodes_CI_GATE():  # noqa: N802 (name is the permanent CI ga
     assert len(s.meshes[0].triangles) > 0, "Draco decode produced no geometry"
 
 
+def test_assimp_already_flips_v_CI_GATE():  # noqa: N802 (permanent CI gate marker)
+    """PERMANENT GATE: Assimp's glTF2 importer applies 1 - v itself. Never skip.
+
+    Pluton's v = 0 is the image's BOTTOM (viewport/texture_cache.gl_row_order
+    reverses Qt's top-down rows for OpenGL's bottom-left origin); glTF's v = 0
+    is the image's TOP. Assimp does that conversion before the bridge sees a
+    coordinate, so import deliberately performs NO flip of its own and export
+    performs one (D14).
+
+    If an Assimp upgrade ever stops flipping, every imported texture renders
+    upside down with nothing else failing. This compares the bridge's output
+    against the fixture's RAW BUFFER BYTES so that change fails here, loudly
+    and by name, instead of silently in the viewport.
+    """
+    import json
+    import struct
+
+    raw = (DATA / "textured_box.glb").read_bytes()
+    json_len, _kind = struct.unpack_from("<II", raw, 12)
+    doc = json.loads(raw[20 : 20 + json_len])
+    bin_start = 20 + json_len + 8
+    accessor = doc["accessors"][doc["meshes"][0]["primitives"][0]["attributes"]["TEXCOORD_0"]]
+    view = doc["bufferViews"][accessor["bufferView"]]
+    base = bin_start + view.get("byteOffset", 0)
+    file_uvs = [struct.unpack_from("<2f", raw, base + i * 8) for i in range(accessor["count"])]
+
+    bridge_uvs = core.import_gltf(str(DATA / "textured_box.glb")).meshes[0].uvs
+    assert len(bridge_uvs) == len(file_uvs)
+
+    # Compare as sorted multisets: JoinIdenticalVertices may reorder vertices,
+    # but the SET of v values must be the file's set with 1 - v applied.
+    expected_v = sorted(round(1.0 - v, 5) for _u, v in file_uvs)
+    actual_v = sorted(round(float(uv[1]), 5) for uv in bridge_uvs)
+    assert actual_v == expected_v, (
+        f"Assimp's V convention changed: expected {expected_v}, got {actual_v}. "
+        "If Assimp stopped flipping, import must start flipping (see D14)."
+    )
+    # u must be untouched in either convention.
+    assert sorted(round(u, 5) for u, _v in file_uvs) == sorted(
+        round(float(uv[0]), 5) for uv in bridge_uvs
+    )
+
+
 def _shared_component_model():
     """A model with one component instanced twice (mesh-level instancing)."""
     model = Model()

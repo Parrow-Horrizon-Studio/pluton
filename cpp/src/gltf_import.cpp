@@ -5,6 +5,7 @@
 #include <assimp/scene.h>
 
 #include <assimp/Importer.hpp>
+#include <cstdlib>
 #include <stdexcept>
 #include <utility>
 
@@ -51,6 +52,20 @@ ImportedScene import_gltf(const std::string& path) {
         if (mat->Get(AI_MATKEY_BASE_COLOR, color) != AI_SUCCESS)
             mat->Get(AI_MATKEY_COLOR_DIFFUSE, color);
         im.base_color = {color.r, color.g, color.b, color.a};
+
+        im.texture_index = -1;
+        aiString tex_path;
+        if (mat->GetTexture(aiTextureType_BASE_COLOR, 0, &tex_path) == AI_SUCCESS ||
+            mat->GetTexture(aiTextureType_DIFFUSE, 0, &tex_path) == AI_SUCCESS) {
+            const char* p = tex_path.C_Str();
+            if (p[0] == '*') {
+                // Assimp's embedded-texture reference: "*N" indexes mTextures.
+                im.texture_index = std::atoi(p + 1);
+            } else if (p[0] != '\0') {
+                im.texture_uri = p;  // external file; Python resolves it (D15)
+            }
+        }
+
         result.materials.push_back(std::move(im));
     }
 
@@ -63,6 +78,13 @@ ImportedScene import_gltf(const std::string& path) {
             const aiVector3D& p = mesh->mVertices[v];
             om.positions.push_back({p.x, p.y, p.z});
         }
+        if (mesh->HasTextureCoords(0) && mesh->mNumUVComponents[0] >= 2) {
+            om.uvs.reserve(mesh->mNumVertices);
+            for (unsigned v = 0; v < mesh->mNumVertices; ++v) {
+                const aiVector3D& t = mesh->mTextureCoords[0][v];
+                om.uvs.push_back({t.x, t.y});
+            }
+        }
         om.triangles.reserve(mesh->mNumFaces);
         for (unsigned f = 0; f < mesh->mNumFaces; ++f) {
             const aiFace& face = mesh->mFaces[f];
@@ -70,6 +92,21 @@ ImportedScene import_gltf(const std::string& path) {
             om.triangles.push_back({face.mIndices[0], face.mIndices[1], face.mIndices[2]});
         }
         result.meshes.push_back(std::move(om));
+    }
+
+    for (unsigned i = 0; i < scene->mNumTextures; ++i) {
+        const aiTexture* tex = scene->mTextures[i];
+        ImportedImage img;
+        img.name = tex->mFilename.C_Str();
+        img.format_hint = tex->achFormatHint;
+        if (tex->mHeight == 0) {
+            // Compressed: mWidth is the byte length and pcData the file bytes.
+            const auto* bytes = reinterpret_cast<const std::uint8_t*>(tex->pcData);
+            img.data.assign(bytes, bytes + tex->mWidth);
+        }
+        // mHeight != 0 means raw ARGB8888 texels with no encoded form. Left
+        // empty deliberately; see ImportedImage's comment.
+        result.images.push_back(std::move(img));
     }
 
     collect_nodes(scene->mRootNode, -1, result.nodes);

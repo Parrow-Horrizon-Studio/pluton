@@ -212,11 +212,18 @@ NB_MODULE(_core, m) {
           nb::arg("direction"), "Brute-force ray-mesh face picking. Returns RayMeshHit or None.");
 
     // M6c: glTF/GLB import bridge (Assimp) — neutral plain-data structs.
+    nb::class_<pluton::ImportedImage>(m, "ImportedImage")
+        .def_ro("name", &pluton::ImportedImage::name)
+        .def_ro("data", &pluton::ImportedImage::data)
+        .def_ro("format_hint", &pluton::ImportedImage::format_hint);
     nb::class_<pluton::ImportedMaterial>(m, "ImportedMaterial")
         .def_ro("name", &pluton::ImportedMaterial::name)
-        .def_ro("base_color", &pluton::ImportedMaterial::base_color);
+        .def_ro("base_color", &pluton::ImportedMaterial::base_color)
+        .def_ro("texture_index", &pluton::ImportedMaterial::texture_index)
+        .def_ro("texture_uri", &pluton::ImportedMaterial::texture_uri);
     nb::class_<pluton::ImportedMesh>(m, "ImportedMesh")
         .def_ro("positions", &pluton::ImportedMesh::positions)
+        .def_ro("uvs", &pluton::ImportedMesh::uvs)
         .def_ro("triangles", &pluton::ImportedMesh::triangles)
         .def_ro("material_index", &pluton::ImportedMesh::material_index);
     nb::class_<pluton::ImportedNode>(m, "ImportedNode")
@@ -227,7 +234,8 @@ NB_MODULE(_core, m) {
     nb::class_<pluton::ImportedScene>(m, "ImportedScene")
         .def_ro("nodes", &pluton::ImportedScene::nodes)
         .def_ro("meshes", &pluton::ImportedScene::meshes)
-        .def_ro("materials", &pluton::ImportedScene::materials);
+        .def_ro("materials", &pluton::ImportedScene::materials)
+        .def_ro("images", &pluton::ImportedScene::images);
     m.def("import_gltf", &pluton::import_gltf, nb::arg("path"),
           "Load a glTF/GLB file into a neutral ImportedScene (M6c import bridge).");
 }
