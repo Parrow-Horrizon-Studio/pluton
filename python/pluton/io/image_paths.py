@@ -46,13 +46,20 @@ def sanitize_filename_stem(name: str, fallback: str) -> str:
 
     First collapses whitespace to '_' for a readable stem (this alone is the
     original, weaker behaviour), then replaces every remaining character
-    outside [A-Za-z0-9._-] with '_'. Returns `fallback` -- never empty --
-    when nothing safe remains, so a name made entirely of unsafe characters
-    still yields a usable stem rather than an empty one.
+    outside [A-Za-z0-9._-] with '_'. Falls back -- never empty -- only when
+    the result has no alphanumeric character at all, e.g. "###" (every
+    character replaced) or "." / ".." (both meaningful path components on
+    their own, and neither contains one). A leading or trailing underscore
+    that survives sanitizing is otherwise left alone: an earlier version of
+    this function unconditionally stripped them, which silently collapsed
+    "_Brick" to the same stem as "Brick" -- issue #119's exact failure mode
+    (two distinct names merging on write, so one material and its image
+    vanish from the export) -- widened to trigger on any leading/trailing
+    underscore rather than only on a literal duplicate name.
     """
     collapsed = "_".join(str(name).split())
-    safe = _UNSAFE_STEM_CHARS.sub("_", collapsed).strip("_")
-    return safe or fallback
+    safe = _UNSAFE_STEM_CHARS.sub("_", collapsed)
+    return safe if any(c.isalnum() for c in safe) else fallback
 
 
 def read_sibling_image_bytes(base_dir, relative: str) -> bytes | None:

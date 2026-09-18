@@ -46,6 +46,40 @@ def test_a_name_entirely_of_unsafe_characters_falls_back_rather_than_going_empty
     assert sanitize_filename_stem("///", "image") == "image"
 
 
+def test_leading_and_trailing_underscores_are_not_stripped_from_a_meaningful_name():
+    """Re-review regression (M7.5c-3): an earlier version of this function
+    ended with `.strip("_")`, which unconditionally removed a leading or
+    trailing underscore even when the rest of the name was perfectly safe.
+    That silently collapsed "_Brick" to the same sanitized stem as "Brick"
+    -- issue #119's exact failure mode, two distinct names merging into one
+    on write, so one material and its image vanish from the export -- and
+    widened its trigger set from "a literal duplicate name" to "any name
+    with a leading or trailing underscore". A leading/trailing underscore
+    that survives sanitizing must now be left alone."""
+    assert sanitize_filename_stem("_Custom", "image") == "_Custom"
+    assert sanitize_filename_stem("_Brick", "image") == "_Brick"
+    assert sanitize_filename_stem("__a__", "image") == "__a__"
+
+
+def test_a_leading_underscore_name_differs_from_its_bare_form():
+    """The direct #119 pin: two materials named "_Brick" and "Brick" must
+    export as two distinct newmtl blocks / two distinct glTF materials, not
+    merge into one because sanitizing discarded the leading underscore."""
+    assert sanitize_filename_stem("_Brick", "image") != sanitize_filename_stem("Brick", "image")
+
+
+def test_names_with_no_alphanumeric_content_fall_back():
+    """"." and ".." are each meaningful path components on their own -- "."
+    the same directory, ".." the parent -- and neither happens to contain an
+    alphanumeric character, so the same "no alphanumeric survived" rule that
+    catches "___" and "###" catches them too, without needing a special case
+    for either."""
+    assert sanitize_filename_stem("___", "image") == "image"
+    assert sanitize_filename_stem("###", "image") == "image"
+    assert sanitize_filename_stem(".", "image") == "image"
+    assert sanitize_filename_stem("..", "image") == "image"
+
+
 def test_only_the_documented_safe_characters_survive():
     stem = sanitize_filename_stem("Brick-Red_02.v3!@$%^&*()", "image")
     assert set(stem) <= set("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789._-")
