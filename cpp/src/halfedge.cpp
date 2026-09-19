@@ -4,6 +4,7 @@
 #include <cassert>
 #include <cmath>
 #include <cstring>
+#include <unordered_set>
 
 namespace pluton {
 
@@ -814,13 +815,42 @@ std::array<std::uint32_t, 2> pluton::HalfEdgeMesh::split_face(
     };
     if (!tris_index_loop(loop_a, tris_a) || !tris_index_loop(loop_b, tris_b)) return fail;
 
+    // Reject a loop that revisits a vertex. Without this, a loop like
+    // {v0, x, y, x} can self-cancel in the directed-edge check below: its
+    // (x,y)/(y,x) pair and its (v0,x)/(x,v0) pair both cancel entirely WITHIN
+    // that one loop, before the other loop is even considered, so the loop's
+    // net contribution to the directed multiset is zero and it can ride
+    // along on whatever the other loop alone supplies. A vertex-revisiting,
+    // self-intersecting loop must be refused before the cancellation logic
+    // even sees it, because add_face_from_loop does not check simplicity
+    // either and would happily build the corrupted face.
+    auto loop_is_simple = [](const std::vector<std::uint32_t>& loop) {
+        std::unordered_set<std::uint32_t> seen;
+        seen.reserve(loop.size());
+        for (auto v : loop) {
+            if (!seen.insert(v).second) return false;
+        }
+        return true;
+    };
+    if (!loop_is_simple(loop_a) || !loop_is_simple(loop_b)) return fail;
+
     // The partition check, as directed edges. Walking both sub-loops gives every
-    // directed boundary step of both children. A chain edge is walked once in
-    // each direction, so those pairs cancel; what survives must be exactly the
-    // parent's own directed loop. This one test carries three separate claims:
-    // the two loops really do partition f, the winding is preserved in both
-    // children (a reversed child would leave uncancelled reversed edges), and
-    // the chain is traversed in opposite directions, which is what makes
+    // directed boundary step of both children. Both loops are already known
+    // simple AND at least 3 vertices long (both checked above), so a directed
+    // edge can only be reversed by an edge in the OTHER loop, never by another
+    // edge in the same loop: for a loop of length >= 3, reversing step x->y to
+    // y->x within that same loop would require x to reappear in it, which
+    // simplicity forbids. (Length 2 is the one case where a loop's own two
+    // steps are unconditionally reverses of each other regardless of
+    // repetition -- e.g. {v0,v2} walks v0->v2 then v2->v0 -- which is exactly
+    // why the length check above runs before this one ever sees such a loop.)
+    // So a chain edge walked once in each direction is always a genuine
+    // shared-chain edge between loop_a and loop_b, and what survives
+    // cancellation must be exactly the parent's own
+    // directed loop. This one test carries three separate claims: the two
+    // loops really do partition f, the winding is preserved in both children
+    // (a reversed child would leave uncancelled reversed edges), and the chain
+    // is traversed in opposite directions, which is what makes
     // add_face_from_loop claim opposite half-edges of each chain edge.
     std::unordered_map<std::uint64_t, int> directed;
     auto add_directed = [&directed](const std::vector<std::uint32_t>& loop) {

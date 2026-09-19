@@ -106,7 +106,8 @@ public:
     /// Replace face f_id with two faces that share a chain of vertices: the
     /// inverse of dissolve_edge. loop_a and loop_b are the two new boundary
     /// loops, each already triangulated by the caller with GLOBAL vertex ids,
-    /// exactly as add_face_from_loop expects.
+    /// exactly as add_face_from_loop expects. Each loop must be simple (no
+    /// repeated vertex); a loop that revisits a vertex is rejected.
     ///
     /// Returns {id_a, id_b}, or {INVALID_ID, INVALID_ID} if any precondition
     /// fails, in which case the mesh is untouched. Every check runs before the

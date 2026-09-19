@@ -1565,11 +1565,20 @@ TEST(SplitFace, ChordSplitsOneQuadIntoTwoTriangles) {
 // returned INVALID_ID. A version that removed the face and then bailed would
 // pass a return-value-only test while leaving a hole.
 namespace {
+// loop_before is the parent face's boundary loop, snapshotted BEFORE the
+// (expected-to-be-rejected) split_face call. Comparing it against the loop
+// read back afterward catches boundary-cycle corruption (stale `next`
+// pointers, a rewritten loop cache) that a live/dead flag and a face count
+// alone would miss -- a rejection path that mangled the half-edge chain but
+// left the tombstone bits untouched would still pass the checks below it.
 void expect_rejected_and_untouched(pluton::HalfEdgeMesh& m, std::uint32_t f,
+                                   const std::vector<std::uint32_t>& loop_before,
                                    const std::array<std::uint32_t, 2>& out) {
     EXPECT_EQ(out[0], pluton::HalfEdgeMesh::INVALID_ID);
     EXPECT_EQ(out[1], pluton::HalfEdgeMesh::INVALID_ID);
     EXPECT_TRUE(m.face_is_live(f)) << "a rejected split must not remove the face";
+    EXPECT_EQ(m.face_loop_vertices(f), loop_before)
+        << "a rejected split must not corrupt the face's boundary loop";
     std::uint32_t live = 0;
     for (auto g = m.next_live_face(0); g != pluton::HalfEdgeMesh::INVALID_ID;
          g = m.next_live_face(g + 1))
@@ -1590,12 +1599,22 @@ TEST(SplitFace, RejectsADeadFace) {
 }
 
 TEST(SplitFace, RejectsALoopWithFewerThanThreeVertices) {
+    // This 2-vertex loop_a = {v0, v2} is caught by BOTH the
+    // `loop.size() < 3` guard and, independently, by the partition check:
+    // loop_a's own two steps (v0->v2, v2->v0) cancel each other out first
+    // (cancelled becomes 1, so `cancelled < 1` does not fire), but loop_b
+    // then contributes a surviving (v0,v2) edge that has no match in the
+    // parent's own directed loop -- (v0,v1),(v1,v2),(v2,v3),(v3,v0), not
+    // (v0,v2) -- so the final match against `want` fails instead. No input
+    // here isolates the size guard alone from the partition check; this
+    // test documents that overlap rather than claiming to isolate one cause.
     std::uint32_t f = 0;
     std::uint32_t v[4];
     auto m = make_quad_with_chord(f, v);
+    const auto loop_before = m.face_loop_vertices(f);
     auto out = m.split_face(f, {v[0], v[2]}, {(int)v[0], (int)v[2], (int)v[0]}, {v[2], v[3], v[0]},
                             {(int)v[2], (int)v[3], (int)v[0]});
-    expect_rejected_and_untouched(m, f, out);
+    expect_rejected_and_untouched(m, f, loop_before, out);
 }
 
 TEST(SplitFace, RejectsAMissingLoopEdge) {
@@ -1603,30 +1622,59 @@ TEST(SplitFace, RejectsAMissingLoopEdge) {
     std::uint32_t f = 0;
     std::uint32_t v[4];
     auto m = make_quad_with_chord(f, v);
+    const auto loop_before = m.face_loop_vertices(f);
     auto out = m.split_face(f, {v[0], v[1], v[3]}, {(int)v[0], (int)v[1], (int)v[3]},
                             {v[1], v[2], v[3]}, {(int)v[1], (int)v[2], (int)v[3]});
-    expect_rejected_and_untouched(m, f, out);
+    expect_rejected_and_untouched(m, f, loop_before, out);
 }
 
 TEST(SplitFace, RejectsATriangleIndexNotInItsOwnLoop) {
     std::uint32_t f = 0;
     std::uint32_t v[4];
     auto m = make_quad_with_chord(f, v);
+    const auto loop_before = m.face_loop_vertices(f);
     auto out = m.split_face(f, {v[0], v[1], v[2]}, {(int)v[0], (int)v[1], (int)v[3]},
                             {v[2], v[3], v[0]}, {(int)v[2], (int)v[3], (int)v[0]});
-    expect_rejected_and_untouched(m, f, out);
+    expect_rejected_and_untouched(m, f, loop_before, out);
 }
 
-TEST(SplitFace, RejectsTwoLoopsThatDoNotTouch) {
-    // Both loops are the parent's own loop, so nothing cancels.
+TEST(SplitFace, RejectsALoopThatRevisitsAVertex) {
+    // loop_a = {v0, v1, v2, v1} revisits v1. Its directed edges are
+    // (v0,v1), (v1,v2), (v2,v1), (v1,v0): the (v1,v2)/(v2,v1) pair and the
+    // (v0,v1)/(v1,v0) pair both cancel entirely WITHIN loop_a, before loop_b
+    // ever enters the picture, leaving zero net contribution from loop_a.
+    // Pairing it with loop_b equal to the parent's own unmodified loop then
+    // lets the final directed-multiset match succeed, because loop_b alone
+    // already equals `want` exactly. Without a simplicity guard this
+    // self-cancelling, vertex-revisiting loop sails through validation.
     std::uint32_t f = 0;
     std::uint32_t v[4];
     auto m = make_quad_with_chord(f, v);
+    const auto loop_before = m.face_loop_vertices(f);
+    auto out = m.split_face(f, {v[0], v[1], v[2], v[1]}, {(int)v[0], (int)v[1], (int)v[2]},
+                            {v[0], v[1], v[2], v[3]},
+                            {(int)v[0], (int)v[1], (int)v[2], (int)v[0], (int)v[2], (int)v[3]});
+    expect_rejected_and_untouched(m, f, loop_before, out);
+}
+
+TEST(SplitFace, RejectsTwoLoopsThatDoNotTouch) {
+    // Both loops are the parent's own loop walked the same direction, so no
+    // directed edge has a reverse anywhere and `cancelled` stays 0: this is
+    // what is actually rejected on today. But this input does not isolate
+    // `cancelled < 1` from the later count-mismatch check either: delete
+    // that guard and every parent edge is still contributed twice (once by
+    // each identical loop) against `want`'s count of 1, so the mismatch
+    // check catches it next. This test documents that overlap rather than
+    // claiming to isolate one cause.
+    std::uint32_t f = 0;
+    std::uint32_t v[4];
+    auto m = make_quad_with_chord(f, v);
+    const auto loop_before = m.face_loop_vertices(f);
     auto out = m.split_face(f, {v[0], v[1], v[2], v[3]},
                             {(int)v[0], (int)v[1], (int)v[2], (int)v[0], (int)v[2], (int)v[3]},
                             {v[0], v[1], v[2], v[3]},
                             {(int)v[0], (int)v[1], (int)v[2], (int)v[0], (int)v[2], (int)v[3]});
-    expect_rejected_and_untouched(m, f, out);
+    expect_rejected_and_untouched(m, f, loop_before, out);
 }
 
 TEST(SplitFace, RejectsAChildWoundBackwards) {
@@ -1638,9 +1686,10 @@ TEST(SplitFace, RejectsAChildWoundBackwards) {
     std::uint32_t f = 0;
     std::uint32_t v[4];
     auto m = make_quad_with_chord(f, v);
+    const auto loop_before = m.face_loop_vertices(f);
     auto out = m.split_face(f, {v[0], v[1], v[2]}, {(int)v[0], (int)v[1], (int)v[2]},
                             {v[0], v[3], v[2]}, {(int)v[0], (int)v[3], (int)v[2]});
-    expect_rejected_and_untouched(m, f, out);
+    expect_rejected_and_untouched(m, f, loop_before, out);
 }
 
 TEST(SplitFace, BothChildrenKeepTheParentsNormal) {
