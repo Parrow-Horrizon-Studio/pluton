@@ -1599,21 +1599,25 @@ TEST(SplitFace, RejectsADeadFace) {
 }
 
 TEST(SplitFace, RejectsALoopWithFewerThanThreeVertices) {
-    // This 2-vertex loop_a = {v0, v2} is caught by BOTH the
-    // `loop.size() < 3` guard and, independently, by the partition check:
-    // loop_a's own two steps (v0->v2, v2->v0) cancel each other out first
-    // (cancelled becomes 1, so `cancelled < 1` does not fire), but loop_b
-    // then contributes a surviving (v0,v2) edge that has no match in the
-    // parent's own directed loop -- (v0,v1),(v1,v2),(v2,v3),(v3,v0), not
-    // (v0,v2) -- so the final match against `want` fails instead. No input
-    // here isolates the size guard alone from the partition check; this
-    // test documents that overlap rather than claiming to isolate one cause.
+    // Pairing this 2-vertex loop_a = {v0, v2} with loop_b equal to the
+    // parent's own FULL unmodified loop isolates the size guard from the
+    // partition check: loop_a's own two steps (v0->v2, v2->v0) cancel
+    // against EACH OTHER (cancelled becomes 1, so `cancelled < 1` does not
+    // fire), and the residual directed set is exactly loop_b's four edges,
+    // which equals `want` exactly. Every other check in split_face passes;
+    // only `loop_a.size() < 3` rejects this input, so the guard is not
+    // redundant with the partition check. Without it, remove_face(f_id)
+    // would run and then add_face_from_loop(loop_a, tris_a) would throw
+    // std::invalid_argument for a loop of size 2 -- after the face is
+    // already gone. That is the exact atomicity violation this whole
+    // kernel op exists to prevent.
     std::uint32_t f = 0;
     std::uint32_t v[4];
     auto m = make_quad_with_chord(f, v);
     const auto loop_before = m.face_loop_vertices(f);
-    auto out = m.split_face(f, {v[0], v[2]}, {(int)v[0], (int)v[2], (int)v[0]}, {v[2], v[3], v[0]},
-                            {(int)v[2], (int)v[3], (int)v[0]});
+    auto out =
+        m.split_face(f, {v[0], v[2]}, {(int)v[0], (int)v[2], (int)v[0]}, {v[0], v[1], v[2], v[3]},
+                     {(int)v[0], (int)v[1], (int)v[2], (int)v[0], (int)v[2], (int)v[3]});
     expect_rejected_and_untouched(m, f, loop_before, out);
 }
 
