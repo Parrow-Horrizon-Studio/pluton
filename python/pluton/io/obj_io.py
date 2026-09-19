@@ -36,6 +36,48 @@ def _unique_name(base: str, used: set[str]) -> str:
     return candidate
 
 
+def _painted_material_ids(model) -> list[int]:
+    """Material ids at least one exported face carries, in first-painted order.
+
+    Only these reach the `.mtl`, so only these should compete for a name: a
+    library material nobody painted with must not take `Brick_Red` and push
+    the material actually being exported to `Brick_Red.001`. The seeded
+    palette makes that the common case, not a corner one.
+    """
+    default_id = model.materials.DEFAULT_ID
+    seen: dict[int, None] = {}
+    for definition, _ in model.traverse():
+        mesh = definition.mesh
+        for f in mesh.faces_iter():
+            mat_id = mesh.face_material(f.id)
+            if mat_id != default_id:
+                seen.setdefault(mat_id, None)
+    return list(seen)
+
+
+def _material_obj_names(model) -> dict[int, str]:
+    """One OBJ material name per material **id**, minted through `_unique_name`.
+
+    `sanitize_material_name` is many-to-one: `Brick Wall` and `Brick_Wall`
+    both come out `Brick_Wall`. Keying the exported material dict on that
+    name merged the two, dropping one material's colour and overwriting its
+    image file, silently, on a user-initiated export (#119). Minting per id
+    gives the second one `Brick_Wall.001` instead.
+
+    Both `model_to_objdoc` and `export_obj` derive names from this, so the
+    `.mtl` block, the `usemtl` on each face and the image file on disk cannot
+    disagree about what a material is called.
+    """
+    used: set[str] = set()
+    names: dict[int, str] = {}
+    for mat_id in _painted_material_ids(model):
+        mat = model.materials.get(mat_id)
+        if mat is None:
+            continue
+        names[mat_id] = _unique_name(sanitize_material_name(mat.name), used)
+    return names
+
+
 def model_to_objdoc(model, resolver=None) -> ObjDocument:
     """Flatten the scene graph to a world-space ObjDocument (one object per node
     with geometry). Never mutates the model.
@@ -59,6 +101,7 @@ def model_to_objdoc(model, resolver=None) -> ObjDocument:
     materials: dict[str, tuple[float, float, float]] = {}
     used_names: set[str] = set()
     default_id = model.materials.DEFAULT_ID
+    obj_material_names = _material_obj_names(model)
 
     uv_pool: list[tuple[float, float]] = []
     uv_lookup: dict[tuple[float, float], int] = {}
@@ -103,7 +146,7 @@ def model_to_objdoc(model, resolver=None) -> ObjDocument:
             is_textured = mat is not None and mat.texture_id is not None
             uv_indices = _uv_indices_for(mesh, f.id, has_stored_uvs or is_textured)
             if mat_id != default_id:
-                mname = sanitize_material_name(mat.name)
+                mname = obj_material_names[mat_id]
                 materials[mname] = mat.base_color
                 faces.append(ObjFace(loop, mname, uv_indices=uv_indices))
             else:
@@ -112,8 +155,8 @@ def model_to_objdoc(model, resolver=None) -> ObjDocument:
 
     material_textures: dict[str, str] = {}
     for m in model.materials.materials():
-        mname = sanitize_material_name(m.name)
-        if mname not in materials:
+        mname = obj_material_names.get(m.id)
+        if mname is None or mname not in materials:
             continue  # only materials actually used by an exported face
         if m.texture_id is None:
             continue
@@ -175,13 +218,17 @@ def export_obj(path, model) -> None:
     if mtl_text is not None:
         _atomic_write_text(path.with_name(mtl_name), mtl_text)
 
+    obj_material_names = _material_obj_names(model)
     for m in model.materials.materials():
         if m.texture_id is None:
             continue
         tex = model.textures.get(m.texture_id)
         if tex is None:
             continue
-        name = f"{sanitize_material_name(m.name)}.{tex.image_format}"
+        obj_name = obj_material_names.get(m.id)
+        if obj_name is None:
+            continue
+        name = f"{obj_name}.{tex.image_format}"
         if name in doc.material_textures.values():
             _atomic_write_bytes(path.with_name(name), tex.data)
 

@@ -158,3 +158,53 @@ def test_obj_io_imports_without_qt():
         check=False,
     )
     assert result.returncode == 0, result.stderr
+
+
+def test_two_materials_that_sanitize_alike_export_as_two_materials(tmp_path):
+    """#119: `Brick Wall` and `Brick_Wall` both sanitize to `Brick_Wall`.
+
+    The OBJ material dict was keyed on that sanitized name, so the two
+    collapsed onto one entry and the loser's colour and image vanished from
+    the export with nothing raised and nothing warned. OBJ names are minted
+    once per material id now, so a collision becomes `Brick_Wall.001`.
+    """
+    model = Model()
+    mesh = model.root.mesh
+    tri_a = [
+        mesh.add_vertex(np.array(p, dtype=np.float32)) for p in [(0, 0, 0), (1, 0, 0), (1, 1, 0)]
+    ]
+    tri_b = [
+        mesh.add_vertex(np.array(p, dtype=np.float32)) for p in [(2, 0, 0), (3, 0, 0), (3, 1, 0)]
+    ]
+    face_a = mesh.add_face_from_loop(tri_a)
+    face_b = mesh.add_face_from_loop(tri_b)
+
+    image_a, image_b = FAKE_PNG + b"-A", FAKE_PNG + b"-B"
+    tex_a = model.textures.add("a", image_a, "png", 4, 8, False)
+    tex_b = model.textures.add("b", image_b, "png", 4, 8, False)
+    mat_a = model.materials.add_custom("Brick Wall", (1.0, 0.0, 0.0))
+    mat_b = model.materials.add_custom("Brick_Wall", (0.0, 0.0, 1.0))
+    model.materials.edit(mat_a.id, texture_id=tex_a.id)
+    model.materials.edit(mat_b.id, texture_id=tex_b.id)
+    mesh.set_face_material(face_a, mat_a.id, Side.FRONT)
+    mesh.set_face_material(face_b, mat_b.id, Side.FRONT)
+
+    out = tmp_path / "m.obj"
+    export_obj(out, model)
+
+    mtl_text = (tmp_path / "m.mtl").read_text(encoding="utf-8")
+    lines = mtl_text.splitlines()
+    names = [ln.removeprefix("newmtl ").strip() for ln in lines if ln.startswith("newmtl ")]
+    assert len(names) == 2, mtl_text
+    assert len(set(names)) == 2, mtl_text
+
+    colors = {ln.strip() for ln in lines if ln.startswith("Kd ")}
+    assert len(colors) == 2, mtl_text
+
+    images = {ln.removeprefix("map_Kd ").strip() for ln in lines if ln.startswith("map_Kd ")}
+    assert len(images) == 2, mtl_text
+    assert {(tmp_path / n).read_bytes() for n in images} == {image_a, image_b}
+
+    back = parse_obj(out.read_text(encoding="utf-8"), mtl_text)
+    used = sorted(f.material for o in back.objects for f in o.faces)
+    assert used == sorted(names)
