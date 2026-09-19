@@ -141,3 +141,51 @@ def test_round_trip_write_then_parse():
     assert back.objects[1].faces[0].material is None
     assert back.materials["Teal"] == (0.1, 0.6, 0.6)
     assert back.has_object_tags is True
+
+
+def test_write_obj_emits_a_vn_line_per_normal():
+    """#113: an exported .obj carried no explicit normals at all, so a viewer
+    that expects them had to re-derive or flat-shade. Pluton already computes
+    one normal per face; writing it costs a line."""
+    doc = ObjDocument(
+        vertices=((0, 0, 0), (1, 0, 0), (1, 1, 0)),
+        objects=(ObjObject("o", (ObjFace((0, 1, 2), normal_index=0),)),),
+        normals=((0.0, 0.0, 1.0),),
+    )
+    text, _ = write_obj(doc)
+    assert "vn 0.000000 0.000000 1.000000" in text
+
+
+def test_a_face_with_a_normal_and_no_uvs_writes_the_double_slash_form():
+    """`f v//n` is how OBJ says "normal, no texture coordinate". Writing
+    `f v/n` instead would make the normal index read as a vt index."""
+    doc = ObjDocument(
+        vertices=((0, 0, 0), (1, 0, 0), (1, 1, 0)),
+        objects=(ObjObject("o", (ObjFace((0, 1, 2), normal_index=0),)),),
+        normals=((0.0, 0.0, 1.0),),
+    )
+    text, _ = write_obj(doc)
+    assert "f 1//1 2//1 3//1" in text
+
+
+def test_a_face_with_both_uvs_and_a_normal_writes_the_full_triple():
+    doc = ObjDocument(
+        vertices=((0, 0, 0), (1, 0, 0), (1, 1, 0)),
+        objects=(
+            ObjObject("o", (ObjFace((0, 1, 2), uv_indices=(0, 1, 2), normal_index=0),)),
+        ),
+        uvs=((0.0, 0.0), (1.0, 0.0), (1.0, 1.0)),
+        normals=((0.0, 0.0, 1.0),),
+    )
+    text, _ = write_obj(doc)
+    assert "f 1/1/1 2/2/1 3/3/1" in text
+
+
+def test_a_face_with_no_normal_writes_no_normal_field():
+    doc = ObjDocument(
+        vertices=((0, 0, 0), (1, 0, 0), (1, 1, 0)),
+        objects=(ObjObject("o", (ObjFace((0, 1, 2)),)),),
+    )
+    text, _ = write_obj(doc)
+    assert "f 1 2 3" in text
+    assert "vn " not in text

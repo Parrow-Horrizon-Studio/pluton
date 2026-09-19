@@ -106,6 +106,36 @@ def model_to_objdoc(model, resolver=None) -> ObjDocument:
     uv_pool: list[tuple[float, float]] = []
     uv_lookup: dict[tuple[float, float], int] = {}
 
+    normal_pool: list[tuple[float, float, float]] = []
+    normal_lookup: dict[tuple[float, float, float], int] = {}
+
+    def _normal_index_for(mesh, fid, normal_world):
+        """Intern this face's world-space normal, or None if it has none.
+
+        The kernel stores one normal per face, so the whole face gets one
+        index (#113). A degenerate face has no defensible normal and simply
+        goes out without one, which is what an exporter that never wrote
+        normals at all did for every face: best-effort, the way a rejected
+        material or a missing .mtl already degrades here.
+        """
+        if normal_world is None:
+            return None
+        try:
+            local = np.asarray(mesh.face_normal(fid), dtype=np.float64)
+        except (KeyError, ValueError):
+            return None
+        world = normal_world @ local
+        length = float(np.linalg.norm(world))
+        if not np.isfinite(length) or length < 1e-12:
+            return None
+        key = tuple(round(float(c), 6) for c in world / length)
+        idx = normal_lookup.get(key)
+        if idx is None:
+            idx = len(normal_pool)
+            normal_lookup[key] = idx
+            normal_pool.append(key)
+        return idx
+
     def _uv_indices_for(mesh, fid, needs_uvs):
         """Resolve this face's UVs and intern them into the shared vt pool."""
         if resolver is None or not needs_uvs:
@@ -131,6 +161,15 @@ def model_to_objdoc(model, resolver=None) -> ObjDocument:
         verts = list(mesh.vertices_iter())
         if not verts:
             continue  # skip empty definitions (e.g. an empty root)
+        # Normals transform by the inverse-transpose of the linear block, not
+        # by the block itself (#92): under a non-uniform scale the block tilts
+        # a normal off its surface, and export is exactly where a scaled group
+        # gets flattened into world space. A collapsed transform has no
+        # inverse and so no normals; its geometry still exports.
+        try:
+            normal_world = np.linalg.inv(world[:3, :3]).T
+        except np.linalg.LinAlgError:
+            normal_world = None
         idmap: dict[int, int] = {}
         for v in verts:
             local = np.array([v.position[0], v.position[1], v.position[2], 1.0], dtype=np.float64)
@@ -145,12 +184,17 @@ def model_to_objdoc(model, resolver=None) -> ObjDocument:
             has_stored_uvs = mesh.face_uvs(f.id, Side.FRONT) is not None
             is_textured = mat is not None and mat.texture_id is not None
             uv_indices = _uv_indices_for(mesh, f.id, has_stored_uvs or is_textured)
+            normal_index = _normal_index_for(mesh, f.id, normal_world)
             if mat_id != default_id:
                 mname = obj_material_names[mat_id]
                 materials[mname] = mat.base_color
-                faces.append(ObjFace(loop, mname, uv_indices=uv_indices))
+                faces.append(
+                    ObjFace(loop, mname, uv_indices=uv_indices, normal_index=normal_index)
+                )
             else:
-                faces.append(ObjFace(loop, None, uv_indices=uv_indices))
+                faces.append(
+                    ObjFace(loop, None, uv_indices=uv_indices, normal_index=normal_index)
+                )
         objects.append(ObjObject(_unique_name(definition.name, used_names), tuple(faces)))
 
     material_textures: dict[str, str] = {}
@@ -171,6 +215,7 @@ def model_to_objdoc(model, resolver=None) -> ObjDocument:
         materials=materials,
         material_textures=material_textures,
         uvs=tuple(uv_pool),
+        normals=tuple(normal_pool),
         has_object_tags=bool(objects),
     )
 

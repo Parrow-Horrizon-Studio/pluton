@@ -27,7 +27,8 @@ def test_export_obj_writes_obj_and_mtl(tmp_path):
     obj_text = path.read_text()
     assert "mtllib house.mtl" in obj_text
     assert "o Model" in obj_text
-    assert "f 1 2 3 4" in obj_text
+    # #113: faces now carry an explicit normal index, so `f v//vn` not `f v`
+    assert "f 1//1 2//1 3//1 4//1" in obj_text
     assert "newmtl Brick_Red" in mtl.read_text()
 
 

@@ -19,6 +19,12 @@ class ObjFace:
     vertex_indices: tuple[int, ...]  # 0-based, into ObjDocument.vertices
     material: str | None = None  # sanitized material name, or None (unpainted)
     uv_indices: tuple[int, ...] | None = None  # 0-based into ObjDocument.uvs, or None
+    # One normal for the WHOLE face, not one per corner: the kernel stores a
+    # single normal[3] per face (Newell's method over the boundary loop), so a
+    # per-corner index could only ever repeat it. Honouring imported per-corner
+    # normals is the smooth-shading half of #113 and needs storage pluton does
+    # not have yet.
+    normal_index: int | None = None  # 0-based into ObjDocument.normals, or None
 
 
 @dataclass(frozen=True)
@@ -34,6 +40,7 @@ class ObjDocument:
     materials: dict[str, tuple[float, float, float]] = field(default_factory=dict)
     material_textures: dict[str, str] = field(default_factory=dict)
     uvs: tuple[tuple[float, float], ...] = ()
+    normals: tuple[tuple[float, float, float], ...] = ()
     has_object_tags: bool = False
 
 
@@ -56,6 +63,8 @@ def write_obj(doc: ObjDocument, mtl_filename: str = "model.mtl") -> tuple[str, s
         obj.append(f"v {vx:.6f} {vy:.6f} {vz:.6f}")
     for tu, tv in doc.uvs:
         obj.append(f"vt {tu:.6f} {tv:.6f}")
+    for nx, ny, nz in doc.normals:
+        obj.append(f"vn {nx:.6f} {ny:.6f} {nz:.6f}")
     for o in doc.objects:
         obj.append(f"o {o.name}")
         # Sort faces so unpainted (None) come first, then grouped by material,
@@ -66,16 +75,18 @@ def write_obj(doc: ObjDocument, mtl_filename: str = "model.mtl") -> tuple[str, s
             if face.material is not None and face.material != current:
                 obj.append(f"usemtl {face.material}")
             current = face.material
+            # OBJ corner forms: `v`, `v/vt`, `v//vn`, `v/vt/vn`. The empty
+            # middle field is load-bearing -- `v/vn` would read the normal
+            # index as a texture-coordinate index.
+            n = "" if face.normal_index is None else str(face.normal_index + 1)
             if face.uv_indices is None:
-                obj.append("f " + " ".join(str(i + 1) for i in face.vertex_indices))
+                corners = [f"{v + 1}//{n}" if n else str(v + 1) for v in face.vertex_indices]
             else:
-                obj.append(
-                    "f "
-                    + " ".join(
-                        f"{v + 1}/{t + 1}"
-                        for v, t in zip(face.vertex_indices, face.uv_indices, strict=True)
-                    )
-                )
+                corners = [
+                    f"{v + 1}/{t + 1}/{n}" if n else f"{v + 1}/{t + 1}"
+                    for v, t in zip(face.vertex_indices, face.uv_indices, strict=True)
+                ]
+            obj.append("f " + " ".join(corners))
     obj_text = "\n".join(obj) + "\n"
 
     mtl_text: str | None = None
