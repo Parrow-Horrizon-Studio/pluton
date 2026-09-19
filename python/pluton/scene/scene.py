@@ -214,18 +214,7 @@ class Scene:
             if not self._mesh.vertex_is_live(vid):
                 raise KeyError(f"add_face_from_loop: unknown vertex_id={vid}")
 
-        # Build an (N, 3) array of the loop's 3D positions for projection.
-        xyz = np.empty((len(loop), 3), dtype=np.float32)
-        for i, vid in enumerate(loop):
-            pos = self._mesh.vertex_position(vid)
-            xyz[i] = (pos[0], pos[1], pos[2])
-        # Project onto the dominant axis-aligned plane so vertical faces don't
-        # collapse to collinear points (which would yield zero triangles).
-        projected = _project_loop_to_2d_for_earcut(xyz)
-        ring_ends = np.array([len(loop)], dtype=np.uint32)
-        local_indices = mapbox_earcut.triangulate_float32(projected, ring_ends)
-        local_indices = np.asarray(local_indices, dtype=np.int32).reshape(-1, 3)
-        triangles = [int(loop[i]) for tri in local_indices for i in tri]
+        triangles = self._triangulate_loop(loop)
 
         # Auto-insert any loop edges that don't already exist (M2 callers do
         # not pre-insert edges before calling add_face_from_loop, but the C++
@@ -237,6 +226,21 @@ class Scene:
             self._mesh.add_halfedge_pair(v_from, v_to)
 
         return self._mesh.add_face_from_loop(list(loop), triangles)
+
+    def _triangulate_loop(self, loop: Sequence[int]) -> list[int]:
+        """Earcut a closed vertex loop to a flat list of GLOBAL vertex ids,
+        three per triangle, which is the form the kernel takes."""
+        xyz = np.empty((len(loop), 3), dtype=np.float32)
+        for i, vid in enumerate(loop):
+            pos = self._mesh.vertex_position(vid)
+            xyz[i] = (pos[0], pos[1], pos[2])
+        # Project onto the dominant axis-aligned plane so vertical faces don't
+        # collapse to collinear points (which would yield zero triangles).
+        projected = _project_loop_to_2d_for_earcut(xyz)
+        ring_ends = np.array([len(loop)], dtype=np.uint32)
+        local_indices = mapbox_earcut.triangulate_float32(projected, ring_ends)
+        local_indices = np.asarray(local_indices, dtype=np.int32).reshape(-1, 3)
+        return [int(loop[i]) for tri in local_indices for i in tri]
 
     def remove_vertex(self, v_id: int) -> None:
         """Remove a vertex. Raises KeyError if not live, ValueError if still referenced."""
@@ -526,6 +530,58 @@ class Scene:
                 old_fid, new_fid, old_loop, self.face_loop(new_fid), result.vertex, va, vb, t
             )
         return result
+
+    def split_face(self, f_id: int, chain: Sequence[int]) -> tuple[int, int] | None:
+        """Divide face `f_id` along `chain`, a path whose two ends lie on its
+        boundary loop. Returns the two new face ids, or None if refused.
+
+        The two sub-loops are built here rather than in the kernel because the
+        triangulator is in Python and `add_face_from_loop` already takes a
+        caller-supplied triangulation. Walking the parent's loop forward in
+        BOTH halves is what preserves its winding, and traversing the chain in
+        opposite directions is what makes the kernel's two add_face_from_loop
+        calls claim opposite half-edges of each chain edge.
+        """
+        f_id = int(f_id)
+        chain = [int(v) for v in chain]
+        if len(chain) < 2 or len(set(chain)) != len(chain):
+            return None
+
+        try:
+            loop = self.face_loop(f_id)
+        except KeyError:
+            return None
+
+        first, last = chain[0], chain[-1]
+        if first not in loop or last not in loop:
+            return None
+        if any(v in loop for v in chain[1:-1]):
+            return None  # an interior chain vertex on the loop is not a chord
+
+        i, j = loop.index(first), loop.index(last)
+        n = len(loop)
+        forward = [loop[(i + k) % n] for k in range((j - i) % n + 1)]
+        backward = [loop[(j + k) % n] for k in range((i - j) % n + 1)]
+        if len(forward) < 2 or len(backward) < 2:
+            return None  # the ends are the same loop vertex
+
+        interior = chain[1:-1]
+        loop_a = forward + interior[::-1]
+        loop_b = backward + interior
+        if len(loop_a) < 3 or len(loop_b) < 3:
+            return None
+
+        out = self._mesh.split_face(
+            f_id,
+            loop_a,
+            self._triangulate_loop(loop_a),
+            loop_b,
+            self._triangulate_loop(loop_b),
+        )
+        if out[0] == self._mesh.INVALID_ID:
+            return None
+        self._render_dirty = True
+        return int(out[0]), int(out[1])
 
     def copy_face_attributes_from(self, source: Scene, src_fid: int, dst_fid: int) -> None:
         """Copy one face's sidecars from another Scene onto a face of this one.

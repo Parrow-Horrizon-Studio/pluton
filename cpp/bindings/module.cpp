@@ -152,6 +152,12 @@ NB_MODULE(_core, m) {
              "Split an edge at parameter t in (0,1), inserting a vertex and "
              "rebuilding incident faces. Returns a SplitEdgeResult, or None if "
              "the edge is dead, t is out of range, or w coincides with an existing vertex.")
+        .def("split_face", &HalfEdgeMesh::split_face, nb::arg("f_id"), nb::arg("loop_a"),
+             nb::arg("tris_a"), nb::arg("loop_b"), nb::arg("tris_b"),
+             "Replace a face with two that share a chain of vertices: the inverse "
+             "of dissolve_edge. Both loops must be triangulated by the caller with "
+             "GLOBAL vertex ids. Returns (id_a, id_b), or (INVALID_ID, INVALID_ID) "
+             "if any precondition fails, in which case the mesh is untouched.")
 
         // Half-edge adjacency (used by M3b push/pull)
         .def("halfedge_origin", &HalfEdgeMesh::halfedge_origin)
