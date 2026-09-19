@@ -92,8 +92,21 @@ def _barycentric(
     d11 = float(np.dot(v1, v1))
     d20 = float(np.dot(v2, v0))
     d21 = float(np.dot(v2, v1))
+    if d00 <= 0.0 or d11 <= 0.0:
+        return None  # a or b or c coincide with a: zero-length edge vector
     denom = d00 * d11 - d01 * d01
-    if abs(denom) < 1e-18:
+    # `denom` is (twice the triangle's area)^2, so it scales as length^4. A
+    # fixed absolute threshold here misclassifies a small-but-real triangle
+    # as degenerate once its edges drop below roughly 1e-4 model units (a
+    # face split near a tight edge loop is exactly where this bites).
+    # denom / (d00 * d11) is sin^2 of the angle between edges v0 and v1,
+    # which is dimensionless and scale-invariant, so comparing against a
+    # small multiple of d00 * d11 reads as "degenerate below roughly this
+    # angle" at any model scale instead of "degenerate below this absolute
+    # area". The d00/d11 <= 0 check above covers the one case this ratio
+    # test cannot: a genuinely zero-length edge, where d00 * d11 is itself
+    # zero and the ratio is undefined rather than small.
+    if abs(denom) < 1e-18 * d00 * d11:
         return None
     wb = (d11 * d20 - d01 * d21) / denom
     wc = (d00 * d21 - d01 * d20) / denom

@@ -562,8 +562,10 @@ class Scene:
         n = len(loop)
         forward = [loop[(i + k) % n] for k in range((j - i) % n + 1)]
         backward = [loop[(j + k) % n] for k in range((i - j) % n + 1)]
-        if len(forward) < 2 or len(backward) < 2:
-            return None  # the ends are the same loop vertex
+        # No separate "ends are the same loop vertex" guard is needed here:
+        # first == last would make forward/backward length 1, but first ==
+        # last is chain[0] == chain[-1], which the duplicate-vertex check
+        # above already rejects.
 
         interior = chain[1:-1]
         loop_a = forward + interior[::-1]
@@ -706,6 +708,17 @@ class Scene:
         other two.
         """
         old_fid = int(old_fid)
+        sidecar_dicts = (
+            self._materials_for(Side.FRONT),
+            self._materials_for(Side.BACK),
+            self._placements_for(Side.FRONT),
+            self._placements_for(Side.BACK),
+            self._uvs_for(Side.FRONT),
+            self._uvs_for(Side.BACK),
+        )
+        if not any(old_fid in d for d in sidecar_dicts):
+            return  # an unpainted face has nothing to replay onto either child
+
         new_fid = int(new_fid)
         old_loop = list(old_loop)
         new_loop = list(new_loop)
@@ -726,14 +739,14 @@ class Scene:
             if stored is None:
                 continue
 
-            new_uvs: list[tuple[float, float]] = []
-            for vid in new_loop:
-                vid = int(vid)
-                if vid in old_index:
-                    uv = stored[old_index[vid]]
+            new_uvs: list[tuple[float, float]] | None = []
+            for raw_vid in new_loop:
+                loop_vid = int(raw_vid)
+                if loop_vid in old_index:
+                    uv = stored[old_index[loop_vid]]
                     new_uvs.append((float(uv[0]), float(uv[1])))
                     continue
-                point = self.vertex(vid).position.astype(np.float64)
+                point = self.vertex(loop_vid).position.astype(np.float64)
                 resolved = uv_at_point_in_face(positions, stored, local_triangles, point)
                 if resolved is None:
                     new_uvs = None

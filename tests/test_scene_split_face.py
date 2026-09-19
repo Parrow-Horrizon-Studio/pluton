@@ -83,13 +83,16 @@ def test_a_dead_face_is_refused():
     fid, v = _quad(s)
     s.remove_face(fid)
     assert s.split_face(fid, [v[0], v[2]]) is None
+    assert len(list(s.faces_iter())) == 0
 
 
-def test_a_chain_with_a_duplicate_vertex_is_refused():
+def test_a_chain_with_a_duplicate_interior_vertex_is_refused():
+    """A repeated vertex anywhere in the chain, not only at the ends, is
+    refused by the same duplicate-vertex check."""
     s = Scene()
     fid, v = _quad(s)
-    s.add_edge(v[0], v[2])
-    assert s.split_face(fid, [v[0], v[2], v[0]]) is None
+    mid = s.add_vertex(np.array((0.5, 0.5, 0.0), dtype=np.float32))
+    assert s.split_face(fid, [v[0], mid, mid, v[2]]) is None
     assert len(list(s.faces_iter())) == 1
     assert len(s.face_loop(fid)) == 4
 
@@ -106,7 +109,15 @@ def test_an_interior_chain_vertex_on_the_parents_loop_is_refused():
     assert len(s.face_loop(fid)) == 4
 
 
-def test_identical_first_and_last_chain_vertices_are_refused():
+def test_a_chain_whose_first_and_last_vertices_match_is_refused_as_a_duplicate():
+    """chain[0] == chain[-1] is itself a repeated vertex, so this hits the
+    same duplicate-vertex check as the interior-duplicate case above rather
+    than a separate "ends must differ" guard. `split_face` used to also
+    carry a `len(forward) < 2 or len(backward) < 2` check for exactly this
+    shape, but that check could only ever fire when first == last, which is
+    already a duplicate the check above rejects first; it was dead code and
+    has been removed. This test pins the duplicate-vertex check for this
+    specific chain shape now that the redundant guard is gone."""
     s = Scene()
     fid, v = _quad(s)
     mid = s.add_vertex(np.array((0.5, 0.5, 0.0), dtype=np.float32))
