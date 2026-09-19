@@ -76,3 +76,41 @@ def test_a_refused_split_leaves_the_face_alone():
     assert s.split_face(fid, [v[0], v[1]]) is None  # adjacent corners: no interior
     assert len(list(s.faces_iter())) == 1
     assert len(s.face_loop(fid)) == 4
+
+
+def test_a_dead_face_is_refused():
+    s = Scene()
+    fid, v = _quad(s)
+    s.remove_face(fid)
+    assert s.split_face(fid, [v[0], v[2]]) is None
+
+
+def test_a_chain_with_a_duplicate_vertex_is_refused():
+    s = Scene()
+    fid, v = _quad(s)
+    s.add_edge(v[0], v[2])
+    assert s.split_face(fid, [v[0], v[2], v[0]]) is None
+    assert len(list(s.faces_iter())) == 1
+    assert len(s.face_loop(fid)) == 4
+
+
+def test_an_interior_chain_vertex_on_the_parents_loop_is_refused():
+    """A chain vertex between the ends must not itself already be a loop
+    vertex: that would make it a second chord end, not an interior point of
+    a chain, and the two sub-loops built from it would not be simple."""
+    s = Scene()
+    fid, v = _quad(s)
+    s.add_edge(v[0], v[1])
+    assert s.split_face(fid, [v[0], v[1], v[2]]) is None
+    assert len(list(s.faces_iter())) == 1
+    assert len(s.face_loop(fid)) == 4
+
+
+def test_identical_first_and_last_chain_vertices_are_refused():
+    s = Scene()
+    fid, v = _quad(s)
+    mid = s.add_vertex(np.array((0.5, 0.5, 0.0), dtype=np.float32))
+    s.add_edge(v[0], mid)
+    assert s.split_face(fid, [v[0], mid, v[0]]) is None
+    assert len(list(s.faces_iter())) == 1
+    assert len(s.face_loop(fid)) == 4

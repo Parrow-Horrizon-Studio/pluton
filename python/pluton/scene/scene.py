@@ -28,7 +28,7 @@ if TYPE_CHECKING:
     from pluton._core import RayMeshHit
 from pluton.scene.edge import Edge
 from pluton.scene.face import Face
-from pluton.scene.uv_transfer import transfer_uvs_across_split
+from pluton.scene.uv_transfer import transfer_uvs_across_split, uv_at_point_in_face
 from pluton.scene.vertex import Vertex
 
 SplitResult = namedtuple("SplitResult", "vertex edge_a edge_b face_a face_b")
@@ -581,7 +581,10 @@ class Scene:
         if out[0] == self._mesh.INVALID_ID:
             return None
         self._render_dirty = True
-        return int(out[0]), int(out[1])
+        new_a, new_b = int(out[0]), int(out[1])
+        self._transfer_subloop_face_attributes(f_id, new_a, loop, self.face_loop(new_a))
+        self._transfer_subloop_face_attributes(f_id, new_b, loop, self.face_loop(new_b))
+        return new_a, new_b
 
     def copy_face_attributes_from(self, source: Scene, src_fid: int, dst_fid: int) -> None:
         """Copy one face's sidecars from another Scene onto a face of this one.
@@ -671,6 +674,73 @@ class Scene:
             )
             if moved is not None:
                 self._uvs_for(side)[int(new_fid)] = np.asarray(moved, dtype=np.float32)
+
+    def _transfer_subloop_face_attributes(
+        self,
+        old_fid: int,
+        new_fid: int,
+        old_loop: Sequence[int],
+        new_loop: Sequence[int],
+    ) -> None:
+        """Replay one destroyed face's sidecars onto ONE of the two faces a
+        split replaced it with.
+
+        Materials and placements copy verbatim, exactly as in the other two
+        siblings: neither depends on the loop, and a split does not move the
+        face's plane. Stored UVs are parallel to the loop, so every corner of
+        `new_loop` needs a value. A corner that was already on `old_loop`
+        copies that corner's UV directly. A corner that was not -- a chain
+        vertex, present in `new_loop` only because the split put it there --
+        carried no UV of its own, and is resolved by barycentric
+        interpolation inside the PARENT's own triangulation (see
+        `uv_transfer.uv_at_point_in_face`). A corner the parent's
+        triangulation cannot place drops that side's whole array rather than
+        leaving some corners guessed and others exact.
+
+        This is the subloop sibling of `copy_face_attributes_from` (identical
+        loop, different Scene) and `_transfer_face_attributes` (loop grew by
+        exactly one corner at a known edge parameter). A split's new loop is
+        neither of those shapes: it is an ARC of the old loop plus vertices
+        that were never on it, which is what the barycentric step exists for
+        and why this is a third function rather than a generalisation of the
+        other two.
+        """
+        old_fid = int(old_fid)
+        new_fid = int(new_fid)
+        old_loop = list(old_loop)
+        new_loop = list(new_loop)
+        old_index = {int(v): i for i, v in enumerate(old_loop)}
+        local_triangles = [old_index[int(v)] for v in self._triangulate_loop(old_loop)]
+        positions = np.array([self.vertex(v).position for v in old_loop], dtype=np.float64)
+
+        for side in (Side.FRONT, Side.BACK):
+            material = self._materials_for(side).get(old_fid)
+            if material is not None:
+                self._materials_for(side)[new_fid] = material
+
+            placement = self._placements_for(side).get(old_fid)
+            if placement is not None:
+                self._placements_for(side)[new_fid] = placement
+
+            stored = self._uvs_for(side).get(old_fid)
+            if stored is None:
+                continue
+
+            new_uvs: list[tuple[float, float]] = []
+            for vid in new_loop:
+                vid = int(vid)
+                if vid in old_index:
+                    uv = stored[old_index[vid]]
+                    new_uvs.append((float(uv[0]), float(uv[1])))
+                    continue
+                point = self.vertex(vid).position.astype(np.float64)
+                resolved = uv_at_point_in_face(positions, stored, local_triangles, point)
+                if resolved is None:
+                    new_uvs = None
+                    break
+                new_uvs.append(resolved)
+            if new_uvs is not None:
+                self._uvs_for(side)[new_fid] = np.asarray(new_uvs, dtype=np.float32)
 
     # --- Queries ----------------------------------------------------------
 
