@@ -779,6 +779,97 @@ std::uint32_t pluton::HalfEdgeMesh::dissolve_edge(std::uint32_t e_id) {
     return new_face;
 }
 
+std::array<std::uint32_t, 2> pluton::HalfEdgeMesh::split_face(
+    std::uint32_t f_id, const std::vector<std::uint32_t>& loop_a,
+    const std::vector<std::int32_t>& tris_a, const std::vector<std::uint32_t>& loop_b,
+    const std::vector<std::int32_t>& tris_b) {
+    const std::array<std::uint32_t, 2> fail{INVALID_ID, INVALID_ID};
+
+    if (!face_is_live(f_id)) return fail;
+    if (loop_a.size() < 3 || loop_b.size() < 3) return fail;
+    if (tris_a.size() % 3 != 0 || tris_b.size() % 3 != 0) return fail;
+
+    // Every loop vertex live, every loop edge present and live. add_face_from_loop
+    // throws on both, and it would throw after remove_face had run.
+    auto loop_is_buildable = [this](const std::vector<std::uint32_t>& loop) {
+        const std::size_t n = loop.size();
+        for (std::size_t i = 0; i < n; ++i) {
+            if (!vertex_is_live(loop[i])) return false;
+            const std::uint32_t e = edge_between(loop[i], loop[(i + 1) % n]);
+            if (e == INVALID_ID || !edge_is_live(e)) return false;
+        }
+        return true;
+    };
+    if (!loop_is_buildable(loop_a) || !loop_is_buildable(loop_b)) return fail;
+
+    // Every triangle index names a vertex of its own loop.
+    auto tris_index_loop = [](const std::vector<std::uint32_t>& loop,
+                              const std::vector<std::int32_t>& tris) {
+        for (auto t : tris) {
+            if (t < 0) return false;
+            if (std::find(loop.begin(), loop.end(), static_cast<std::uint32_t>(t)) == loop.end())
+                return false;
+        }
+        return true;
+    };
+    if (!tris_index_loop(loop_a, tris_a) || !tris_index_loop(loop_b, tris_b)) return fail;
+
+    // The partition check, as directed edges. Walking both sub-loops gives every
+    // directed boundary step of both children. A chain edge is walked once in
+    // each direction, so those pairs cancel; what survives must be exactly the
+    // parent's own directed loop. This one test carries three separate claims:
+    // the two loops really do partition f, the winding is preserved in both
+    // children (a reversed child would leave uncancelled reversed edges), and
+    // the chain is traversed in opposite directions, which is what makes
+    // add_face_from_loop claim opposite half-edges of each chain edge.
+    std::unordered_map<std::uint64_t, int> directed;
+    auto add_directed = [&directed](const std::vector<std::uint32_t>& loop) {
+        const std::size_t n = loop.size();
+        for (std::size_t i = 0; i < n; ++i) {
+            ++directed[pack_pair(loop[i], loop[(i + 1) % n])];
+        }
+    };
+    add_directed(loop_a);
+    add_directed(loop_b);
+
+    std::uint32_t cancelled = 0;
+    for (auto& [key, count] : directed) {
+        if (count <= 0) continue;
+        const std::uint32_t u = static_cast<std::uint32_t>(key >> 32);
+        const std::uint32_t v = static_cast<std::uint32_t>(key & 0xFFFFFFFFull);
+        auto it = directed.find(pack_pair(v, u));
+        if (it == directed.end()) continue;
+        const int pairs = std::min(count, it->second);
+        if (pairs <= 0) continue;
+        count -= pairs;
+        it->second -= pairs;
+        cancelled += static_cast<std::uint32_t>(pairs);
+    }
+    if (cancelled < 1) return fail;  // the two loops do not touch
+
+    const std::vector<std::uint32_t>& parent = faces_[f_id].loop;
+    std::unordered_map<std::uint64_t, int> want;
+    for (std::size_t i = 0; i < parent.size(); ++i) {
+        ++want[pack_pair(parent[i], parent[(i + 1) % parent.size()])];
+    }
+    for (const auto& [key, count] : directed) {
+        if (count == 0) continue;
+        auto it = want.find(key);
+        if (it == want.end() || it->second != count) return fail;
+    }
+    for (const auto& [key, count] : want) {
+        auto it = directed.find(key);
+        if (it == directed.end() || it->second != count) return fail;
+    }
+
+    // Validated. From here nothing can fail.
+    remove_face(f_id);
+    const std::uint32_t a = add_face_from_loop(loop_a, tris_a);
+    const std::uint32_t b = add_face_from_loop(loop_b, tris_b);
+    dirty_ = true;
+    return {a, b};
+}
+
 std::optional<pluton::SplitEdgeResult> pluton::HalfEdgeMesh::split_edge(std::uint32_t e_id,
                                                                         float t) {
     if (!edge_is_live(e_id)) return std::nullopt;

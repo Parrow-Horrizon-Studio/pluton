@@ -103,6 +103,21 @@ public:
     /// The dissolved edge id is tombstoned (never reused).
     std::uint32_t dissolve_edge(std::uint32_t e_id);
 
+    /// Replace face f_id with two faces that share a chain of vertices: the
+    /// inverse of dissolve_edge. loop_a and loop_b are the two new boundary
+    /// loops, each already triangulated by the caller with GLOBAL vertex ids,
+    /// exactly as add_face_from_loop expects.
+    ///
+    /// Returns {id_a, id_b}, or {INVALID_ID, INVALID_ID} if any precondition
+    /// fails, in which case the mesh is untouched. Every check runs before the
+    /// first mutation on purpose: add_face_from_loop throws on a missing edge,
+    /// and a throw after remove_face would leave a hole with no way back.
+    std::array<std::uint32_t, 2> split_face(std::uint32_t f_id,
+                                            const std::vector<std::uint32_t>& loop_a,
+                                            const std::vector<std::int32_t>& tris_a,
+                                            const std::vector<std::uint32_t>& loop_b,
+                                            const std::vector<std::int32_t>& tris_b);
+
     /// Split an edge at parameter t ∈ (0,1), inserting a new vertex w at
     /// p(v_min) + t*(p(v_max) - p(v_min)) where (v_min, v_max) = edge_vertices(e_id).
     /// The edge is replaced by two collinear edges and w is inserted into the

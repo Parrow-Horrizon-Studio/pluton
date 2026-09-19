@@ -1509,3 +1509,205 @@ TEST(HalfEdgeMeshTest, FacesAreCoplanar_CollinearStartWallIsNotCoplanarWithAFloo
     EXPECT_FALSE(m.faces_are_coplanar(f_wall, f_floor, kCos05Deg, kDistTol));
     EXPECT_FALSE(m.faces_are_coplanar(f_floor, f_wall, kCos05Deg, kDistTol));
 }
+
+// ---- split_face -------------------------------------------------------------
+
+namespace {
+// One quad f = [v0,v1,v2,v3] on z=0, plus the chord edge (v0,v2) already
+// present but belonging to no face. That is the state the Line tool leaves
+// behind today: the edge lands, the face stays whole.
+pluton::HalfEdgeMesh make_quad_with_chord(std::uint32_t& f_out, std::uint32_t v_out[4]) {
+    using pluton::HalfEdgeMesh;
+    HalfEdgeMesh m;
+    auto v0 = m.add_vertex(0, 0, 0);
+    auto v1 = m.add_vertex(1, 0, 0);
+    auto v2 = m.add_vertex(1, 1, 0);
+    auto v3 = m.add_vertex(0, 1, 0);
+    m.add_halfedge_pair(v0, v1);
+    m.add_halfedge_pair(v1, v2);
+    m.add_halfedge_pair(v2, v3);
+    m.add_halfedge_pair(v3, v0);
+    m.add_halfedge_pair(v0, v2);  // the chord
+    f_out = m.add_face_from_loop({v0, v1, v2, v3},
+                                 {(int)v0, (int)v1, (int)v2, (int)v0, (int)v2, (int)v3});
+    v_out[0] = v0;
+    v_out[1] = v1;
+    v_out[2] = v2;
+    v_out[3] = v3;
+    return m;
+}
+}  // namespace
+
+TEST(SplitFace, ChordSplitsOneQuadIntoTwoTriangles) {
+    std::uint32_t f = 0;
+    std::uint32_t v[4];
+    auto m = make_quad_with_chord(f, v);
+
+    auto out = m.split_face(f, {v[0], v[1], v[2]}, {(int)v[0], (int)v[1], (int)v[2]},
+                            {v[2], v[3], v[0]}, {(int)v[2], (int)v[3], (int)v[0]});
+
+    ASSERT_NE(out[0], pluton::HalfEdgeMesh::INVALID_ID);
+    ASSERT_NE(out[1], pluton::HalfEdgeMesh::INVALID_ID);
+    EXPECT_FALSE(m.face_is_live(f));
+    EXPECT_TRUE(m.face_is_live(out[0]));
+    EXPECT_TRUE(m.face_is_live(out[1]));
+    EXPECT_EQ(m.face_loop_vertices(out[0]).size(), 3u);
+    EXPECT_EQ(m.face_loop_vertices(out[1]).size(), 3u);
+
+    std::uint32_t live = 0;
+    for (auto g = m.next_live_face(0); g != pluton::HalfEdgeMesh::INVALID_ID;
+         g = m.next_live_face(g + 1))
+        ++live;
+    EXPECT_EQ(live, 2u);
+}
+
+// Every rejection asserts the mesh is UNTOUCHED, not merely that the call
+// returned INVALID_ID. A version that removed the face and then bailed would
+// pass a return-value-only test while leaving a hole.
+namespace {
+void expect_rejected_and_untouched(pluton::HalfEdgeMesh& m, std::uint32_t f,
+                                   const std::array<std::uint32_t, 2>& out) {
+    EXPECT_EQ(out[0], pluton::HalfEdgeMesh::INVALID_ID);
+    EXPECT_EQ(out[1], pluton::HalfEdgeMesh::INVALID_ID);
+    EXPECT_TRUE(m.face_is_live(f)) << "a rejected split must not remove the face";
+    std::uint32_t live = 0;
+    for (auto g = m.next_live_face(0); g != pluton::HalfEdgeMesh::INVALID_ID;
+         g = m.next_live_face(g + 1))
+        ++live;
+    EXPECT_EQ(live, 1u);
+}
+}  // namespace
+
+TEST(SplitFace, RejectsADeadFace) {
+    std::uint32_t f = 0;
+    std::uint32_t v[4];
+    auto m = make_quad_with_chord(f, v);
+    m.remove_face(f);
+    auto out = m.split_face(f, {v[0], v[1], v[2]}, {(int)v[0], (int)v[1], (int)v[2]},
+                            {v[2], v[3], v[0]}, {(int)v[2], (int)v[3], (int)v[0]});
+    EXPECT_EQ(out[0], pluton::HalfEdgeMesh::INVALID_ID);
+    EXPECT_EQ(out[1], pluton::HalfEdgeMesh::INVALID_ID);
+}
+
+TEST(SplitFace, RejectsALoopWithFewerThanThreeVertices) {
+    std::uint32_t f = 0;
+    std::uint32_t v[4];
+    auto m = make_quad_with_chord(f, v);
+    auto out = m.split_face(f, {v[0], v[2]}, {(int)v[0], (int)v[2], (int)v[0]}, {v[2], v[3], v[0]},
+                            {(int)v[2], (int)v[3], (int)v[0]});
+    expect_rejected_and_untouched(m, f, out);
+}
+
+TEST(SplitFace, RejectsAMissingLoopEdge) {
+    // v1 to v3 is not an edge of this mesh, so add_face_from_loop would throw.
+    std::uint32_t f = 0;
+    std::uint32_t v[4];
+    auto m = make_quad_with_chord(f, v);
+    auto out = m.split_face(f, {v[0], v[1], v[3]}, {(int)v[0], (int)v[1], (int)v[3]},
+                            {v[1], v[2], v[3]}, {(int)v[1], (int)v[2], (int)v[3]});
+    expect_rejected_and_untouched(m, f, out);
+}
+
+TEST(SplitFace, RejectsATriangleIndexNotInItsOwnLoop) {
+    std::uint32_t f = 0;
+    std::uint32_t v[4];
+    auto m = make_quad_with_chord(f, v);
+    auto out = m.split_face(f, {v[0], v[1], v[2]}, {(int)v[0], (int)v[1], (int)v[3]},
+                            {v[2], v[3], v[0]}, {(int)v[2], (int)v[3], (int)v[0]});
+    expect_rejected_and_untouched(m, f, out);
+}
+
+TEST(SplitFace, RejectsTwoLoopsThatDoNotTouch) {
+    // Both loops are the parent's own loop, so nothing cancels.
+    std::uint32_t f = 0;
+    std::uint32_t v[4];
+    auto m = make_quad_with_chord(f, v);
+    auto out = m.split_face(f, {v[0], v[1], v[2], v[3]},
+                            {(int)v[0], (int)v[1], (int)v[2], (int)v[0], (int)v[2], (int)v[3]},
+                            {v[0], v[1], v[2], v[3]},
+                            {(int)v[0], (int)v[1], (int)v[2], (int)v[0], (int)v[2], (int)v[3]});
+    expect_rejected_and_untouched(m, f, out);
+}
+
+TEST(SplitFace, RejectsAChildWoundBackwards) {
+    // loop_b reversed. Correct loop_b walks the chord v0 -> v2, opposite to
+    // loop_a's v2 -> v0, and that pair cancels. Reversed, loop_b walks
+    // v2 -> v0 as well, so nothing cancels and the check fails on
+    // `cancelled < 1`. That is the mechanism, and without it the two
+    // children's normals would face opposite ways.
+    std::uint32_t f = 0;
+    std::uint32_t v[4];
+    auto m = make_quad_with_chord(f, v);
+    auto out = m.split_face(f, {v[0], v[1], v[2]}, {(int)v[0], (int)v[1], (int)v[2]},
+                            {v[0], v[3], v[2]}, {(int)v[0], (int)v[3], (int)v[2]});
+    expect_rejected_and_untouched(m, f, out);
+}
+
+TEST(SplitFace, BothChildrenKeepTheParentsNormal) {
+    // There is no public per-face normal accessor on HalfEdgeMesh; the cached
+    // normal reaches the outside only through face_triangle_buffer, which is
+    // how test_halfedge.cpp:447 already reads one. Every corner of every
+    // triangle of both children must carry the parent's +Z.
+    std::uint32_t f = 0;
+    std::uint32_t v[4];
+    auto m = make_quad_with_chord(f, v);
+    auto out = m.split_face(f, {v[0], v[1], v[2]}, {(int)v[0], (int)v[1], (int)v[2]},
+                            {v[2], v[3], v[0]}, {(int)v[2], (int)v[3], (int)v[0]});
+    ASSERT_NE(out[0], pluton::HalfEdgeMesh::INVALID_ID);
+
+    auto [positions, normals] = m.face_triangle_buffer();
+    ASSERT_EQ(normals.size(), 18u) << "two triangles, three corners each, three floats each";
+    for (std::size_t i = 0; i + 2 < normals.size(); i += 3) {
+        EXPECT_FLOAT_EQ(normals[i + 0], 0.0f);
+        EXPECT_FLOAT_EQ(normals[i + 1], 0.0f);
+        EXPECT_FLOAT_EQ(normals[i + 2], 1.0f)
+            << "a child wound backwards renders as an unpainted back face and pushes "
+               "the wrong way";
+    }
+}
+
+TEST(SplitFace, SplittingTheSameFaceTwiceInSequence) {
+    // The second split targets one of the first split's children, which is the
+    // case an id-reuse or stale-loop bug shows up in. This also covers #31's
+    // outstanding sequential-splits GoogleTest item.
+    std::uint32_t f = 0;
+    std::uint32_t v[4];
+    auto m = make_quad_with_chord(f, v);
+    auto first = m.split_face(f, {v[0], v[1], v[2]}, {(int)v[0], (int)v[1], (int)v[2]},
+                              {v[2], v[3], v[0]}, {(int)v[2], (int)v[3], (int)v[0]});
+    ASSERT_NE(first[0], pluton::HalfEdgeMesh::INVALID_ID);
+
+    // Split child [v0,v1,v2] by inserting a vertex on (v0,v1) and chording to v2.
+    auto se = m.split_edge(m.edge_between(v[0], v[1]), 0.5f);
+    ASSERT_TRUE(se.has_value());
+    const std::uint32_t w = se->vertex;
+    const std::uint32_t child =
+        (se->face_a != pluton::HalfEdgeMesh::INVALID_ID) ? se->face_a : se->face_b;
+    ASSERT_TRUE(m.face_is_live(child));
+    // face_loop_vertices(child) is [w, v1, v2, v0] or a rotation of it; read it
+    // rather than assuming the rotation, which earcut's version can change.
+    m.add_halfedge_pair(w, v[2]);
+    auto second = m.split_face(child, {w, v[1], v[2]}, {(int)w, (int)v[1], (int)v[2]},
+                               {v[2], v[0], w}, {(int)v[2], (int)v[0], (int)w});
+    ASSERT_NE(second[0], pluton::HalfEdgeMesh::INVALID_ID);
+
+    std::uint32_t live = 0;
+    for (auto g = m.next_live_face(0); g != pluton::HalfEdgeMesh::INVALID_ID;
+         g = m.next_live_face(g + 1))
+        ++live;
+    EXPECT_EQ(live, 3u);
+}
+
+TEST(SplitFace, DissolvingTheChordReturnsTheParentsLoop) {
+    std::uint32_t f = 0;
+    std::uint32_t v[4];
+    auto m = make_quad_with_chord(f, v);
+    const auto parent_loop = m.face_loop_vertices(f);
+    auto out = m.split_face(f, {v[0], v[1], v[2]}, {(int)v[0], (int)v[1], (int)v[2]},
+                            {v[2], v[3], v[0]}, {(int)v[2], (int)v[3], (int)v[0]});
+    ASSERT_NE(out[0], pluton::HalfEdgeMesh::INVALID_ID);
+
+    const std::uint32_t merged = m.dissolve_edge(m.edge_between(v[0], v[2]));
+    ASSERT_NE(merged, pluton::HalfEdgeMesh::INVALID_ID);
+    EXPECT_EQ(m.face_loop_vertices(merged).size(), parent_loop.size());
+}
