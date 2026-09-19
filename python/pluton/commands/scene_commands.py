@@ -443,6 +443,79 @@ class SplitEdgeCommand(Command):
             scene.restore_face(fid, loop)
 
 
+class SplitFaceCommand(Command):
+    """Split a face along a chain of vertices. Reversible.
+
+    do(): first call performs the split via scene.split_face and captures
+          BOTH the original face's id and loop and the created ids (two new
+          faces) plus their rebuilt loops. Redo restores the created faces to
+          their FIRST-RUN ids (id-preserving), so a sibling command in the
+          same gesture composite that cached one of them stays valid across
+          undo/redo (the M3c atomic-undo concern, see SplitEdgeCommand).
+    undo(): removes the created faces, then restores the original face to its
+            ORIGINAL id. split_face creates no vertices and no edges, so
+            undo touches only faces.
+    A refused split (see Scene.split_face) makes the command a clean no-op.
+    """
+
+    name = "Split Face"
+
+    def __init__(self, face_id: int, chain: Sequence[int]) -> None:
+        self._face_id = face_id
+        self._chain = [int(v) for v in chain]
+        self._was_noop = False
+        self._done_once = False
+        # original
+        self._orig_loop: tuple[int, ...] | None = None
+        # created (first-run ids, reused on redo)
+        self.new_face_ids: tuple[int, int] | None = None
+        self._new_loops: list[tuple[int, tuple[int, ...]]] = []
+
+    def do(self, scene) -> None:
+        if not self._done_once:
+            self._first_do(scene)
+        else:
+            self._redo(scene)
+
+    def _first_do(self, scene) -> None:
+        try:
+            loop = scene.face_loop(self._face_id)
+        except KeyError:
+            self._was_noop = True
+            self._done_once = True
+            return
+
+        result = scene.split_face(self._face_id, self._chain)
+        if result is None:
+            self._was_noop = True
+            self._done_once = True
+            return
+
+        self._orig_loop = tuple(loop)
+        self.new_face_ids = result
+        self._new_loops = [(fid, tuple(scene.face(fid).loop_vertex_ids)) for fid in result]
+        self._done_once = True
+        self._was_noop = False
+
+    def _redo(self, scene) -> None:
+        if self._was_noop:
+            return
+        assert self._orig_loop is not None, "SplitFaceCommand._redo before _first_do"
+        assert self.new_face_ids is not None, "SplitFaceCommand._redo before _first_do"
+        scene.remove_face(self._face_id)
+        for fid, loop in self._new_loops:
+            scene.restore_face(fid, loop)
+
+    def undo(self, scene) -> None:
+        if self._was_noop:
+            return
+        assert self._orig_loop is not None, "SplitFaceCommand.undo before do"
+        assert self.new_face_ids is not None, "SplitFaceCommand.undo before do"
+        for fid in self.new_face_ids:
+            scene.remove_face(fid)
+        scene.restore_face(self._face_id, self._orig_loop)
+
+
 class TransformVerticesCommand(Command):
     """Move a set of vertices to new positions; undo restores the old ones.
 
