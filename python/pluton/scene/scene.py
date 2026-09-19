@@ -835,6 +835,21 @@ class Scene:
             f = self._mesh.next_live_face(f + 1)
         return np.asarray(out, dtype=np.int32).reshape(-1)
 
+    def face_loop_indices(self, f_id: int) -> np.ndarray:
+        """One face's slice of face_triangle_loop_indices, (3t,) int32.
+
+        The overlay that substitutes stored UVs reads the corners of the
+        faces that have them, which is typically a handful out of thousands.
+        Building the whole-scene array to serve those is what gave a single
+        stored face a cost proportional to the definition's total face count
+        (#117); this serves one face in time proportional to that face.
+        """
+        loop = self._mesh.face_loop_vertices(f_id)
+        position = {int(v): i for i, v in enumerate(loop)}
+        return np.asarray(
+            [position[int(v)] for v in self._mesh.face_triangles(f_id)], dtype=np.int32
+        )
+
     # --- Render-buffer projection -----------------------------------------
 
     def edge_line_buffer(self) -> np.ndarray:

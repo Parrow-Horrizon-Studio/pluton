@@ -117,3 +117,28 @@ def test_one_stored_face_among_many_leaves_the_others_projected():
         elif owning == f1:
             np.testing.assert_allclose(mixed[corner], stored[int(idx[corner])], atol=1e-6)
     assert not np.allclose(mixed, projected_both)
+
+
+def test_a_few_stored_faces_do_not_walk_every_face(monkeypatch):
+    """#117: the overlay paid a cost proportional to the definition's TOTAL
+    face count the moment a single face carried stored UVs.
+
+    `face_triangle_loop_indices()` walks every live face in Python to build
+    an array of which the overlay read a handful of entries. Making it raise
+    is the discrimination: any implementation that still reaches for the
+    whole-scene array to serve two stored faces fails here, and no
+    implementation that slices per face can.
+    """
+    s = Scene()
+    faces = [_quad(s, z=float(i)) for i in range(40)]
+    s.set_face_uvs(faces[0], [(0.0, 0.0), (0.5, 0.0), (0.5, 0.5), (0.0, 0.5)], Side.FRONT)
+    s.set_face_uvs(faces[7], [(0.0, 0.0), (0.25, 0.0), (0.25, 0.25), (0.0, 0.25)], Side.FRONT)
+    expected = build_face_uvs(s, None, Side.FRONT)
+
+    def boom(self):
+        raise AssertionError("the overlay walked every face to serve two stored ones")
+
+    monkeypatch.setattr(type(s), "face_triangle_loop_indices", boom)
+    got = build_face_uvs(s, None, Side.FRONT)
+
+    np.testing.assert_allclose(got, expected, atol=1e-6)

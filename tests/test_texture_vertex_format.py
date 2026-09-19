@@ -629,3 +629,53 @@ def test_clearing_the_last_texture_goes_back_to_the_cheap_path(monkeypatch):
 
     assert calls == []
     assert np.all(uploads[-1].reshape(-1, _FACE_VERTEX_FLOATS)[:, 6:10] == 0.0)
+
+
+def test_a_definition_carrying_no_textured_material_skips_the_bake(monkeypatch):
+    """#112: the M7.5b gate asked the whole MaterialLibrary, so a document
+    containing one image anywhere made EVERY definition pay the full bake,
+    including definitions where nothing is textured.
+
+    Measured on a 9,600-face definition, that was 33.8 ms against about
+    95 ms per re-upload, and uploads fire on every mesh edit that dirties a
+    definition, so it is a stall per push/pull on the ordinary document
+    that has some textured surfaces and many untextured ones.
+
+    The gate asks about THIS definition now: the materials its own faces
+    carry, which uv_material_key already collects for both sides. A texture
+    on a material no face here carries samples nothing here.
+    """
+    model, _, mat = _painted_box()
+    assert mat.texture_id is None
+    elsewhere = model.materials.add_custom("Textured", (1.0, 1.0, 1.0))
+    model.materials.edit(elsewhere.id, texture_id=5)
+
+    calls = _count_bakes(monkeypatch)
+    r, uploads = _capture_uploads(monkeypatch)
+
+    buf = r._upload_definition(model.root, frozenset(), model)
+
+    assert calls == [], "a definition whose own materials carry no texture must not bake"
+    rows = uploads[0].reshape(-1, _FACE_VERTEX_FLOATS)
+    assert rows.shape[1] == 10
+    assert rows.shape[0] == buf.face_count
+    assert np.all(rows[:, 6:10] == 0.0)
+
+
+def test_painting_this_definition_with_the_textured_material_bakes_it(monkeypatch):
+    """The other half of the pair. A per-definition gate that latched off
+    would pass the test above and leave a genuinely textured definition
+    rendering a single texel."""
+    model, scene, mat = _painted_box()
+    model.materials.edit(mat.id, texture_id=5)
+
+    calls = _count_bakes(monkeypatch)
+    r, uploads = _capture_uploads(monkeypatch)
+    buf = r._upload_definition(model.root, frozenset(), model)
+
+    assert len(calls) == 1
+    rows = uploads[0].reshape(-1, _FACE_VERTEX_FLOATS)
+    order = np.asarray(buf.plan.vertex_order)
+    front = build_face_uvs(scene, model, Side.FRONT)
+    assert np.any(front != 0.0), "this box projects to all-zero UVs, so the test is blind"
+    assert np.allclose(rows[:, 6:8], front[order], atol=1e-6)

@@ -405,7 +405,57 @@ def _face_uv_geometry(scene, face_buffer=None) -> _FaceUvGeometry | None:
     )
 
 
-def _overlay_stored_uvs(scene, side: Side, geom: _FaceUvGeometry, uvs: np.ndarray) -> np.ndarray:
+class _OverlayCache:
+    """The two lookups the stored-UV overlay needs, built lazily and shared.
+
+    Both sides want the same corner-span map and the same loop indices, and
+    neither side wants either unless it has a stored face, so each is built
+    on first use and then reused. Building them per side is part of what made
+    stored UVs cost what they did (#117).
+    """
+
+    __slots__ = ("_geom", "_loops", "_scene", "_spans")
+
+    def __init__(self, scene, geom: _FaceUvGeometry) -> None:
+        self._scene = scene
+        self._geom = geom
+        self._spans: dict[int, tuple[int, int]] | None = None
+        self._loops: np.ndarray | None = None
+
+    def spans(self) -> dict[int, tuple[int, int]]:
+        """The whole map, not one lookup at a time: the caller reads it once
+        per stored face, and a bound-method call per face is measurable at
+        the counts a fully imported model reaches."""
+        if self._spans is None:
+            geom = self._geom
+            starts = np.concatenate(([0], np.cumsum(geom.counts)[:-1]))
+            self._spans = {
+                int(f): (int(start), int(count))
+                for f, start, count in zip(geom.face_ids, starts, geom.counts, strict=True)
+            }
+        return self._spans
+
+    def prefers_whole_walk(self, stored_count: int) -> bool:
+        """Is one walk over every face cheaper than `stored_count` per-face calls?
+
+        The whole-scene array is a single Python walk of every live face; a
+        per-face call repeats that walk's body for one face with a call's
+        overhead on top. Measured on a 1,600-quad definition, the whole walk
+        costs about 1.4 ms and the per-face route about 1.4 us per face, so
+        they cross near two thirds. Half is the rule because it is a rule
+        someone can check, and the arithmetic either side of it is flat.
+        """
+        return stored_count * 2 >= len(self._geom.face_ids)
+
+    def loop_indices(self) -> np.ndarray:
+        if self._loops is None:
+            self._loops = self._scene.face_triangle_loop_indices()
+        return self._loops
+
+
+def _overlay_stored_uvs(
+    scene, side: Side, geom: _FaceUvGeometry, uvs: np.ndarray, cache: _OverlayCache
+) -> np.ndarray:
     """Replace projected UVs with stored ones, for the faces that have them.
 
     Stored UVs are parallel to a face's boundary loop; `uvs` is per triangle
@@ -413,26 +463,25 @@ def _overlay_stored_uvs(scene, side: Side, geom: _FaceUvGeometry, uvs: np.ndarra
     takes stored[loop_indices[i]].
 
     Iterates the sidecar's entries rather than every face, so a definition with
-    three stored faces among ten thousand touches three.
+    three stored faces among ten thousand touches three. The loop indices come
+    per face for the same reason: the whole-scene array walks every live face
+    in Python to produce entries only these faces read (#117).
     """
     stored_here = [f for f, s in scene.faces_with_uvs() if s is side]
     if not stored_here:
         return uvs
-
-    starts = np.concatenate(([0], np.cumsum(geom.counts)[:-1]))
-    span = {
-        int(f): (int(s), int(c)) for f, s, c in zip(geom.face_ids, starts, geom.counts, strict=True)
-    }
-    loop_indices = scene.face_triangle_loop_indices()
+    whole = cache.loop_indices() if cache.prefers_whole_walk(len(stored_here)) else None
+    spans = cache.spans()
+    per_face_loop_indices = scene.face_loop_indices
 
     out = uvs
     for face_id in stored_here:
-        where = span.get(int(face_id))
+        where = spans.get(int(face_id))
         if where is None:
             continue  # stored on a face this definition's buffer does not carry
         first, count = where
         arr = scene.face_uvs(face_id, side)
-        idx = loop_indices[first : first + count]
+        idx = whole[first : first + count] if whole is not None else per_face_loop_indices(face_id)
         if int(idx.max()) >= arr.shape[0]:
             # Defensive: a stored array shorter than the face's loop, which the
             # public API (set_face_uvs' length validation) prevents.
@@ -443,8 +492,16 @@ def _overlay_stored_uvs(scene, side: Side, geom: _FaceUvGeometry, uvs: np.ndarra
     return out
 
 
-def _side_uvs(scene, materials, side: Side, geom: _FaceUvGeometry) -> np.ndarray:
-    """One side's (3T, 2) UVs from the shared geometry."""
+def _side_uvs(
+    scene, materials, side: Side, geom: _FaceUvGeometry, cache: _OverlayCache | None = None
+) -> np.ndarray:
+    """One side's (3T, 2) UVs from the shared geometry.
+
+    `cache` lets a two-sided bake share the overlay's lookups; a single-sided
+    caller can leave it out and get its own.
+    """
+    if cache is None:
+        cache = _OverlayCache(scene, geom)
     if materials is None:
         sizes = np.ones((geom.positions.shape[0], 2), dtype=np.float64)
     else:
@@ -456,7 +513,7 @@ def _side_uvs(scene, materials, side: Side, geom: _FaceUvGeometry) -> np.ndarray
 
     uvs = project_onto_bases(geom.positions, geom.u_axes, geom.v_axes, geom.origins, sizes)
 
-    uvs = _overlay_stored_uvs(scene, side, geom, uvs)
+    uvs = _overlay_stored_uvs(scene, side, geom, uvs, cache)
 
     # The placement sidecars hold only adjusted faces, so a definition nobody has
     # placed a texture on skips the gather entirely rather than reading the
@@ -497,38 +554,42 @@ def build_face_uvs_both_sides(scene, model, face_buffer=None) -> tuple[np.ndarra
         empty = np.zeros((0, 2), dtype=np.float32)
         return empty, empty
     materials = getattr(model, "materials", None)
+    cache = _OverlayCache(scene, geom)
     return (
-        _side_uvs(scene, materials, Side.FRONT, geom),
-        _side_uvs(scene, materials, Side.BACK, geom),
+        _side_uvs(scene, materials, Side.FRONT, geom, cache),
+        _side_uvs(scene, materials, Side.BACK, geom, cache),
     )
 
 
-def model_has_any_texture(model) -> bool:
-    """Can anything in this model sample a UV?
+def uv_key_needs_bake(key: tuple) -> bool:
+    """Can anything the definition behind `key` sample a UV?
 
-    M7.5b final review, item 2. The per-corner UV bake is pure cost in a
-    document that contains no image at all: measured on a 9,600-face definition
-    with an empty texture library, build_face_uvs_both_sides added ~61 ms to
-    every re-upload of coordinates nothing could ever read.
+    The per-corner UV bake is pure cost where nothing can read it. M7.5b
+    measured ~61 ms added to every re-upload of a 9,600-face definition in a
+    document with no image at all, and gated on the whole MaterialLibrary.
+    That gate was too coarse: one image anywhere made every definition pay,
+    including definitions with nothing textured, so the ordinary document
+    with some textured surfaces and many untextured ones got no relief at
+    all (#112, about 95 ms against 33.8 ms per upload).
 
-    Asked of the MATERIAL library rather than the texture library on purpose:
-    a texture only reaches a fragment through a material's texture_id, and that
-    same field is what uv_material_key snapshots -- so the moment a material
-    the scene actually uses gains a texture, uv_key stops matching and the
-    definition re-uploads with real UVs. A texture imported but not yet
-    assigned, or assigned to a material no face carries, samples nothing and
-    correctly does not pay for a bake; painting that material onto a face
-    dirties the mesh and re-uploads by the ordinary route.
+    `key` comes from uv_material_key, which already names exactly the
+    materials this definition's own faces carry, on both sides, and which
+    _upload_definition has to compute anyway. Asking it instead costs
+    nothing and scopes the answer to one definition.
+
+    The invalidation argument is the one that made the coarse gate safe, and
+    it is unchanged: a texture reaches a fragment only through a material's
+    texture_id, and texture_id is what the key snapshots, so assigning one
+    to a material this definition carries breaks uv_key_still_matches and
+    forces a re-upload with real UVs. A material entering the scene can only
+    happen by painting a face, which dirties the mesh and re-uploads anyway.
 
     This gates the CPU bake ONLY. The vertex format stays unconditionally 10
     floats (spec 1.5 as superseded during execution): a per-definition layout
     branch in the renderer's hot path is expressly not wanted, and the memory
     cost of the two zero-filled UV blocks is accepted.
     """
-    materials = getattr(model, "materials", None)
-    if materials is None:
-        return False
-    return any(m.texture_id is not None for m in materials.materials())
+    return any(texture_id is not None for _, texture_id, _ in key)
 
 
 def uv_material_key(scene, model) -> tuple:
@@ -549,12 +610,26 @@ def uv_material_key(scene, model) -> tuple:
     re-upload. Including them would re-upload every definition on every colour
     tweak, rebuilding visible geometry while the user drags a colour picker.
     """
+    return uv_material_key_for(
+        scene.face_triangle_materials(Side.FRONT),
+        scene.face_triangle_materials(Side.BACK),
+        model,
+    )
+
+
+def uv_material_key_for(front_materials, back_materials, model) -> tuple:
+    """uv_material_key from per-triangle material arrays already in hand.
+
+    _upload_definition fetches both arrays for plan_face_batches regardless,
+    and face_triangle_materials measures ~3.5 ms on a 10k-face definition, so
+    letting the key re-fetch them doubled that walk for nothing.
+    """
     materials = getattr(model, "materials", None)
     if materials is None:
         return ()
     ids: set[int] = set()
-    for side in Side:
-        ids.update(int(m) for m in scene.face_triangle_materials(side).tolist())
+    for arr in (front_materials, back_materials):
+        ids.update(int(m) for m in arr.tolist())
     key = []
     for mid in sorted(ids):
         mat = materials.get(mid)
@@ -1744,14 +1819,19 @@ class SceneRenderer:
         # permutes them — and the permutation must reach every one of them.
         face_buffer = scene.face_triangle_buffer()
         positions, normals = face_buffer
+        # Fetched once and used three times: the batch plan, the UV key, and
+        # through the key the bake gate. Each fetch walks every triangle.
+        front_mats = scene.face_triangle_materials(Side.FRONT)
+        back_mats = scene.face_triangle_materials(Side.BACK)
+        uv_key = uv_material_key_for(front_mats, back_mats, model)
         if positions.shape[0] > 0:
-            if model_has_any_texture(model):
+            if uv_key_needs_bake(uv_key):
                 front_uvs, back_uvs = build_face_uvs_both_sides(scene, model, face_buffer)
             else:
-                # Nothing in this document can sample a UV, so the walk is
-                # skipped and the two blocks go out zero-filled -- the LAYOUT is
-                # unchanged, only the arithmetic is. See model_has_any_texture
-                # for why importing the first texture still re-bakes correctly.
+                # Nothing THIS definition carries can sample a UV, so the walk
+                # is skipped and the two blocks go out zero-filled -- the LAYOUT
+                # is unchanged, only the arithmetic is. See uv_key_needs_bake
+                # for why gaining a texture still re-bakes correctly.
                 zeros = np.zeros((positions.shape[0], 2), dtype=np.float64)
                 front_uvs = back_uvs = zeros
             interleaved = np.concatenate([positions, normals, front_uvs, back_uvs], axis=1).astype(
@@ -1760,8 +1840,6 @@ class SceneRenderer:
             # Group triangles by (front, back) material so each pair draws as one
             # contiguous batch, with the translucent pairs as a contiguous suffix
             # that render()'s second pass depth-sorts.
-            front_mats = scene.face_triangle_materials(Side.FRONT)
-            back_mats = scene.face_triangle_materials(Side.BACK)
             plan = plan_face_batches(front_mats, back_mats, translucent_ids)
             interleaved = np.ascontiguousarray(interleaved[plan.vertex_order])
             GL.glBindBuffer(GL.GL_ARRAY_BUFFER, buf.face_vbo)
@@ -1774,7 +1852,7 @@ class SceneRenderer:
             buf.face_count = 0
             buf.plan = plan
         buf.translucent_ids = translucent_ids
-        buf.uv_key = uv_material_key(scene, model)
+        buf.uv_key = uv_key
         _reset_translucent_state(buf, plan, interleaved)
 
         # Edges: (2*E, 3) positions — pack constant color per vertex so the

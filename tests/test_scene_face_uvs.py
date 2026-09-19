@@ -144,3 +144,31 @@ def test_an_empty_scene_returns_an_empty_index_array():
     idx = s.face_triangle_loop_indices()
     assert idx.shape == (0,)
     assert idx.dtype == np.int32
+
+
+def test_face_loop_indices_is_the_whole_scene_array_sliced_to_one_face():
+    """#117: the overlay needs one face's corners, not every face's.
+
+    Building the whole (3T,) array to read a handful of entries is what
+    makes three stored faces among 1,600 cost as much as they do. The
+    per-face accessor must agree with the slice it replaces, or the two
+    would drift and the overlay would read the wrong loop position.
+    """
+    s = Scene()
+    f1 = _quad(s)
+    f2 = _quad(s, z=1.0)
+    whole = s.face_triangle_loop_indices()
+    face_per_tri = s.face_triangle_face_ids()
+
+    for face in (f1, f2):
+        corners = np.flatnonzero(np.repeat(face_per_tri, 3) == face)
+        np.testing.assert_array_equal(s.face_loop_indices(face), whole[corners])
+
+
+def test_face_loop_indices_of_a_lone_quad_covers_its_whole_loop():
+    s = Scene()
+    f = _quad(s)
+    idx = s.face_loop_indices(f)
+    assert idx.dtype == np.int32
+    assert idx.shape == (6,)
+    assert set(int(i) for i in idx) == {0, 1, 2, 3}
