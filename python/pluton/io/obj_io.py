@@ -188,13 +188,9 @@ def model_to_objdoc(model, resolver=None) -> ObjDocument:
             if mat_id != default_id:
                 mname = obj_material_names[mat_id]
                 materials[mname] = mat.base_color
-                faces.append(
-                    ObjFace(loop, mname, uv_indices=uv_indices, normal_index=normal_index)
-                )
+                faces.append(ObjFace(loop, mname, uv_indices=uv_indices, normal_index=normal_index))
             else:
-                faces.append(
-                    ObjFace(loop, None, uv_indices=uv_indices, normal_index=normal_index)
-                )
+                faces.append(ObjFace(loop, None, uv_indices=uv_indices, normal_index=normal_index))
         objects.append(ObjObject(_unique_name(definition.name, used_names), tuple(faces)))
 
     material_textures: dict[str, str] = {}
