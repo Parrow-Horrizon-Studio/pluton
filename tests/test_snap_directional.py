@@ -138,3 +138,86 @@ def test_no_acquisition_yields_no_directional_candidates():
 
     res = SnapEngine().snap(_screen_of(cam, probe), (1280, 800), cam, scene, anchor=anchor)
     assert res.kind not in (SnapKind.PARALLEL, SnapKind.PERPENDICULAR, SnapKind.FROM_POINT)
+
+
+# --- Direct generator tests -------------------------------------------------
+#
+# The three tests below call directional_candidates / from_point_candidates
+# directly instead of going through SnapEngine.snap(). This is deliberate,
+# not redundant with the end-to-end tests above: snap() has filters of its
+# own that mask defects in these generators before they ever reach a
+# SnapResult. Its tolerance filter drops a NaN screen_dist (nan <= tolerance
+# is False, so a broken candidate is silently excluded from "within" as if it
+# had never been offered), and its own "if acquired is not None" guard means
+# a broken inner guard in directional_candidates is never even reached when
+# acquired is None. Testing a pure generator through the engine that wraps it
+# hid both defects; these tests exercise the generators at their own level so
+# a later edit cannot reintroduce either bug unnoticed. Do not delete these as
+# duplicates of the end-to-end tests above: they check a different thing.
+
+
+def test_directional_candidates_emits_no_perpendicular_when_the_edge_is_the_plane_normal():
+    """Direct call: the equivalent check through snap() passes for the wrong reason.
+
+    cross(n, d) is the zero vector here, so normalising it produces NaN rather
+    than raising. That NaN direction survives _line_candidate (nan > tolerance
+    is False, so its guard does not reject it) and would reach SnapEngine.snap()
+    as a PERPENDICULAR candidate with screen_dist=nan -- but snap()'s own
+    "within tolerance" filter (nan <= tolerance is also False) drops it before
+    it can be selected, so an end-to-end assertion on snap()'s result cannot
+    tell a correct degeneracy guard from a missing one. This test inspects the
+    generator's own return value, where the NaN candidate has nowhere to hide.
+    """
+    from pluton.viewport.snap_candidates import directional_candidates
+    from pluton.viewport.snap_engine import SnapKind
+
+    cam = _camera_at_default()
+    anchor = np.array([0.0, 0.0, 0.0], dtype=np.float32)
+    acquired = _acquired_edge((0.0, 0.0, 3.0), (0.0, 0.0, 1.0))
+
+    out = directional_candidates(
+        640.0,
+        400.0,
+        1280,
+        800,
+        cam,
+        anchor,
+        acquired,
+        np.array([0.0, 0.0, 1.0]),
+        8.0,
+    )
+    assert not any(c.kind == SnapKind.PERPENDICULAR for c in out), f"got {out}"
+
+
+def test_directional_candidates_returns_nothing_with_no_acquisition():
+    """Direct call: snap()'s own "if acquired is not None" guard hides this.
+
+    snap() never calls directional_candidates at all when acquired is None,
+    so mutating this function's own None-guard is invisible to any assertion
+    made through SnapEngine.snap(). This test calls the generator directly so
+    a broken guard here cannot hide behind the engine's outer one.
+    """
+    from pluton.viewport.snap_candidates import directional_candidates
+
+    cam = _camera_at_default()
+    anchor = np.array([0.0, 0.0, 0.0], dtype=np.float32)
+
+    out = directional_candidates(
+        640.0, 400.0, 1280, 800, cam, anchor, None, np.array([0.0, 0.0, 1.0]), 8.0
+    )
+    assert out == []
+
+
+def test_from_point_candidates_returns_nothing_with_no_acquisition():
+    """Direct call, for the same reason as the directional_candidates case above.
+
+    from_point_candidates has no anchor-vs-acquired ambiguity to hide behind,
+    but it is still only reachable through snap() when acquired is not None,
+    so its own None-guard is likewise untested by any end-to-end assertion.
+    """
+    from pluton.viewport.snap_candidates import from_point_candidates
+
+    cam = _camera_at_default()
+
+    out = from_point_candidates(640.0, 400.0, 1280, 800, cam, None, 8.0)
+    assert out == []
