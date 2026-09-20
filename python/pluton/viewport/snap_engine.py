@@ -71,13 +71,20 @@ MARKER_COLOR_BY_KIND = {
 }
 
 # Precedence, highest first. Decoupled from the enum's integer values.
+#
+# ON_FACE sits second from last, above only the GRID fallback. Its candidate is
+# ALWAYS in tolerance whenever the cursor ray hits a face, because the candidate's
+# position is the ray-face intersection and therefore reprojects onto the cursor.
+# Ranking it high meant it swallowed every directional inference while drawing on
+# a face, which is the ordinary case. The face itself is not lost: `snap()` copies
+# `face_id` onto whichever candidate wins.
 _PRECEDENCE = [
     SnapKind.ENDPOINT,
     SnapKind.INTERSECTION,
     SnapKind.MIDPOINT,
     SnapKind.ON_EDGE,
-    SnapKind.ON_FACE,
     SnapKind.AXIS_LOCK,
+    SnapKind.ON_FACE,
     SnapKind.GRID,
 ]
 _PRECEDENCE_RANK = {k: i for i, k in enumerate(_PRECEDENCE)}  # lower = higher precedence
@@ -175,7 +182,15 @@ class SnapEngine:
 
         within = [c for c in cands if c.screen_dist <= self.PIXEL_TOLERANCE]
         if within:
-            return self._to_result(self._select(within))
+            chosen = self._select(within)
+            # The face under the cursor rides every result, not only an ON_FACE
+            # win. Tools resolve their drawing plane from it, and a snap to a
+            # face's own corner or midpoint is still a snap ON that face: keying
+            # the plane off the winning KIND put those gestures on a horizontal
+            # plane instead of the wall they were drawn against.
+            if chosen.face_id is None and face_cand is not None:
+                chosen.face_id = face_cand.face_id
+            return self._to_result(chosen)
 
         if ground_hit is not None:
             gx = round(float(ground_hit[0]) / self.GRID_SIZE_WORLD) * self.GRID_SIZE_WORLD
@@ -192,7 +207,14 @@ class SnapEngine:
     # --- selection --------------------------------------------------------
 
     def _select(self, candidates: list[_Candidate]) -> _Candidate:
-        return min(candidates, key=lambda c: (_PRECEDENCE_RANK[c.kind], c.depth))
+        """Highest precedence, then nearest the cursor, then nearest the camera.
+
+        `screen_dist` is the middle key because of #31: with precedence and depth
+        alone, two candidates of the SAME kind are separated only by depth, so a
+        vertex sitting exactly under the cursor could lose to one several pixels
+        away that happened to be nearer the camera.
+        """
+        return min(candidates, key=lambda c: (_PRECEDENCE_RANK[c.kind], c.screen_dist, c.depth))
 
     def _to_result(self, c: _Candidate) -> SnapResult:
         return SnapResult(

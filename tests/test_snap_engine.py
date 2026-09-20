@@ -214,3 +214,71 @@ def test_intersection_of_axis_line_and_edge():
     assert res.kind == SnapKind.INTERSECTION
     assert res.edge_id == e
     np.testing.assert_allclose(res.world_position, [3.0, 0.0, 0.0], atol=5e-2)
+
+
+def test_axis_lock_wins_over_a_face():
+    """Axis lock must be reachable while the cursor is over a face.
+
+    Regression test for the M7.6b section 1 finding: ON_FACE's candidate is
+    always in tolerance (its position is the ray-face hit, so it reprojects onto
+    the cursor exactly), and ON_FACE outranked AXIS_LOCK, so the axis inference
+    was invisible in the ordinary case of drawing on a face.
+    """
+    from pluton.scene import Scene
+    from pluton.viewport.snap_engine import SnapEngine, SnapKind
+
+    scene = Scene()
+    vids = [
+        scene.add_vertex(np.array(p, dtype=np.float32))
+        for p in [(0, 0, 0), (10, 0, 0), (10, 10, 0), (0, 10, 0)]
+    ]
+    for a, b in [(0, 1), (1, 2), (2, 3), (3, 0)]:
+        scene.add_edge(vids[a], vids[b])
+    scene.add_face_from_loop(vids)
+
+    cam = _camera_at_default()
+    anchor = np.array([2.0, 2.0, 0.0], dtype=np.float32)
+    # A point on the red axis through the anchor, comfortably inside the quad
+    # and away from every vertex, midpoint and boundary edge.
+    probe = np.array([6.0, 2.0, 0.0], dtype=np.float32)
+    cursor = _screen_of(cam, probe)
+
+    res = SnapEngine().snap(cursor, (1280, 800), cam, scene, anchor=anchor)
+    assert res.kind == SnapKind.AXIS_LOCK, f"expected AXIS_LOCK, got {res.kind}"
+    assert res.axis == 0, "expected the red (X) axis"
+    # The face is still reported, so a shape started here lands on the quad.
+    assert res.face_id is not None
+
+
+def test_same_kind_tiebreak_prefers_the_candidate_under_the_cursor():
+    """#31: two endpoints in tolerance must resolve to the nearer one on screen.
+
+    The far vertex is placed NEARER the camera, so a depth-only tiebreak picks it.
+    """
+    from pluton.scene import Scene
+    from pluton.viewport.snap_engine import SnapEngine, SnapKind
+
+    scene = Scene()
+    cam = _camera_at_default()
+
+    under_cursor = np.array([0.0, 0.0, 0.0], dtype=np.float32)
+    v_far = scene.add_vertex(under_cursor)
+    cursor = _screen_of(cam, under_cursor)
+
+    # Walk a second vertex toward the camera until it projects a few pixels off
+    # the cursor while sitting at a smaller depth.
+    v_near = None
+    for step in np.linspace(0.05, 2.0, 80):
+        cand = under_cursor + np.array([0.0, 0.0, step], dtype=np.float32)
+        proj = cam.world_to_screen(cand, 1280, 800)
+        if proj is None:
+            continue
+        dist = float(np.hypot(proj[0] - cursor[0], proj[1] - cursor[1]))
+        if 2.0 < dist < 7.0:
+            v_near = scene.add_vertex(cand)
+            break
+    assert v_near is not None, "fixture failed to place a second endpoint in tolerance"
+
+    res = SnapEngine().snap(cursor, (1280, 800), cam, scene)
+    assert res.kind == SnapKind.ENDPOINT
+    assert res.vertex_id == v_far, "expected the endpoint under the cursor, not the nearer one"

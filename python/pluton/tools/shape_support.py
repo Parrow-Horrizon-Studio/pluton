@@ -38,12 +38,15 @@ _COINCIDENT_EPS = 1e-5
 
 
 def resolve_drawing_plane(snap, scene) -> DrawingPlane:
-    """ON_FACE snap → that face's plane; otherwise a ground-parallel plane
-    through the snapped point's height."""
-    from pluton.viewport.snap_engine import SnapKind
+    """The plane of the face under the cursor, else a ground-parallel plane.
 
+    Keyed off `snap.face_id` rather than `snap.kind`, because the face under the
+    cursor is reported on every snap. An ENDPOINT snap at a wall's own corner is
+    still a point on that wall, and resolving it to a horizontal plane dropped
+    the whole gesture onto the ground.
+    """
     origin = np.asarray(snap.world_position, dtype=np.float64).reshape(3)
-    if snap.kind == SnapKind.ON_FACE and snap.face_id is not None:
+    if snap.face_id is not None:
         try:
             return DrawingPlane.from_face(scene, snap.face_id, origin)
         except (ValueError, KeyError):
