@@ -7,7 +7,6 @@ numeric value of `SnapKind` — higher wins.
 
 from __future__ import annotations
 
-import math
 from dataclasses import dataclass
 from enum import IntEnum
 
@@ -20,6 +19,32 @@ from pluton.geometry.ray import (
     closest_points_two_lines as _closest_points_two_lines,
 )
 from pluton.geometry.transforms import apply_mat, is_identity_transform, mat_invert
+from pluton.viewport.snap_candidates import Candidate as _Candidate
+from pluton.viewport.snap_candidates import (
+    axis_candidates as _axis_candidates,
+)
+from pluton.viewport.snap_candidates import (
+    edge_point_candidates as _edge_point_candidates,
+)
+from pluton.viewport.snap_candidates import (
+    endpoint_candidates as _endpoint_candidates,
+)
+from pluton.viewport.snap_candidates import (
+    face_candidate as _face_candidate,
+)
+from pluton.viewport.snap_candidates import (
+    intersection_candidates as _intersection_candidates,
+)
+
+# `_closest_point_on_segment_to_ray` and `_closest_points_two_lines` are no longer
+# called from this module directly (their call sites moved to snap_candidates.py
+# with the generators that used them); they are kept importable from here (and
+# listed below so lint does not treat them as unused) because existing code,
+# including tests/test_snap_engine.py, imports them from this module by name.
+__all__ = [
+    "_closest_point_on_segment_to_ray",
+    "_closest_points_two_lines",
+]
 
 
 class SnapKind(IntEnum):
@@ -48,15 +73,6 @@ class SnapResult:
     face_id: int | None = None  # ON_FACE
     edge_t: float | None = None  # parameter along edge_id (drives split_edge)
 
-
-_AXIS_NAMES = {0: "Red", 1: "Green", 2: "Blue"}
-
-_INTERSECTION_EPS = 1e-3  # world-space closest-approach below this = a real crossing
-_AXIS_DIRS = {
-    0: np.array([1.0, 0.0, 0.0], dtype=np.float32),
-    1: np.array([0.0, 1.0, 0.0], dtype=np.float32),
-    2: np.array([0.0, 0.0, 1.0], dtype=np.float32),
-}
 
 # Snap-marker colors, keyed by kind. Shared by tools (overlay color); the
 # renderer is shape-only. AXIS_LOCK has no marker color (the rubber-band shows
@@ -88,22 +104,6 @@ _PRECEDENCE = [
     SnapKind.GRID,
 ]
 _PRECEDENCE_RANK = {k: i for i, k in enumerate(_PRECEDENCE)}  # lower = higher precedence
-
-
-@dataclass
-class _Candidate:
-    """One in-tolerance snap candidate, before precedence selection."""
-
-    kind: SnapKind
-    world_position: np.ndarray
-    screen_dist: float
-    depth: float
-    label: str
-    vertex_id: int | None = None
-    edge_id: int | None = None
-    face_id: int | None = None
-    axis: int | None = None
-    edge_t: float | None = None
 
 
 class SnapEngine:
@@ -155,8 +155,10 @@ class SnapEngine:
             ray_dir_local = ray_dir
 
         cands: list[_Candidate] = []
-        cands += self._endpoint_candidates(px, py, width, height, camera, scene, _to_world)
-        cands += self._edge_point_candidates(
+        cands += _endpoint_candidates(
+            px, py, width, height, camera, scene, _to_world, self.PIXEL_TOLERANCE
+        )
+        cands += _edge_point_candidates(
             px,
             py,
             width,
@@ -168,8 +170,9 @@ class SnapEngine:
             _to_world,
             ray_origin_local,
             ray_dir_local,
+            pixel_tolerance=self.PIXEL_TOLERANCE,
         )
-        face_cand = self._face_candidate(ray_origin_local, ray_dir_local, scene)
+        face_cand = _face_candidate(ray_origin_local, ray_dir_local, scene)
         if face_cand is not None:
             if use_wt:
                 # Surface the snap result in world space.
@@ -177,8 +180,12 @@ class SnapEngine:
             cands.append(face_cand)
         if anchor is not None:
             a = np.asarray(anchor, dtype=np.float32)
-            cands += self._axis_candidates(px, py, width, height, camera, a, ray_origin, ray_dir)
-            cands += self._intersection_candidates(px, py, width, height, camera, scene, a)
+            cands += _axis_candidates(
+                px, py, width, height, camera, a, ray_origin, ray_dir, self.PIXEL_TOLERANCE
+            )
+            cands += _intersection_candidates(
+                px, py, width, height, camera, scene, a, self.PIXEL_TOLERANCE
+            )
 
         within = [c for c in cands if c.screen_dist <= self.PIXEL_TOLERANCE]
         if within:
@@ -235,183 +242,4 @@ class SnapEngine:
             axis=None,
             vertex_id=None,
             label="—",
-        )
-
-    # --- candidate generators --------------------------------------------
-
-    def _endpoint_candidates(self, px, py, width, height, camera, scene, _to_world=None):
-        if _to_world is None:
-
-            def _to_world(p):  # type: ignore[misc]
-                return p
-
-        out: list[_Candidate] = []
-        for v in scene.vertices_iter():
-            world_pos = _to_world(v.position)
-            proj = camera.world_to_screen(world_pos, width, height)
-            if proj is None:
-                continue
-            sx, sy, depth = proj
-            d = math.hypot(sx - px, sy - py)
-            if d <= self.PIXEL_TOLERANCE:
-                out.append(
-                    _Candidate(
-                        kind=SnapKind.ENDPOINT,
-                        world_position=np.asarray(world_pos, dtype=np.float32),
-                        screen_dist=d,
-                        depth=depth,
-                        label="Endpoint",
-                        vertex_id=v.id,
-                    )
-                )
-        return out
-
-    def _edge_point_candidates(
-        self,
-        px,
-        py,
-        width,
-        height,
-        camera,
-        scene,
-        ray_origin,
-        ray_dir,
-        _to_world=None,
-        ray_origin_local=None,
-        ray_dir_local=None,
-    ):
-        """Midpoint AND On-Edge candidates for each live edge.
-
-        The Midpoint block projects the geometric midpoint of each edge.
-        The On-Edge block uses `ray_origin`/`ray_dir` (the cursor ray) to find
-        the closest point on the 3D segment to the ray, producing an ON_EDGE
-        candidate whenever that projected point is within pixel tolerance.
-
-        _to_world: optional callable that maps a local position to world space.
-        ray_origin_local / ray_dir_local: the camera ray in local space (for
-        finding the closest point on local-space segments).
-        """
-        if _to_world is None:
-
-            def _to_world(p):  # type: ignore[misc]
-                return p
-
-        if ray_origin_local is None:
-            ray_origin_local = ray_origin
-        if ray_dir_local is None:
-            ray_dir_local = ray_dir
-
-        out: list[_Candidate] = []
-        for e in scene.edges_iter():
-            p1 = scene.vertex(e.v1_id).position
-            p2 = scene.vertex(e.v2_id).position
-            # Work in local space for segment math; project world positions to screen.
-            mid_local = (p1 + p2) * 0.5
-            mid_world = _to_world(mid_local)
-            proj = camera.world_to_screen(mid_world, width, height)
-            if proj is not None:
-                sx, sy, depth = proj
-                d = math.hypot(sx - px, sy - py)
-                if d <= self.PIXEL_TOLERANCE:
-                    out.append(
-                        _Candidate(
-                            kind=SnapKind.MIDPOINT,
-                            world_position=np.asarray(mid_world, dtype=np.float32),
-                            screen_dist=d,
-                            depth=depth,
-                            label="Midpoint",
-                            edge_id=e.id,
-                            edge_t=0.5,
-                        )
-                    )
-            # On-Edge: closest point on the local 3D segment to the local cursor ray.
-            on_pt_local, t = _closest_point_on_segment_to_ray(
-                ray_origin_local, ray_dir_local, p1, p2
-            )
-            on_pt_world = _to_world(on_pt_local)
-            proj_e = camera.world_to_screen(on_pt_world, width, height)
-            if proj_e is not None:
-                sx, sy, depth = proj_e
-                d = math.hypot(sx - px, sy - py)
-                if d <= self.PIXEL_TOLERANCE:
-                    out.append(
-                        _Candidate(
-                            kind=SnapKind.ON_EDGE,
-                            world_position=np.asarray(on_pt_world, dtype=np.float32),
-                            screen_dist=d,
-                            depth=depth,
-                            label="On Edge",
-                            edge_id=e.id,
-                            edge_t=t,
-                        )
-                    )
-        return out
-
-    def _axis_candidates(self, px, py, width, height, camera, anchor, ray_origin, ray_dir):
-        out: list[_Candidate] = []
-        for axis_idx, axis_dir in _AXIS_DIRS.items():
-            # Point on the infinite axis line (through anchor) nearest the cursor ray.
-            _, _, _c_ray, c_axis = _closest_points_two_lines(ray_origin, ray_dir, anchor, axis_dir)
-            proj = camera.world_to_screen(c_axis, width, height)
-            if proj is None:
-                continue
-            sx, sy, depth = proj
-            d = math.hypot(sx - px, sy - py)
-            if d <= self.PIXEL_TOLERANCE:
-                out.append(
-                    _Candidate(
-                        kind=SnapKind.AXIS_LOCK,
-                        world_position=c_axis,
-                        screen_dist=d,
-                        depth=depth,
-                        label=f"on {_AXIS_NAMES[axis_idx]} Axis",
-                        axis=axis_idx,
-                    )
-                )
-        return out
-
-    def _intersection_candidates(self, px, py, width, height, camera, scene, anchor):
-        out: list[_Candidate] = []
-        for _axis_idx, axis_dir in _AXIS_DIRS.items():
-            for e in scene.edges_iter():
-                a = scene.vertex(e.v1_id).position
-                b = scene.vertex(e.v2_id).position
-                seg_dir = b - a
-                _, t, c_axis, c_edge = _closest_points_two_lines(anchor, axis_dir, a, seg_dir)
-                if t < 0.0 or t > 1.0:
-                    continue  # crossing lies outside the edge segment
-                if float(np.linalg.norm(c_axis - c_edge)) > _INTERSECTION_EPS:
-                    continue  # skew — no genuine 3D crossing
-                proj = camera.world_to_screen(c_edge, width, height)
-                if proj is None:
-                    continue
-                sx, sy, depth = proj
-                d = math.hypot(sx - px, sy - py)
-                if d <= self.PIXEL_TOLERANCE:
-                    out.append(
-                        _Candidate(
-                            kind=SnapKind.INTERSECTION,
-                            world_position=c_edge,
-                            screen_dist=d,
-                            depth=depth,
-                            label="Intersection",
-                            edge_id=e.id,
-                            edge_t=float(t),
-                        )
-                    )
-        return out
-
-    def _face_candidate(self, ray_origin, ray_dir, scene):
-        """On-Face via the C++ ray-mesh pick. Screen distance is 0 (under cursor)."""
-        hit = scene.ray_pick_face(ray_origin, ray_dir)
-        if hit is None:
-            return None
-        point = np.array([hit.point[0], hit.point[1], hit.point[2]], dtype=np.float32)
-        return _Candidate(
-            kind=SnapKind.ON_FACE,
-            world_position=point,
-            screen_dist=0.0,
-            depth=float(hit.t),
-            label="On Face",
-            face_id=int(hit.face_id),
         )
