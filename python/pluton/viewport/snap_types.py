@@ -5,6 +5,12 @@ geometry generators) both need `SnapKind` and `Candidate`, and neither may
 import the other without creating a cycle. This module exists so they can
 share that vocabulary without importing each other: it deliberately depends
 on nothing else in `pluton.viewport`.
+
+`AcquiredKind` and `Acquired` live here too, for the same reason: Task 4's
+candidate generators in `snap_candidates.py` need `AcquiredKind` without
+importing `inference.py` (which is stateful and depends on this module).
+`inference.py` imports both from here and re-exports them. This module must
+keep depending on nothing but numpy and the standard library.
 """
 
 from __future__ import annotations
@@ -56,3 +62,19 @@ class Candidate:
     face_id: int | None = None
     axis: int | None = None
     edge_t: float | None = None
+
+
+class AcquiredKind(IntEnum):
+    NONE = 0
+    VERTEX = 1
+    EDGE = 2
+
+
+@dataclass(frozen=True, slots=True)
+class Acquired:
+    """A reference the cursor dwelled on, and what it can infer from."""
+
+    kind: AcquiredKind
+    position: np.ndarray
+    direction: np.ndarray | None
+    entity_id: int

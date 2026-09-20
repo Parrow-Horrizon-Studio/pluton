@@ -243,6 +243,11 @@ class RotateTool(Tool):
         return self._stage != _Stage.IDLE
 
     @property
+    def consumes_arrow_keys(self) -> bool:
+        """Up/Down cycle the forced rotation axis."""
+        return True
+
+    @property
     def anchor_or_none(self) -> np.ndarray | None:
         return self._center.copy() if self._stage != _Stage.IDLE else None
 

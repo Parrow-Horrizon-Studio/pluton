@@ -168,6 +168,11 @@ class RoofTool(Tool):
         return self._first is not None
 
     @property
+    def consumes_arrow_keys(self) -> bool:
+        """Up/Down cycle the flip-quarters count while drawing."""
+        return True
+
+    @property
     def anchor_or_none(self) -> np.ndarray | None:
         return self._first.copy() if self._first is not None else None
 

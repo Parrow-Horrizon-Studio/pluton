@@ -180,6 +180,11 @@ class PolygonTool(Tool):
         return self._state == _State.DRAWING
 
     @property
+    def consumes_arrow_keys(self) -> bool:
+        """Up/Down change the side count while drawing."""
+        return True
+
+    @property
     def anchor_or_none(self) -> np.ndarray | None:
         if self._state == _State.DRAWING and self._center is not None:
             return self._center.copy()

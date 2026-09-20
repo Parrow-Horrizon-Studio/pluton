@@ -94,6 +94,14 @@ from pluton.views.capture import apply_tags_and_style, capture_view
 # the long edge is capped well below full viewport resolution.
 _THUMBNAIL_MAX_EDGE = 512
 
+# M7.6b: arrow keys arm an inference lock on the matching axis, unless the
+# active tool claims Up/Down for itself (Tool.consumes_arrow_keys).
+_LOCK_AXIS_BY_KEY = {
+    Qt.Key.Key_Up: 2,  # blue / Z
+    Qt.Key.Key_Left: 1,  # green / Y
+    Qt.Key.Key_Right: 0,  # red / X
+}
+
 
 def _texture_decoder(data: bytes):
     """Adapt texture_cache's decoder to the Qt-free shape pluton/io expects."""
@@ -385,6 +393,16 @@ class MainWindow(QMainWindow):
             self,
             activated=lambda: self._on_tool_key(Qt.Key.Key_Down),
         )
+        QShortcut(
+            QKeySequence(Qt.Key.Key_Left),
+            self,
+            activated=lambda: self._on_tool_key(Qt.Key.Key_Left),
+        )
+        QShortcut(
+            QKeySequence(Qt.Key.Key_Right),
+            self,
+            activated=lambda: self._on_tool_key(Qt.Key.Key_Right),
+        )
         QShortcut(QKeySequence("Esc"), self, activated=self._on_escape)
         QShortcut(QKeySequence(Qt.Key.Key_Return), self, activated=self._on_finish_gesture)
         QShortcut(QKeySequence(Qt.Key.Key_Enter), self, activated=self._on_finish_gesture)
@@ -609,6 +627,13 @@ class MainWindow(QMainWindow):
     def eventFilter(self, obj, event):
         from PySide6.QtCore import QEvent
 
+        if event.type() in (QEvent.Type.KeyPress, QEvent.Type.KeyRelease):
+            if event.key() == Qt.Key.Key_Shift:
+                self._viewport.inference.set_shift_lock(
+                    event.type() == QEvent.Type.KeyPress, self._viewport.last_snap
+                )
+                return False
+
         if event.type() in (QEvent.Type.KeyPress, QEvent.Type.ShortcutOverride):
             if self._vcb.active or (
                 event.type() == QEvent.Type.KeyPress and event.text() in set("0123456789")
@@ -717,6 +742,7 @@ class MainWindow(QMainWindow):
             self._properties_dock.show_tab("tool_settings")
 
     def _on_escape(self) -> None:
+        self._viewport.inference.release_lock()
         active = self._tool_manager.active
         if active is None:
             return
@@ -756,15 +782,28 @@ class MainWindow(QMainWindow):
         self._viewport.update()
 
     def _on_tool_key(self, qt_key) -> None:
-        """Forward a non-text key (e.g. Up/Down for polygon sides) to the active
-        tool, but only while it has a live gesture (so arrows are inert otherwise)."""
-        active = self._tool_manager.active
-        if active is None or not active.has_active_gesture:
-            return
-        from PySide6.QtGui import QKeyEvent
+        """Route an arrow key to inference locking, or to the tool that claims it.
 
-        ev = QKeyEvent(QKeyEvent.Type.KeyPress, qt_key, Qt.KeyboardModifier.NoModifier)
-        active.on_key_press(ev)
+        Left and Right always lock. Up and Down lock only when the active tool does
+        not consume them; PolygonTool, RoofTool and RotateTool do.
+        """
+        active = self._tool_manager.active
+        claimed = active is not None and active.consumes_arrow_keys
+        if qt_key in (Qt.Key.Key_Up, Qt.Key.Key_Down) and claimed:
+            if active.has_active_gesture:
+                from PySide6.QtGui import QKeyEvent
+
+                ev = QKeyEvent(QKeyEvent.Type.KeyPress, qt_key, Qt.KeyboardModifier.NoModifier)
+                active.on_key_press(ev)
+                self._refresh_status_text()
+                self._viewport.update()
+            return
+
+        inference = self._viewport.inference
+        if qt_key == Qt.Key.Key_Down:
+            inference.toggle_edge_lock()
+        else:
+            inference.toggle_axis_lock(_LOCK_AXIS_BY_KEY[qt_key])
         self._refresh_status_text()
         self._viewport.update()
 

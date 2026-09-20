@@ -115,6 +115,18 @@ class Tool(ABC):
     @abstractmethod
     def deactivate(self) -> None: ...
 
+    @property
+    def consumes_arrow_keys(self) -> bool:
+        """True if this tool binds Up/Down itself during a gesture.
+
+        M7.6b gives the arrow keys to inference locking. Left and Right are free
+        in every tool, but Up and Down were already taken by PolygonTool (sides),
+        RoofTool (flip) and RotateTool (axis cycling), so those three keep them
+        and forgo the blue-axis and edge locks. Declared here rather than as a
+        tool-id list in MainWindow, which would silently drift.
+        """
+        return False
+
     def on_mouse_move(self, event: QMouseEvent, snap) -> None:
         """Default: do nothing. Tools override as needed."""
         return None

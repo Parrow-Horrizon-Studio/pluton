@@ -18,6 +18,7 @@ from PySide6.QtOpenGLWidgets import QOpenGLWidget
 from pluton.tools.select_tool import _HOVER_EDGE_COLOR, SelectTool
 from pluton.units import Units, format_coordinates
 from pluton.viewport.camera import Camera
+from pluton.viewport.inference import InferenceState
 from pluton.viewport.scene_renderer import SceneRenderer
 from pluton.viewport.snap_engine import SnapEngine, SnapKind
 
@@ -37,10 +38,12 @@ class ViewportWidget(QOpenGLWidget):
         self.tool_manager = tool_manager
         self.selection = None  # M4b — set by MainWindow (pluton.selection.Selection)
         self.snap_engine = SnapEngine()
+        self.inference = InferenceState()
         self._status_bar = None
         self._on_event_finished = None
         self._units_provider = None  # M7d — callable () -> pluton.units.Units (or None)
         self._camera_input_callback = None  # M7e — invoked when the user moves the camera
+        self._last_snap = None  # M7.6b — most recent SnapResult, for key handlers with no event
 
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         self.setMouseTracking(True)
@@ -244,7 +247,7 @@ class ViewportWidget(QOpenGLWidget):
         active = self.tool_manager.active if self.tool_manager is not None else None
         anchor = active.anchor_or_none if active is not None else None
         wt = self.model.active_world_transform if self.model is not None else None
-        return self.snap_engine.snap(
+        snap = self.snap_engine.snap(
             (float(pos.x()), float(pos.y())),
             (self.width(), self.height()),
             self.camera,
@@ -252,6 +255,33 @@ class ViewportWidget(QOpenGLWidget):
             anchor=anchor,
             world_transform=wt,
         )
+        # Acquisition reads the snap the engine just produced; the scene lives
+        # here, not in InferenceState, so the edge direction is resolved here.
+        self.inference.observe(snap, (float(pos.x()), float(pos.y())), self._edge_direction(snap))
+        result = self.inference.apply_lock(
+            snap, self.camera, (self.width(), self.height()), (float(pos.x()), float(pos.y()))
+        )
+        self._last_snap = result
+        return result
+
+    def _edge_direction(self, snap):
+        """World-space unit direction of the snapped edge, or None."""
+        if snap is None or snap.edge_id is None or self.scene is None:
+            return None
+        try:
+            edge = self.scene.edge(snap.edge_id)
+            p1 = self.scene.vertex(edge.v1_id).position
+            p2 = self.scene.vertex(edge.v2_id).position
+        except (KeyError, AttributeError):
+            return None
+        d = np.asarray(p2, dtype=np.float64) - np.asarray(p1, dtype=np.float64)
+        n = float(np.linalg.norm(d))
+        return None if n < 1e-12 else d / n
+
+    @property
+    def last_snap(self):
+        """The most recent SnapResult, for key handlers that have no event."""
+        return self._last_snap
 
     def _paint_annotations(self, overlay=None) -> None:
         """M7d: draw every visible context's annotations in screen space, on
