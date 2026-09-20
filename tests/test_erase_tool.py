@@ -114,7 +114,7 @@ def test_miss_click_pushes_nothing(qtbot):
     assert len(list(scene.faces_iter())) == f0
 
 
-def test_erase_interior_edge_removes_both_faces(qtbot):
+def test_erase_a_crease_edge_removes_both_faces(qtbot):
     from pluton.commands import CommandStack
     from pluton.scene import Scene
 
