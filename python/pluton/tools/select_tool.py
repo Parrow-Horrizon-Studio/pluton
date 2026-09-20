@@ -47,6 +47,7 @@ class SelectTool(Tool):
         self._stack = None  # M7d Task 12 — pluton.commands.CommandStack (or None)
         self._units_provider = None  # M7d — callable () -> pluton.units.Units (or None)
         self._request_rebuild = None  # M4e — callable () -> None
+        self._show_guides_provider = None  # M7.6b Task 7 fix round 1 -- callable () -> bool
         self._hovered: tuple[str, int] | None = None
         self._hovered_instance = None  # M4e — Instance | None (for Task 15 silhouette)
         self._hovered_annotation: int | None = None  # M7d — annotation id under the cursor
@@ -66,6 +67,7 @@ class SelectTool(Tool):
         self._stack = ctx.command_stack
         self._units_provider = ctx.units_provider
         self._request_rebuild = ctx.request_context_rebuild
+        self._show_guides_provider = ctx.show_guides_provider
         self._hovered = None
         self._hovered_instance = None
         self._hovered_annotation = None
@@ -85,9 +87,17 @@ class SelectTool(Tool):
 
     def _pick_annotation(self, cx: float, cy: float, w: int, h: int) -> int | None:
         """M7d: annotation hit-test scoped to the active context, mirroring how
-        pick_selectable/pick_instance already scope to it."""
+        pick_selectable/pick_instance already scope to it.
+
+        Fix round 1: a hidden guide (View > Guides off) must not be pickable
+        either -- `show_guides_provider` is None readable as "visible",
+        matching ViewportWidget.show_guides's own default, so a bare test
+        ToolContext with no provider wired keeps today's behaviour."""
         if self._model is None or self._camera is None:
             return None
+        show_guides = (
+            self._show_guides_provider() if self._show_guides_provider is not None else True
+        )
         return pick_annotation(
             (cx, cy),
             self._model.active_context.annotations,
@@ -96,6 +106,7 @@ class SelectTool(Tool):
             w,
             h,
             self._units(),
+            show_guides=show_guides,
         )
 
     def deactivate(self) -> None:

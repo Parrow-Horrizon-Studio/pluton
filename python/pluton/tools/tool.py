@@ -38,6 +38,13 @@ class ToolContext:
     # panel's Task 10 placement fields don't go stale after a Shift-drag on
     # the currently-selected face. Fired on commit only, never per mouse-move.
     on_placement_committed: object = None
+    # M7.6b Task 7 fix round 1 -- callable () -> bool, mirroring
+    # ViewportWidget.show_guides. Picking tools (Select, Erase) hold the
+    # Model, not the viewport, so this is how a hidden guide's kind reaches
+    # them without a new Model<->viewport coupling; None (a bare test
+    # ToolContext) reads as "guides visible", matching the viewport's own
+    # default.
+    show_guides_provider: object = None
 
 
 @dataclass(frozen=True, slots=True)

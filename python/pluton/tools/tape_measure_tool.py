@@ -1,4 +1,4 @@
-"""The Tape Measure tool (T) — point-to-point distance readout, and (M7.6b
+"""The Tape Measure tool (T) -- point-to-point distance readout, and (M7.6b
 Task 7) construction-guide creation.
 
 Two distinct gestures now share the same clicks:
@@ -27,7 +27,6 @@ from pluton.commands.annotation_commands import CreateAnnotationCommand
 from pluton.geometry.transforms import is_identity_transform, mat_invert
 from pluton.model.annotation import Guide, GuidePoint
 from pluton.tools.annotation_support import world_to_active_local
-from pluton.tools.shape_support import resolve_drawing_plane
 from pluton.tools.tool import Tool, ToolContext, ToolOverlay
 from pluton.viewport.snap_engine import MARKER_COLOR_BY_KIND
 
@@ -93,16 +92,42 @@ class TapeMeasureTool(Tool):
     def _world_transform(self):
         return self._model.active_world_transform if self._model is not None else None
 
-    def _world_vec_to_local(self, world_vec: np.ndarray) -> np.ndarray:
-        """A WORLD direction vector (no translation) -> the active context's
-        local frame, via the inverse of the world transform's linear block --
-        the same conversion `draw_plan._vec_to_world` runs in reverse."""
+    def _local_vec_to_world(self, local_vec: np.ndarray) -> np.ndarray:
+        """A LOCAL direction vector (no translation) -> WORLD, via the world
+        transform's linear block -- exactly `draw_plan._vec_to_world`."""
         wt = self._world_transform()
-        world_vec = np.asarray(world_vec, dtype=np.float64)
+        local_vec = np.asarray(local_vec, dtype=np.float64)
         if is_identity_transform(wt):
-            return world_vec
-        inv3 = mat_invert(np.asarray(wt, dtype=np.float64))[:3, :3]
-        return inv3 @ world_vec
+            return local_vec
+        return np.asarray(wt, dtype=np.float64)[:3, :3] @ local_vec
+
+    def _plane_normal_world(self, press_snap) -> np.ndarray | None:
+        """The offset plane's normal, in WORLD space, or None if degenerate.
+
+        Fix round 1: a resolved face's normal comes from `Scene.face_normal`,
+        which is LOCAL. A normal is not an ordinary vector -- transforming it
+        by the world transform's plain linear block tilts it off-perpendicular
+        under a non-uniform scale. It must go through the inverse-transpose of
+        that linear block instead, exactly like `Model.pick_face_local` (M7.4
+        #92, also documented in `paint_tool.py`). The horizontal fallback (no
+        face under the cursor at click time) is a world-space convention on
+        its own terms -- "the gesture's drawing plane" means the world ground
+        plane, not a context-local one -- so it needs no conversion at all.
+        """
+        if press_snap.face_id is None:
+            return np.array([0.0, 0.0, 1.0], dtype=np.float64)
+        try:
+            normal_local = np.asarray(self._scene.face_normal(press_snap.face_id), dtype=np.float64)
+        except (KeyError, ValueError):
+            return None
+        wt = self._world_transform()
+        if is_identity_transform(wt):
+            normal_world = normal_local
+        else:
+            inv3 = mat_invert(np.asarray(wt, dtype=np.float64))[:3, :3]
+            normal_world = inv3.T @ normal_local
+        norm = float(np.linalg.norm(normal_world))
+        return None if norm < _EPS else normal_world / norm
 
     def on_mouse_move(self, event: QMouseEvent, snap) -> None:
         from pluton.viewport.snap_engine import SnapKind
@@ -260,11 +285,11 @@ class TapeMeasureTool(Tool):
 
     def _edge_direction_local(self, edge_id) -> np.ndarray | None:
         """Unit direction of `edge_id`'s two endpoints, straight from the
-        scene's own (local) vertex positions -- treated as world exactly the
-        way `ViewportWidget._edge_direction` and every drag tool's plane
-        resolution already treats undeformed local geometry, so this stays
-        consistent with the rest of the codebase rather than introducing a
-        one-off stricter frame conversion Task 7 alone would carry."""
+        scene's own LOCAL vertex positions. Genuinely local -- fix round 1
+        removed the previous "treat local as world" shortcut for this value,
+        since it round-trips into the stored `Guide.direction` verbatim
+        (see `_commit_edge_guide`) and must therefore be correct in the
+        active context's own frame, not an approximation of world."""
         if edge_id is None or self._scene is None:
             return None
         try:
@@ -278,53 +303,83 @@ class TapeMeasureTool(Tool):
         return None if n < _EPS else d / n
 
     def _resolve_offset_direction(self, press_snap) -> tuple[np.ndarray, np.ndarray] | None:
-        """(perpendicular unit vector, edge unit direction), or None.
+        """(perpendicular unit vector in WORLD space, edge unit direction in
+        LOCAL space), or None.
 
         Spec 2.4: perpendicular to the clicked edge, within the plane of the
-        face that edge bounds. `resolve_drawing_plane` already implements
-        exactly the face-or-fallback rule this needs -- keyed off
-        `snap.face_id`, which is populated for every snap regardless of the
-        winning kind (M7.6b Task 1) -- so a two-face edge resolves to
-        whichever face was under the cursor at click time, and a free edge
-        (no face) falls back to the gesture's drawing plane. The perpendicular
-        itself is the cross product of that plane's normal with the edge
-        direction, which is perpendicular to the edge and orthogonal to the
-        normal by construction -- i.e. guaranteed to lie IN the plane -- and
-        None only when that cross product degenerates (the edge direction is
-        parallel to the plane's normal, e.g. a free vertical edge falling
-        back to the horizontal ground plane: there is no direction
-        perpendicular to a vertical edge that also lies in a horizontal
-        plane, since the edge does not lie in that plane at all).
+        face that edge bounds; a two-face edge uses whichever face was under
+        the cursor at click time (`snap.face_id`, populated for every snap
+        since M7.6b Task 1); a free edge (no face) falls back to the
+        gesture's drawing plane.
+
+        Fix round 1: this must be computed entirely in WORLD space. The drag
+        itself is measured in world points (`press_point`/`current_point`
+        come straight off the SnapEngine, already world), so the plane
+        normal and the edge direction both have to be world too before the
+        cross product and the dot-product projection against the drag can
+        mean anything -- mixing a local vector into a world computation
+        silently produces nonsense that happens to look right at identity
+        (the M7.4-root-context case every existing test used) and wrong
+        anywhere else. `_plane_normal_world` handles the normal (inverse-
+        transpose, not the plain linear block -- see its own docstring);
+        `_local_vec_to_world` handles the edge direction (an ordinary
+        vector, so the plain linear block is correct for it).
+
+        The perpendicular itself is the cross product of the world plane
+        normal with the world edge direction, which is perpendicular to the
+        edge and orthogonal to the normal by construction -- i.e. guaranteed
+        to lie IN the plane -- and None only when that cross product
+        degenerates (the edge direction is parallel to the plane's normal,
+        e.g. a free vertical edge falling back to the horizontal ground
+        plane: there is no direction perpendicular to a vertical edge that
+        also lies in a horizontal plane, since the edge does not lie in that
+        plane at all).
+
+        The edge direction is returned in LOCAL space (not world): the
+        stored `Guide.direction` needs exactly the local vector already read
+        off the mesh, with no round trip through a transform and back --
+        see `_commit_edge_guide`.
         """
-        edge_dir = self._edge_direction_local(press_snap.edge_id)
-        if edge_dir is None:
+        edge_dir_local = self._edge_direction_local(press_snap.edge_id)
+        if edge_dir_local is None:
             return None
-        plane = resolve_drawing_plane(press_snap, self._scene)
-        perp = np.cross(plane.normal, edge_dir)
+        normal_world = self._plane_normal_world(press_snap)
+        if normal_world is None:
+            return None
+        edge_dir_world = self._local_vec_to_world(edge_dir_local)
+        edge_dir_world_norm = float(np.linalg.norm(edge_dir_world))
+        if edge_dir_world_norm < _EPS:
+            return None
+        edge_dir_world = edge_dir_world / edge_dir_world_norm
+        perp = np.cross(normal_world, edge_dir_world)
         norm = float(np.linalg.norm(perp))
         if norm < _EPS:
             return None
-        return perp / norm, edge_dir
+        return perp / norm, edge_dir_local
 
     def _commit_edge_guide(self, press_snap, press_point, current_point) -> bool:
         resolved = self._resolve_offset_direction(press_snap)
         if resolved is None:
             return False
-        perp_unit, edge_dir = resolved
+        perp_unit_world, edge_dir_local = resolved
         raw_delta = np.asarray(current_point, dtype=np.float64) - np.asarray(
             press_point, dtype=np.float64
         )
-        scalar = float(np.dot(raw_delta, perp_unit))
+        scalar = float(np.dot(raw_delta, perp_unit_world))
         if abs(scalar) < _MIN_DRAG_DISTANCE:
             return False
-        origin_world = np.asarray(press_point, dtype=np.float64) + perp_unit * scalar
+        origin_world = np.asarray(press_point, dtype=np.float64) + perp_unit_world * scalar
 
+        # origin_world is a POINT: the full affine conversion (world_to_active_local)
+        # applies. edge_dir_local is already LOCAL (read straight off the mesh in
+        # _edge_direction_local) -- it must NOT be run through another local<->world
+        # conversion here, which is exactly the bug fix round 1 found: converting an
+        # already-local vector "back" from world a second time silently rotated it.
         origin_local = world_to_active_local(self._model, origin_world)
-        direction_local = self._world_vec_to_local(edge_dir)
         guide = Guide(
             self._model.new_annotation_id(),
             tuple(float(v) for v in origin_local),
-            tuple(float(v) for v in direction_local),
+            tuple(float(v) for v in edge_dir_local),
         )
         self._command_stack.execute(
             CreateAnnotationCommand(guide, self._model.active_context), self._model
@@ -374,10 +429,10 @@ class TapeMeasureTool(Tool):
             resolved = self._resolve_offset_direction(press_snap)
             if resolved is None:
                 return None
-            perp_unit, _edge_dir = resolved
+            perp_unit_world, _edge_dir_local = resolved
             raw_delta = np.asarray(current, dtype=np.float64) - np.asarray(press, dtype=np.float64)
-            scalar = float(np.dot(raw_delta, perp_unit))
-            end = press + perp_unit * scalar
+            scalar = float(np.dot(raw_delta, perp_unit_world))
+            end = press + perp_unit_world * scalar
         elif press_snap.vertex_id is not None:
             end = current
         else:

@@ -552,6 +552,10 @@ class MainWindow(QMainWindow):
             # rather than relying on the mouse-release handler that happens to
             # follow a drag -- see _on_placement_drag_committed.
             on_placement_committed=self._on_placement_drag_committed,
+            # M7.6b Task 7 fix round 1: a hidden guide must be unpickable too
+            # (Select/Erase), not just unpainted -- this is how that reaches
+            # them without handing a picking tool the whole viewport.
+            show_guides_provider=lambda: self._viewport.show_guides,
         )
 
     def _rebuild_tool_context(self) -> None:
@@ -1131,6 +1135,7 @@ class MainWindow(QMainWindow):
             self._viewport.width(),
             self._viewport.height(),
             self._doc.units,
+            show_guides=self._viewport.show_guides,
         )
 
         # Right-clicking an unselected entity selects it first (SketchUp's

@@ -22,7 +22,7 @@ from pluton.ui.actions import CONTEXT_MENUS, ContextTarget
 
 
 def resolve_context_target(
-    model, camera, x: int, y: int, width: int, height: int, units
+    model, camera, x: int, y: int, width: int, height: int, units, show_guides: bool = True
 ) -> tuple[ContextTarget, int | None]:
     """What is under the cursor: (ContextTarget, entity_id or None).
 
@@ -35,6 +35,11 @@ def resolve_context_target(
     Precedence mirrors SelectTool: annotations draw on top of everything, so
     they are hit-tested first; then whole instances; then the active
     context's own edges/faces.
+
+    `show_guides` (M7.6b Task 7 fix round 1): a hidden guide must not be
+    right-clickable either -- defaults to True (the pre-Task-7 behaviour, and
+    ViewportWidget.show_guides's own default) so every existing caller keeps
+    working unchanged.
     """
     from pluton.annotations.picking import pick_annotation
     from pluton.viewport.picking import pick_selectable
@@ -47,6 +52,7 @@ def resolve_context_target(
         width,
         height,
         units,
+        show_guides=show_guides,
     )
     if annotation_id is not None:
         return ContextTarget.ANNOTATION, annotation_id

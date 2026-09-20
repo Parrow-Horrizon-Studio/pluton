@@ -49,6 +49,7 @@ class EraserTool(Tool):
         self._command_stack = None
         self._model = None
         self._units_provider = None  # M7d — callable () -> pluton.units.Units (or None)
+        self._show_guides_provider = None  # M7.6b Task 7 fix round 1 -- callable () -> bool
         self._hovered_edge: int | None = None
         self._stroke: CompositeCommand | None = None
         self._erased: set[int] = set()
@@ -60,6 +61,7 @@ class EraserTool(Tool):
         self._command_stack = ctx.command_stack
         self._model = ctx.model
         self._units_provider = ctx.units_provider
+        self._show_guides_provider = ctx.show_guides_provider
         self._hovered_edge = None
         self._stroke = None
         self._erased = set()
@@ -100,10 +102,16 @@ class EraserTool(Tool):
 
     def _pick_annotation(self, event: QMouseEvent) -> int | None:
         """M7d: annotation hit-test scoped to the active context, same call
-        shape as SelectTool._pick_annotation."""
+        shape as SelectTool._pick_annotation.
+
+        Fix round 1: a hidden guide (View > Guides off) must not be erasable
+        either -- see SelectTool._pick_annotation's own note."""
         if self._model is None or self._camera is None:
             return None
         w, h = self._viewport_size()
+        show_guides = (
+            self._show_guides_provider() if self._show_guides_provider is not None else True
+        )
         return pick_annotation(
             self._cursor(event),
             self._model.active_context.annotations,
@@ -112,6 +120,7 @@ class EraserTool(Tool):
             w,
             h,
             self._units(),
+            show_guides=show_guides,
         )
 
     def _try_dissolve(self, e_id: int) -> bool:

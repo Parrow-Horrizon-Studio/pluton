@@ -74,7 +74,7 @@ def _model_with_dimension():
     return model
 
 
-def _make_tool(model, sel, w=640, h=480):
+def _make_tool(model, sel, w=640, h=480, show_guides=True):
     cam = _FlatCamera()
     tool = SelectTool()
     ctx = ToolContext(
@@ -83,6 +83,7 @@ def _make_tool(model, sel, w=640, h=480):
         widget_size_provider=lambda: (w, h),
         selection=sel,
         model=model,
+        show_guides_provider=lambda: show_guides,
     )
     tool.activate(ctx)
     return tool, cam
@@ -293,7 +294,7 @@ def test_geometry_click_unaffected_when_model_has_no_annotations(qtbot):
 # M7d Task 11: EraserTool erases a clicked annotation via DeleteAnnotationsCommand
 # ---------------------------------------------------------------------------
 
-def _make_eraser(model, sel, stack, w=640, h=480):
+def _make_eraser(model, sel, stack, w=640, h=480, show_guides=True):
     cam = _FlatCamera()
     tool = EraserTool()
     ctx = ToolContext(
@@ -303,6 +304,7 @@ def _make_eraser(model, sel, stack, w=640, h=480):
         widget_size_provider=lambda: (w, h),
         selection=sel,
         model=model,
+        show_guides_provider=lambda: show_guides,
     )
     tool.activate(ctx)
     return tool, cam
@@ -406,3 +408,67 @@ def test_delete_removes_selected_annotations_and_undo_restores():
     assert ctx.annotations == []
     stack.undo()
     assert len(ctx.annotations) == 1
+
+
+# ---------------------------------------------------------------------------
+# M7.6b Task 7 fix round 1: a hidden guide (View > Guides off) must not be
+# pickable either -- Select must not hover/select it, Erase must not delete
+# it. `_FlatCamera.world_to_screen` projects (x, y, z) -> (100 + x*10,
+# 200 - y*10, ...), so a GuidePoint at world (0, 0, 0) lands at pixel
+# (100, 200), the same convention `_model_with_dimension`'s (120.0, 220.0)
+# click already relies on for its own p1 at world (0, 0, 0).
+# ---------------------------------------------------------------------------
+
+
+def _model_with_guide_point():
+    from pluton.model.annotation import GuidePoint
+
+    model = Model()
+    model.active_context.annotations.append(GuidePoint(7, (0.0, 0.0, 0.0)))
+    return model
+
+
+def test_select_cannot_click_a_hidden_guide_point(qtbot):
+    model = _model_with_guide_point()
+    sel = Selection()
+    tool, _cam = _make_tool(model, sel, show_guides=False)
+
+    _click_at(tool, 100.0, 200.0)
+
+    assert sel.annotations == set()
+
+
+def test_select_can_click_the_same_guide_point_when_visible(qtbot):
+    """Control for the test above: the same click, same fixture, guides
+    visible -- proves the miss above is the show_guides filter, not a
+    fixture/geometry mistake."""
+    model = _model_with_guide_point()
+    sel = Selection()
+    tool, _cam = _make_tool(model, sel, show_guides=True)
+
+    _click_at(tool, 100.0, 200.0)
+
+    assert sel.annotations == {7}
+
+
+def test_eraser_cannot_erase_a_hidden_guide_point(qtbot):
+    model = _model_with_guide_point()
+    sel = Selection()
+    stack = CommandStack()
+    tool, _cam = _make_eraser(model, sel, stack, show_guides=False)
+
+    tool.on_mouse_press(_press(100.0, 200.0), None)
+
+    assert len(model.active_context.annotations) == 1
+    assert not stack.can_undo
+
+
+def test_eraser_can_erase_the_same_guide_point_when_visible(qtbot):
+    model = _model_with_guide_point()
+    sel = Selection()
+    stack = CommandStack()
+    tool, _cam = _make_eraser(model, sel, stack, show_guides=True)
+
+    tool.on_mouse_press(_press(100.0, 200.0), None)
+
+    assert model.active_context.annotations == []
