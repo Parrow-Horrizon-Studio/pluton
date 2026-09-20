@@ -44,6 +44,10 @@ class ViewportWidget(QOpenGLWidget):
         self._units_provider = None  # M7d — callable () -> pluton.units.Units (or None)
         self._camera_input_callback = None  # M7e — invoked when the user moves the camera
         self._last_snap = None  # M7.6b: most recent SnapResult, for key handlers with no event
+        # M7.6b Task 4: the active gesture's drawing plane, pinned once at anchor
+        # time (see _update_gesture_plane_normal / _drawing_plane_normal).
+        self._gesture_plane_normal: np.ndarray | None = None
+        self._gesture_plane_captured = False
 
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         self.setMouseTracking(True)
@@ -246,6 +250,7 @@ class ViewportWidget(QOpenGLWidget):
         pos = event.position()
         active = self.tool_manager.active if self.tool_manager is not None else None
         anchor = active.anchor_or_none if active is not None else None
+        self._update_gesture_plane_normal(anchor)
         wt = self.model.active_world_transform if self.model is not None else None
         snap = self.snap_engine.snap(
             (float(pos.x()), float(pos.y())),
@@ -285,21 +290,55 @@ class ViewportWidget(QOpenGLWidget):
         """The most recent SnapResult, for key handlers that have no event."""
         return self._last_snap
 
+    def _update_gesture_plane_normal(self, anchor) -> None:
+        """Pin the drawing plane's normal once, at the anchor's None -> not-None edge.
+
+        Called at the top of `_snap_for_event`, before `self._last_snap` is
+        overwritten with this frame's result, so `self._last_snap` here still
+        holds the PREVIOUS frame's snap. On the frame the anchor first appears,
+        that previous snap is exactly the click that set it -- the frame order
+        in mousePressEvent computes the snap before delegating to the tool,
+        so the anchor is still None while that snap is taken, and only becomes
+        non-None afterwards, once the tool consumes it. That makes this the
+        one moment `_last_snap` reliably names the face the gesture started on.
+
+        Captured exactly once per gesture, not re-attempted on later frames
+        even if the first attempt found no face (`face_id is None`, or the
+        scene lookup fails): a later frame's snap belongs to wherever the
+        cursor is now, not to the anchor, so trying again there would silently
+        reintroduce the per-frame chasing this exists to prevent.
+        """
+        if anchor is None:
+            self._gesture_plane_normal = None
+            self._gesture_plane_captured = False
+            return
+        if self._gesture_plane_captured:
+            return
+        self._gesture_plane_captured = True
+        snap = self._last_snap
+        if snap is None or snap.face_id is None or self.scene is None:
+            return
+        try:
+            self._gesture_plane_normal = np.asarray(
+                self.scene.face_normal(snap.face_id), dtype=np.float64
+            )
+        except (KeyError, ValueError):
+            self._gesture_plane_normal = None
+
     def _drawing_plane_normal(self):
         """The active gesture's plane normal, for Perpendicular. None if unknown.
 
-        Reads the PREVIOUS frame's snap, which is correct and deliberate: the
-        plane was established when the gesture's anchor was placed, and
-        re-deriving it from the current frame would make the perpendicular
-        direction chase the cursor.
+        Returns the value pinned by `_update_gesture_plane_normal` at anchor
+        time, not a value re-derived from the current frame. Spec 2.2 resolves
+        Perpendicular "inside the gesture's drawing plane", which is a
+        property of where the gesture started, not of whatever face happens to
+        be under the cursor this frame: re-deriving it every frame would make
+        the perpendicular direction flip when the cursor crosses onto an
+        adjoining wall mid-gesture, and vanish outright over empty space, and
+        would also feed the snap engine's own output back into its next call's
+        inputs.
         """
-        snap = self._last_snap
-        if snap is None or snap.face_id is None or self.scene is None:
-            return None
-        try:
-            return np.asarray(self.scene.face_normal(snap.face_id), dtype=np.float64)
-        except (KeyError, ValueError):
-            return None
+        return self._gesture_plane_normal
 
     def _paint_annotations(self, overlay=None) -> None:
         """M7d: draw every visible context's annotations in screen space, on

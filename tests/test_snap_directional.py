@@ -189,6 +189,46 @@ def test_directional_candidates_emits_no_perpendicular_when_the_edge_is_the_plan
     assert not any(c.kind == SnapKind.PERPENDICULAR for c in out), f"got {out}"
 
 
+def test_directional_candidates_emits_no_perpendicular_for_a_non_unit_edge_direction():
+    """The degeneracy guard must key off cross(n, d), not dot(n, d).
+
+    dot(n, d) only tracks the angle between n and d when d is unit length.
+    Here d=(0, 0, 0.5) is parallel to n=(0, 0, 1) but half its length, so
+    dot(n, d) == 0.5, well inside the "not degenerate" range the old guard
+    checked -- yet cross(n, d) is still the zero vector, so normalising it
+    still produces NaN. A guard keyed on dot alone lets this case through
+    and hands back a "guessed" PERPENDICULAR candidate at [nan, nan, nan],
+    exactly the outcome the requirement forbids. This constructs the Acquired
+    directly (not via _acquired_edge, which normalises) so the non-unit
+    direction survives intact.
+    """
+    from pluton.viewport.inference import Acquired, AcquiredKind
+    from pluton.viewport.snap_candidates import directional_candidates
+    from pluton.viewport.snap_engine import SnapKind
+
+    cam = _camera_at_default()
+    anchor = np.array([0.0, 0.0, 0.0], dtype=np.float32)
+    acquired = Acquired(
+        kind=AcquiredKind.EDGE,
+        position=np.array([0.0, 0.0, 3.0], dtype=np.float64),
+        direction=np.array([0.0, 0.0, 0.5], dtype=np.float64),
+        entity_id=0,
+    )
+
+    out = directional_candidates(
+        640.0,
+        400.0,
+        1280,
+        800,
+        cam,
+        anchor,
+        acquired,
+        np.array([0.0, 0.0, 1.0]),
+        8.0,
+    )
+    assert not any(c.kind == SnapKind.PERPENDICULAR for c in out), f"got {out}"
+
+
 def test_directional_candidates_returns_nothing_with_no_acquisition():
     """Direct call: snap()'s own "if acquired is not None" guard hides this.
 
@@ -221,3 +261,18 @@ def test_from_point_candidates_returns_nothing_with_no_acquisition():
 
     out = from_point_candidates(640.0, 400.0, 1280, 800, cam, None, 8.0)
     assert out == []
+
+
+def test_marker_colors_reflect_the_d14_intersection_move():
+    """Guards the deliberate colour change: no test previously asserted these.
+
+    D14 moves INTERSECTION off magenta (SketchUp reserves magenta for Parallel
+    and Perpendicular) to near-black, and gives PARALLEL and PERPENDICULAR the
+    freed-up magenta. Without an assertion on the actual values, a revert of
+    this change -- accidental or "helpful" -- would pass every other test.
+    """
+    from pluton.viewport.snap_engine import MARKER_COLOR_BY_KIND, SnapKind
+
+    assert MARKER_COLOR_BY_KIND[SnapKind.INTERSECTION] == (0.10, 0.10, 0.12)
+    assert MARKER_COLOR_BY_KIND[SnapKind.PARALLEL] == (0.82, 0.23, 0.82)
+    assert MARKER_COLOR_BY_KIND[SnapKind.PERPENDICULAR] == (0.82, 0.23, 0.82)

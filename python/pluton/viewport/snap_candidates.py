@@ -189,7 +189,16 @@ def intersection_candidates(px, py, width, height, camera, scene, anchor, pixel_
 
 
 _PLANE_PARALLEL_EPS = 1e-4
-"""abs(dot(n, d)) above 1 - this means cross(n, d) is too short to normalise."""
+"""Minimum length of cross(unit(n), unit(d)) for Perpendicular to be defined.
+
+Below this, the edge runs along (or nearly along) the plane normal, cross
+degenerates toward the zero vector, and normalising it would produce NaN
+rather than a direction. Measured on the cross product itself, not on the
+dot product of the raw inputs, so it stays correct when `d` is not unit
+length: dot(n, d) only tracks the angle between them when `d` is a unit
+vector, but cross's length does not depend on that assumption once both
+inputs are normalised first.
+"""
 
 
 def _line_candidate(
@@ -255,12 +264,18 @@ def directional_candidates(
 
     if plane_normal is not None:
         n = np.asarray(plane_normal, dtype=np.float64).reshape(3)
-        ln = float(np.linalg.norm(n))
-        if ln > 0.0:
-            n = n / ln
-            if abs(float(np.dot(n, d))) <= 1.0 - _PLANE_PARALLEL_EPS:
-                perp = np.cross(n, d)
-                perp = perp / float(np.linalg.norm(perp))
+        n_len = float(np.linalg.norm(n))
+        d_len = float(np.linalg.norm(d))
+        if n_len > 0.0 and d_len > 0.0:
+            n_hat = n / n_len
+            d_hat = d / d_len
+            perp = np.cross(n_hat, d_hat)
+            perp_len = float(np.linalg.norm(perp))
+            # Guard on cross's own length, the quantity that actually degenerates,
+            # not on dot(n, d): dot only tracks the angle between them when d is
+            # unit length, and d is not guaranteed to be here.
+            if perp_len > _PLANE_PARALLEL_EPS:
+                perp = perp / perp_len
                 cand = _line_candidate(
                     px,
                     py,

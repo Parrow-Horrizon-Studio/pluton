@@ -74,7 +74,11 @@ MARKER_COLOR_BY_KIND = {
     SnapKind.INTERSECTION: (0.10, 0.10, 0.12),  # near-black, SketchUp's convention
     SnapKind.PARALLEL: (0.82, 0.23, 0.82),  # magenta
     SnapKind.PERPENDICULAR: (0.82, 0.23, 0.82),  # magenta
-    # FROM_POINT gets no entry: it renders in the colour of the axis it rides.
+    # FROM_POINT gets no entry, and every consumer looks this dict up as
+    # MARKER_COLOR_BY_KIND.get(snap.kind, <neutral>), so today it just renders
+    # neutral like any other unlisted kind. Colouring it by snap.axis (like
+    # AXIS_LOCK's rubber-band) would need plumbing snap.axis through all
+    # eleven call sites for a Task-4-scale change; deferred, not done.
 }
 
 # Precedence, highest first. Decoupled from the enum's integer values.

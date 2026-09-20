@@ -365,3 +365,69 @@ def test_camera_input_callback_fires(qtbot):
     vp.set_camera_input_callback(lambda: fired.append(1))
     vp._notify_camera_input()
     assert fired == [1]
+
+
+def test_drawing_plane_normal_is_pinned_at_anchor_time_not_re_derived(qtbot):
+    """M7.6b Task 4 fix round 2: the plane must not chase the cursor mid-gesture.
+
+    The original implementation re-derived the plane from self._last_snap on
+    every frame, which names whatever face the cursor is over NOW, not the
+    face the gesture started on: crossing onto an adjoining wall flipped the
+    perpendicular direction, and moving into empty space made it vanish. This
+    drives _update_gesture_plane_normal / _drawing_plane_normal directly (the
+    pair _snap_for_event calls) to check the fixed behaviour: the captured
+    normal must survive the cursor moving onto a different face while the
+    anchor is still set, and must clear once the anchor goes away.
+    """
+    from pluton.viewport.snap_engine import SnapKind, SnapResult
+    from pluton.viewport.viewport_widget import ViewportWidget
+
+    class _FakeScene:
+        def __init__(self):
+            self._normals = {
+                1: np.array([0.0, 0.0, 1.0]),
+                2: np.array([1.0, 0.0, 0.0]),
+            }
+
+        def face_normal(self, f_id):
+            return self._normals[f_id]
+
+    class _FakeModel:
+        def __init__(self, scene):
+            self.active_scene = scene
+            self.active_world_transform = None
+
+    def snap_on_face(f_id):
+        return SnapResult(
+            kind=SnapKind.ON_FACE,
+            world_position=np.zeros(3, dtype=np.float32),
+            axis=None,
+            vertex_id=None,
+            label="On Face",
+            face_id=f_id,
+        )
+
+    widget = ViewportWidget()
+    qtbot.addWidget(widget)
+    widget.model = _FakeModel(_FakeScene())
+
+    # No anchor yet: no plane, regardless of what is under the cursor.
+    widget._last_snap = snap_on_face(1)
+    widget._update_gesture_plane_normal(None)
+    assert widget._drawing_plane_normal() is None
+
+    # Anchor appears: _last_snap still holds the click's own snap (face 1),
+    # which is the frame ordering _update_gesture_plane_normal relies on.
+    anchor = np.array([0.0, 0.0, 0.0], dtype=np.float32)
+    widget._update_gesture_plane_normal(anchor)
+    np.testing.assert_allclose(widget._drawing_plane_normal(), [0.0, 0.0, 1.0])
+
+    # Cursor moves onto a different face mid-gesture: the pinned plane must
+    # not follow it.
+    widget._last_snap = snap_on_face(2)
+    widget._update_gesture_plane_normal(anchor)
+    np.testing.assert_allclose(widget._drawing_plane_normal(), [0.0, 0.0, 1.0])
+
+    # Gesture ends: the plane clears, ready for the next one.
+    widget._update_gesture_plane_normal(None)
+    assert widget._drawing_plane_normal() is None

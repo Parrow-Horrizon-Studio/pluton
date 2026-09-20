@@ -43,7 +43,7 @@ class SnapResult:
 
     kind: SnapKind
     world_position: np.ndarray
-    axis: int | None  # 0=X (red), 1=Y (green), 2=Z (blue); only AXIS_LOCK
+    axis: int | None  # 0=X (red), 1=Y (green), 2=Z (blue); AXIS_LOCK and FROM_POINT
     vertex_id: int | None  # only ENDPOINT
     label: str
     edge_id: int | None = None  # MIDPOINT / ON_EDGE / INTERSECTION
