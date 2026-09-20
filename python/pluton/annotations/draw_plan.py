@@ -28,6 +28,12 @@ _LANDING_PX = 26.0  # horizontal landing under the text
 _ARROW_PX = 9.0  # arrowhead stroke length
 _ARROW_SPREAD = 0.42  # radians each side of the leader direction
 _EPS = 1e-9
+_GUIDE_CROSS_PX = 5.0  # half-length of each stroke of a guide point's cross
+_NEAR_PAD = 1e-4  # push the clipped point just in front of the near plane
+_VISIBLE_SPAN = 1.0e4  # world units drawn each way from a guide's closest approach to
+# the eye. An infinite line has to be bounded to something the 2D viewport clip can
+# handle in floating point; the viewport clip is what actually decides what is drawn,
+# this constant just has to be generous enough to outlast a typical camera.far.
 
 
 @dataclass
@@ -44,16 +50,29 @@ class AnnotationDraw:
     segments_px: list = field(default_factory=list)  # (x1, y1, x2, y2)
     texts: list = field(default_factory=list)  # TextDraw
     hit_boxes: list = field(default_factory=list)  # (x0, y0, x1, y1)
+    kind: str = "annotation"  # the source annotation's `kind`, for kind-specific painting
+
+
+def _world_matrix(world_transform):
+    """`world_transform` as a 4x4 float64 matrix, treating None as identity.
+
+    Guides are context-local like every other annotation, but a caller with no
+    context to transform through (e.g. a bare layout test) passes None rather
+    than constructing an identity matrix itself.
+    """
+    if world_transform is None:
+        return np.eye(4, dtype=np.float64)
+    return np.asarray(world_transform, dtype=np.float64)
 
 
 def _to_world(point, world_transform):
     p = np.asarray(point, dtype=np.float64)
-    return (np.asarray(world_transform, dtype=np.float64) @ np.append(p, 1.0))[:3]
+    return (_world_matrix(world_transform) @ np.append(p, 1.0))[:3]
 
 
 def _vec_to_world(vec, world_transform):
     v = np.asarray(vec, dtype=np.float64)
-    return np.asarray(world_transform, dtype=np.float64)[:3, :3] @ v
+    return _world_matrix(world_transform)[:3, :3] @ v
 
 
 def _project(world_point, camera, width, height):
@@ -93,6 +112,10 @@ def plan_annotation(annotation, world_transform, camera, width, height, units):
         return _plan_dimension(annotation, world_transform, camera, width, height, units)
     if getattr(annotation, "kind", None) == "label":
         return _plan_label(annotation, world_transform, camera, width, height)
+    if getattr(annotation, "kind", None) == "guide":
+        return _plan_guide(annotation, world_transform, camera, width, height)
+    if getattr(annotation, "kind", None) == "guide_point":
+        return _plan_guide_point(annotation, world_transform, camera, width, height)
     return None
 
 
@@ -116,7 +139,7 @@ def _plan_dimension(dim, world_transform, camera, width, height, units):
         return None
     perp = np.array([-along[1], along[0]], dtype=np.float64)
 
-    plan = AnnotationDraw(annotation_id=dim.id)
+    plan = AnnotationDraw(annotation_id=dim.id, kind=dim.kind)
 
     # dimension line
     dim_seg = (float(d1_px[0]), float(d1_px[1]), float(d2_px[0]), float(d2_px[1]))
@@ -186,7 +209,7 @@ def _plan_label(label, world_transform, camera, width, height):
     if anchor_px is None or text_px is None:
         return None
 
-    plan = AnnotationDraw(annotation_id=label.id)
+    plan = AnnotationDraw(annotation_id=label.id, kind=label.kind)
     to_right = float(text_px[0]) >= float(anchor_px[0])
     sign = 1.0 if to_right else -1.0
     # the landing runs from the elbow toward the text side
@@ -221,3 +244,106 @@ def _plan_label(label, world_transform, camera, width, height):
     plan.hit_boxes.append(_text_box(label.text, text.x, text.y, align))
     plan.hit_boxes.append(_segment_box(leader))
     return plan
+
+
+def _clip_line_to_near_plane(origin, direction, camera):
+    """The visible span of an infinite 3D line, as two world points, or None.
+
+    Clipping in 3D before projecting is not optional. `world_to_screen` is
+    meaningless behind the eye, so sampling two far-apart points and projecting
+    them produces mirrored or runaway coordinates whenever the line crosses the
+    near plane, which an infinite line usually does.
+    """
+    # Camera is a dataclass: `position` and `target` are ATTRIBUTES, not methods.
+    eye = np.asarray(camera.position, dtype=np.float64).reshape(3)
+    fwd = np.asarray(camera.target, dtype=np.float64).reshape(3) - eye
+    fwd = fwd / float(np.linalg.norm(fwd))
+    near = float(camera.near) + _NEAR_PAD
+
+    o = np.asarray(origin, dtype=np.float64).reshape(3)
+    d = np.asarray(direction, dtype=np.float64).reshape(3)
+    d = d / float(np.linalg.norm(d))
+
+    # Signed distance in front of the near plane, as a function of t: f(t) = a + b*t
+    a = float(np.dot(o - eye, fwd)) - near
+    b = float(np.dot(d, fwd))
+
+    span = _VISIBLE_SPAN  # world units of line drawn each way from the closest point
+    # Parameter of the point on the line closest to the eye, so the drawn span is
+    # centred on the part of the line the user is actually looking at.
+    t_mid = float(np.dot(eye - o, d))
+    lo, hi = t_mid - span, t_mid + span
+
+    if abs(b) < 1e-12:
+        return None if a <= 0.0 else (o + d * lo, o + d * hi)
+    t_cross = -a / b
+    if b > 0.0:
+        lo = max(lo, t_cross)
+    else:
+        hi = min(hi, t_cross)
+    if hi <= lo:
+        return None
+    return (o + d * lo, o + d * hi)
+
+
+def _clip_segment_to_viewport(x1, y1, x2, y2, width, height):
+    """Liang-Barsky clip of a 2D segment to the viewport, or None if outside."""
+    dx, dy = x2 - x1, y2 - y1
+    t0, t1 = 0.0, 1.0
+    for p, q in ((-dx, x1), (dx, width - x1), (-dy, y1), (dy, height - y1)):
+        if abs(p) < 1e-12:
+            if q < 0.0:
+                return None
+            continue
+        r = q / p
+        if p < 0.0:
+            if r > t1:
+                return None
+            t0 = max(t0, r)
+        else:
+            if r < t0:
+                return None
+            t1 = min(t1, r)
+    if t1 <= t0:
+        return None
+    return (x1 + t0 * dx, y1 + t0 * dy, x1 + t1 * dx, y1 + t1 * dy)
+
+
+def _plan_guide(guide, world_transform, camera, width, height):
+    origin = _to_world(guide.origin, world_transform)
+    direction = _vec_to_world(guide.direction, world_transform)
+    span = _clip_line_to_near_plane(origin, direction, camera)
+    if span is None:
+        return AnnotationDraw(annotation_id=guide.id, kind=guide.kind)
+    p_a = _project(span[0], camera, width, height)
+    p_b = _project(span[1], camera, width, height)
+    if p_a is None or p_b is None:
+        return AnnotationDraw(annotation_id=guide.id, kind=guide.kind)
+    clipped = _clip_segment_to_viewport(p_a[0], p_a[1], p_b[0], p_b[1], width, height)
+    if clipped is None:
+        return AnnotationDraw(annotation_id=guide.id, kind=guide.kind)
+    draw = AnnotationDraw(annotation_id=guide.id, kind=guide.kind)
+    draw.segments_px.append(clipped)
+    draw.hit_boxes.append(_segment_box(clipped))
+    return draw
+
+
+def _plan_guide_point(point, world_transform, camera, width, height):
+    projected = _project(_to_world(point.position, world_transform), camera, width, height)
+    if projected is None:
+        return AnnotationDraw(annotation_id=point.id, kind=point.kind)
+    x, y = float(projected[0]), float(projected[1])
+    # _project only excludes points behind the eye (see world_to_screen), not
+    # points off to the side: a guide point needs its own viewport bounds
+    # check, the way a guide's infinite line gets one from
+    # _clip_segment_to_viewport. Without this, a construction point far
+    # outside the current view still emits a cross at wildly out-of-range
+    # pixel coordinates.
+    if not (0.0 <= x <= width and 0.0 <= y <= height):
+        return AnnotationDraw(annotation_id=point.id, kind=point.kind)
+    r = _GUIDE_CROSS_PX
+    draw = AnnotationDraw(annotation_id=point.id, kind=point.kind)
+    draw.segments_px.append((x - r, y - r, x + r, y + r))
+    draw.segments_px.append((x - r, y + r, x + r, y - r))
+    draw.hit_boxes.append(_segment_box(draw.segments_px[0]))
+    return draw

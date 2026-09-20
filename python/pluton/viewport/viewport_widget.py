@@ -361,7 +361,7 @@ class ViewportWidget(QOpenGLWidget):
         unique, so a dimmed plan is never routed through the same
         paint_annotation_plans call as the selection/hover ids (which belong
         to the active context only); doing so could otherwise collide."""
-        from PySide6.QtGui import QColor, QFont, QPainter
+        from PySide6.QtGui import QColor, QFont, QPainter, QPen
 
         from pluton.annotations.draw_plan import FONT_PX, collect_annotation_plans
         from pluton.viewport.annotation_painter import paint_annotation_plans
@@ -384,6 +384,17 @@ class ViewportWidget(QOpenGLWidget):
         dim_color = QColor(color)
         dim_color.setAlphaF(_DIM_ALPHA_BLEND)
 
+        # Task 6: guides and guide points draw dashed and grey regardless of
+        # selection/hover -- they are construction geometry, not measured
+        # annotations, so they never compete visually with dimensions/labels.
+        guide_color = QColor.fromRgbF(0.45, 0.45, 0.52)
+        guide_pen = QPen(guide_color)
+        guide_pen.setStyle(Qt.PenStyle.DashLine)
+        dim_guide_color = QColor(guide_color)
+        dim_guide_color.setAlphaF(_DIM_ALPHA_BLEND)
+        dim_guide_pen = QPen(dim_guide_color)
+        dim_guide_pen.setStyle(Qt.PenStyle.DashLine)
+
         selected_ids = set(self.selection.annotations) if self.selection is not None else set()
         hovered_id = overlay.hovered_annotation_id if overlay is not None else None
         painter = QPainter(self)
@@ -394,7 +405,9 @@ class ViewportWidget(QOpenGLWidget):
             painter.setFont(font)
             # Dimmed plans first (never selectable/hoverable -- picking stays
             # active-context-only), so the active-context plans draw on top.
-            paint_annotation_plans(painter, dimmed_plans, dim_color, set(), dim_color, None, None)
+            paint_annotation_plans(
+                painter, dimmed_plans, dim_color, set(), dim_color, None, None, dim_guide_pen
+            )
             paint_annotation_plans(
                 painter,
                 active_plans,
@@ -407,6 +420,7 @@ class ViewportWidget(QOpenGLWidget):
                     round(_HOVER_EDGE_COLOR[1] * 255),
                     round(_HOVER_EDGE_COLOR[2] * 255),
                 ),
+                guide_pen,
             )
         finally:
             painter.end()

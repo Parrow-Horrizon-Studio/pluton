@@ -129,6 +129,82 @@ def test_no_hovered_id_uses_the_default_pen():
     assert p.pens == [color]
 
 
+def _guide_plan(ann_id=1, kind="guide"):
+    return AnnotationDraw(
+        annotation_id=ann_id,
+        segments_px=[(0.0, 0.0, 10.0, 0.0)],
+        texts=[],
+        hit_boxes=[],
+        kind=kind,
+    )
+
+
+def test_guide_plan_uses_the_guide_pen_when_one_is_supplied():
+    """Task 6: a guide's plan is painted with `guide_pen`, not the ordinary
+    default colour, when the caller supplies one."""
+    p = _RecordingPainter()
+    color = (0.1, 0.1, 0.1)
+    selected_color = (0.2, 0.5, 0.9)
+    guide_pen = (0.45, 0.45, 0.52)
+    paint_annotation_plans(p, [_guide_plan()], color, set(), selected_color, guide_pen=guide_pen)
+    assert p.pens == [guide_pen]
+
+
+def test_guide_point_plan_also_uses_the_guide_pen():
+    """The same treatment applies to guide_point plans, not only guide plans."""
+    p = _RecordingPainter()
+    color = (0.1, 0.1, 0.1)
+    selected_color = (0.2, 0.5, 0.9)
+    guide_pen = (0.45, 0.45, 0.52)
+    paint_annotation_plans(
+        p, [_guide_plan(kind="guide_point")], color, set(), selected_color, guide_pen=guide_pen
+    )
+    assert p.pens == [guide_pen]
+
+
+def test_guide_plan_ignores_selection_and_hover_when_a_guide_pen_is_supplied():
+    """Guides are construction geometry, not measured annotations: selection
+    and hover state must not override the guide pen once one is supplied."""
+    p = _RecordingPainter()
+    color = (0.1, 0.1, 0.1)
+    selected_color = (0.2, 0.5, 0.9)
+    hover_color = (0.45, 0.70, 1.00)
+    guide_pen = (0.45, 0.45, 0.52)
+    paint_annotation_plans(
+        p,
+        [_guide_plan(7)],
+        color,
+        {7},
+        selected_color,
+        hovered_id=7,
+        hover_color=hover_color,
+        guide_pen=guide_pen,
+    )
+    assert p.pens == [guide_pen]
+
+
+def test_guide_plan_falls_back_to_the_default_pen_when_no_guide_pen_is_given():
+    """Backward-compatible default: omitting `guide_pen` entirely must leave a
+    guide plan on the ordinary colour rules, matching pre-Task-6 behaviour."""
+    p = _RecordingPainter()
+    color = (0.1, 0.1, 0.1)
+    selected_color = (0.2, 0.5, 0.9)
+    paint_annotation_plans(p, [_guide_plan()], color, set(), selected_color)
+    assert p.pens == [color]
+
+
+def test_a_non_guide_plan_is_unaffected_by_a_supplied_guide_pen():
+    """A dimension/label plan (kind not in the guide set) keeps the pen it
+    already had even when the caller supplies a guide_pen for other plans in
+    the same call."""
+    p = _RecordingPainter()
+    color = (0.1, 0.1, 0.1)
+    selected_color = (0.2, 0.5, 0.9)
+    guide_pen = (0.45, 0.45, 0.52)
+    paint_annotation_plans(p, [_plan(7)], color, set(), selected_color, guide_pen=guide_pen)
+    assert p.pens == [color]
+
+
 class _RecordingQPainter:
     """Stands in for QPainter inside ViewportWidget._paint_annotations.
 

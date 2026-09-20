@@ -157,3 +157,39 @@ def test_selection_toggle_and_contains_annotation_mirrors_instance():
     sel.toggle_annotation(7)
     assert not sel.contains_annotation(7)
     assert sel.annotations == set()
+
+
+def test_click_on_a_guide_line_hits_it():
+    """Task 6: guides are hit-tested through the same plan the picker always
+    uses. _FlatCamera above has no position/target/near, so a real Camera is
+    needed here for the near-plane clip _plan_guide performs."""
+    from pluton.annotations.draw_plan import plan_annotation
+    from pluton.model.annotation import Guide
+    from pluton.viewport.camera import Camera
+
+    cam = Camera()
+    cam.aspect = 640 / 480
+    guide = Guide(31, (0.0, 0.0, 0.0), (1.0, 0.0, 0.0))
+    plan = plan_annotation(guide, None, cam, 640, 480, Units())
+    assert plan is not None and len(plan.segments_px) == 1
+    x1, y1, x2, y2 = plan.segments_px[0]
+    mid = ((x1 + x2) / 2.0, (y1 + y2) / 2.0)
+
+    assert pick_annotation(mid, [guide], None, cam, 640, 480, Units()) == 31
+    assert pick_annotation((2.0, 2.0), [guide], None, cam, 640, 480, Units()) is None
+
+
+def test_click_on_a_guide_point_cross_hits_it():
+    from pluton.annotations.draw_plan import plan_annotation
+    from pluton.model.annotation import GuidePoint
+    from pluton.viewport.camera import Camera
+
+    cam = Camera()
+    cam.aspect = 640 / 480
+    point = GuidePoint(32, (0.0, 0.0, 0.0))
+    plan = plan_annotation(point, None, cam, 640, 480, Units())
+    assert plan is not None
+    x1, y1, _x2, _y2 = plan.segments_px[0]
+
+    assert pick_annotation((x1, y1), [point], None, cam, 640, 480, Units()) == 32
+    assert pick_annotation((2.0, 2.0), [point], None, cam, 640, 480, Units()) is None
