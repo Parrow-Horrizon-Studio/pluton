@@ -179,6 +179,34 @@ def test_click_on_a_guide_line_hits_it():
     assert pick_annotation((2.0, 2.0), [guide], None, cam, 640, 480, Units()) is None
 
 
+def test_a_diagonal_guide_does_not_hit_empty_space_far_from_its_line():
+    """Fix round 1, Critical finding: a guide's clipped segment routinely
+    spans most of the viewport, so a single axis-aligned _segment_box over
+    the whole segment covers most of the screen for a diagonal guide -- the
+    test above only passed because the default camera's +X guide happens to
+    be nearly horizontal, giving a thin bounding-box strip. Reviewer's
+    concrete case: Guide(2, (0,0,0), (1,1,0.5)) at 1280x800 with the default
+    camera draws (0.0, 634.0) -> (1280.0, 233.9), whose single bounding box
+    is (-3, 230.9, 1283, 637.0) -- 5120 of 10240 probed viewport cells would
+    return this guide's id. (1200, 600) sits well inside that box (~325px
+    perpendicular from the actual line) and must not be picked."""
+    from pluton.annotations.draw_plan import plan_annotation
+    from pluton.model.annotation import Guide
+    from pluton.viewport.camera import Camera
+
+    cam = Camera()
+    cam.aspect = 1280 / 800
+    guide = Guide(2, (0.0, 0.0, 0.0), (1.0, 1.0, 0.5))
+    plan = plan_annotation(guide, None, cam, 1280, 800, Units())
+    assert plan is not None and len(plan.segments_px) == 1
+    _x1, y1, _x2, y2 = plan.segments_px[0]
+
+    # Still pickable close to the actual drawn line.
+    assert pick_annotation((640.0, (y1 + y2) / 2.0), [guide], None, cam, 1280, 800, Units()) == 2
+    # Far from the line but inside the old single bounding box -- must miss.
+    assert pick_annotation((1200.0, 600.0), [guide], None, cam, 1280, 800, Units()) is None
+
+
 def test_click_on_a_guide_point_cross_hits_it():
     from pluton.annotations.draw_plan import plan_annotation
     from pluton.model.annotation import GuidePoint

@@ -11,6 +11,7 @@ annotation keeps a constant on-screen size at any zoom.
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, field
 
 import numpy as np
@@ -30,10 +31,26 @@ _ARROW_SPREAD = 0.42  # radians each side of the leader direction
 _EPS = 1e-9
 _GUIDE_CROSS_PX = 5.0  # half-length of each stroke of a guide point's cross
 _NEAR_PAD = 1e-4  # push the clipped point just in front of the near plane
-_VISIBLE_SPAN = 1.0e4  # world units drawn each way from a guide's closest approach to
-# the eye. An infinite line has to be bounded to something the 2D viewport clip can
-# handle in floating point; the viewport clip is what actually decides what is drawn,
-# this constant just has to be generous enough to outlast a typical camera.far.
+_VISIBLE_SPAN = 1.0e4  # floor for the world-space half-window drawn around a
+# guide's closest approach to the eye. A fixed floor is not enough on its own:
+# see _SPAN_SCALE below for why the window has to grow with distance from the eye.
+_SPAN_SCALE = 1.0e4  # the half-window scales as _SPAN_SCALE * max(h, camera.far),
+# where h is the eye-to-line distance. Perspective foreshortening means a line
+# far from the eye needs a proportionally larger world-space window to reach the
+# same screen-space extent: with a fixed window, the drawn segment can stop dead
+# in the middle of the viewport (no edge, no near-plane crossing there) while the
+# true infinite line keeps going -- see M7.6b Task 6 fix round 1. Scaling by h
+# keeps the residual truncation sub-pixel even for a narrow ~10-degree fov;
+# scaling by camera.far too keeps the same 10x-of-far margin the original fixed
+# constant had for guides close to the eye. The 2D viewport clip is still what
+# actually decides where the drawn segment ends -- this only has to be generous
+# enough that the near-plane-clipped span reaches every point that clip needs to see.
+_GUIDE_HIT_CHUNK_PX = 24.0  # a guide's pick area is chunked into boxes this long
+# along the drawn segment, not one box for the whole span. A dimension's line is
+# bounded by the geometry it measures, so one bounding box is tight; a guide's
+# clipped segment spans most of the viewport, so for a diagonal guide a single
+# axis-aligned box would cover most of the screen and let empty-space clicks
+# hit it -- see M7.6b Task 6 fix round 1.
 
 
 @dataclass
@@ -268,10 +285,11 @@ def _clip_line_to_near_plane(origin, direction, camera):
     a = float(np.dot(o - eye, fwd)) - near
     b = float(np.dot(d, fwd))
 
-    span = _VISIBLE_SPAN  # world units of line drawn each way from the closest point
     # Parameter of the point on the line closest to the eye, so the drawn span is
     # centred on the part of the line the user is actually looking at.
     t_mid = float(np.dot(eye - o, d))
+    h = float(np.linalg.norm((o + d * t_mid) - eye))  # eye-to-line distance
+    span = max(_VISIBLE_SPAN, _SPAN_SCALE * max(h, float(camera.far)))
     lo, hi = t_mid - span, t_mid + span
 
     if abs(b) < 1e-12:
@@ -309,6 +327,30 @@ def _clip_segment_to_viewport(x1, y1, x2, y2, width, height):
     return (x1 + t0 * dx, y1 + t0 * dy, x1 + t1 * dx, y1 + t1 * dy)
 
 
+def _chunked_hit_boxes(seg, chunk_px=_GUIDE_HIT_CHUNK_PX):
+    """Hit boxes covering `seg`, subdivided into ~chunk_px-long pieces.
+
+    A single axis-aligned _segment_box over the whole segment is fine for a
+    dimension line (bounded by the geometry it measures), but a guide's
+    clipped segment routinely spans most of the viewport -- a diagonal guide's
+    single bounding box would then cover most of the screen, so a click on
+    empty space far from the drawn line would still hit it. Chunking keeps
+    each box hugging the actual line.
+    """
+    x1, y1, x2, y2 = seg
+    length = math.hypot(x2 - x1, y2 - y1)
+    n = max(1, math.ceil(length / chunk_px))
+    boxes = []
+    for i in range(n):
+        t0, t1 = i / n, (i + 1) / n
+        boxes.append(
+            _segment_box(
+                (x1 + t0 * (x2 - x1), y1 + t0 * (y2 - y1), x1 + t1 * (x2 - x1), y1 + t1 * (y2 - y1))
+            )
+        )
+    return boxes
+
+
 def _plan_guide(guide, world_transform, camera, width, height):
     origin = _to_world(guide.origin, world_transform)
     direction = _vec_to_world(guide.direction, world_transform)
@@ -324,7 +366,7 @@ def _plan_guide(guide, world_transform, camera, width, height):
         return AnnotationDraw(annotation_id=guide.id, kind=guide.kind)
     draw = AnnotationDraw(annotation_id=guide.id, kind=guide.kind)
     draw.segments_px.append(clipped)
-    draw.hit_boxes.append(_segment_box(clipped))
+    draw.hit_boxes.extend(_chunked_hit_boxes(clipped))
     return draw
 
 
