@@ -14,6 +14,7 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
+from itertools import pairwise
 
 import numpy as np
 
@@ -216,43 +217,98 @@ def _strictly_inside_polygon(poly_2d: np.ndarray, pt: np.ndarray) -> bool:
     return inside
 
 
-def _orientation(o: np.ndarray, a: np.ndarray, b: np.ndarray) -> float:
-    """Signed area of (o, a, b); sign gives turn direction, 0.0 means collinear."""
-    return float((a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0]))
+# Absolute tolerance for the intersection-parameter math below: deciding
+# when two segments are parallel (a near-zero cross product of their
+# direction vectors) and when a computed t sits at 0/1 within float64
+# round-trip error. Unitless (t lives on [0, 1] regardless of the polygon's
+# physical scale), so one constant serves both roles.
+_PARAM_EPS = 1e-9
 
 
-def _segments_properly_cross(p1, p2, p3, p4) -> bool:
-    """True iff segment p1-p2 and segment p3-p4 cross at a point interior to
-    both -- a genuine transversal crossing.
+def _segment_intersection_params(
+    p1: np.ndarray, p2: np.ndarray, a: np.ndarray, b: np.ndarray
+) -> list[float]:
+    """Parameter(s) t in [0, 1] along segment p1->p2 where it MEETS segment
+    a->b -- a proper crossing, an endpoint touch, or a collinear overlap
+    alike. This is deliberately not a "does it cross" test: it reports every
+    point the two segments share, because chain_cuts_face needs to know
+    where the chain segment touches the loop's boundary at all, not just
+    where it crosses transversally (see _segment_stays_inside_polygon for
+    why the distinction matters).
 
-    A shared endpoint, a touch along one segment's interior, or a collinear
-    overlap all force at least one of the four orientation products below to
-    be zero or same-signed, so none of those register here -- deliberately:
-    a chain's own ends legitimately touch the boundary loop where they
-    attach to it. Only an actual crossing through a loop edge counts, which
-    is the case a sampled interior vertex and sampled segment midpoints can
-    both miss on a concave loop (see chain_cuts_face's own test suite for
-    the reproduction that motivated this).
+    Returns at most one value for a point intersection (crossing or touch,
+    including a touch at a vertex shared with the chain's own endpoint), or
+    two values (the overlap's own endpoints, clipped to [0, 1]) for a
+    collinear overlap. Empty if the segments do not meet at all.
     """
-    d1 = _orientation(p3, p4, p1)
-    d2 = _orientation(p3, p4, p2)
-    d3 = _orientation(p1, p2, p3)
-    d4 = _orientation(p1, p2, p4)
-    return d1 * d2 < 0.0 and d3 * d4 < 0.0
+    d1 = p2 - p1
+    d2 = b - a
+    denom = float(d1[0] * d2[1] - d1[1] * d2[0])
+    ap = a - p1
+    if abs(denom) > _PARAM_EPS:
+        t = float(ap[0] * d2[1] - ap[1] * d2[0]) / denom
+        s = float(ap[0] * d1[1] - ap[1] * d1[0]) / denom
+        if -_PARAM_EPS <= t <= 1.0 + _PARAM_EPS and -_PARAM_EPS <= s <= 1.0 + _PARAM_EPS:
+            return [min(1.0, max(0.0, t))]
+        return []
+    # Parallel (or one/both segments degenerate). Collinear only if `a`
+    # lies on the infinite line through p1, p2.
+    cross_ap_d1 = float(ap[0] * d1[1] - ap[1] * d1[0])
+    if abs(cross_ap_d1) > _PARAM_EPS:
+        return []  # parallel and offset -- never meet
+    len_sq = float(d1[0] * d1[0] + d1[1] * d1[1])
+    if len_sq < _PARAM_EPS:
+        return []  # p1 == p2 -- degenerate chain segment, nothing to report
+    t_a = float((a[0] - p1[0]) * d1[0] + (a[1] - p1[1]) * d1[1]) / len_sq
+    t_b = float((b[0] - p1[0]) * d1[0] + (b[1] - p1[1]) * d1[1]) / len_sq
+    lo, hi = (t_a, t_b) if t_a <= t_b else (t_b, t_a)
+    lo, hi = max(0.0, lo), min(1.0, hi)
+    if lo > hi + _PARAM_EPS:
+        return []
+    return [lo, hi]
 
 
-def _segment_crosses_loop_boundary(
+def _segment_stays_inside_polygon(
     poly_2d: np.ndarray, seg_a: np.ndarray, seg_b: np.ndarray
 ) -> bool:
-    """True if the 2D segment (seg_a, seg_b) properly crosses any of the
-    polygon's own boundary edges."""
+    """True iff the whole 2D segment (seg_a, seg_b) stays strictly inside
+    the polygon.
+
+    Finds every parameter t where the segment touches the polygon's
+    boundary at all (crossing, endpoint touch, or collinear overlap), sorts
+    them together with the segment's own two ends (t=0, t=1), and tests the
+    MIDPOINT of every resulting sub-interval for strict containment. A
+    segment that stays inside the whole way produces exactly one
+    sub-interval (0, 1) whose midpoint is the plain segment midpoint; one
+    that exits and re-enters produces more sub-intervals, and any one of
+    them landing outside means the segment left the face somewhere.
+
+    This is deliberately not built on a plain crossing test: a segment that
+    exits through one loop VERTEX and re-enters through another crosses no
+    edge transversally (each touch alone gives a zero-orientation, tangent
+    result), so a crossing-only test misses it entirely, but the
+    sub-interval between the two vertex-touches still gets its own midpoint
+    tested here, and that midpoint is what is actually outside (see
+    chain_cuts_face's own test suite for the reproduction that motivated
+    this -- a T-slot-shaped loop where a chain drawn between two of its
+    vertices exits and re-enters exactly at two OTHER vertices in between).
+    """
+    ts = {0.0, 1.0}
     n = len(poly_2d)
     for i in range(n):
         edge_a = poly_2d[i]
         edge_b = poly_2d[(i + 1) % n]
-        if _segments_properly_cross(seg_a, seg_b, edge_a, edge_b):
-            return True
-    return False
+        for t in _segment_intersection_params(seg_a, seg_b, edge_a, edge_b):
+            ts.add(t)
+    sorted_ts = sorted(ts)
+    for lo, hi in pairwise(sorted_ts):
+        if hi - lo < _PARAM_EPS:
+            continue  # negligible sliver (e.g. duplicate touch points)
+        mid_t = (lo + hi) / 2.0
+        mid = seg_a + mid_t * (seg_b - seg_a)
+        if not _strictly_inside_polygon(poly_2d, mid):
+            return False
+    return True
 
 
 def _face_is_cut_by_chain(scene, face, chain: list[int], chain_pos: np.ndarray) -> bool:
@@ -284,14 +340,11 @@ def _face_is_cut_by_chain(scene, face, chain: list[int], chain_pos: np.ndarray) 
 
     for i in range(len(chain_pos) - 1):
         seg_a, seg_b = chain_pos[i][[u, v]], chain_pos[i + 1][[u, v]]
-        mid = (chain_pos[i] + chain_pos[i + 1]) / 2.0
-        if not _strictly_inside_polygon(poly_2d, mid[[u, v]]):
-            return False
-        # The interior-vertex and midpoint samples above are point samples;
-        # a concave loop can dip outside the polygon strictly BETWEEN two
-        # sampled points and back in without either sample seeing it. This
-        # is the check that actually carries the guarantee.
-        if _segment_crosses_loop_boundary(poly_2d, seg_a, seg_b):
+        # This is the check that actually carries rule 3's containment
+        # guarantee for the segment as a whole (not just its two point
+        # samples): see _segment_stays_inside_polygon for why a plain
+        # midpoint-and-crossing test is not enough on its own.
+        if not _segment_stays_inside_polygon(poly_2d, seg_a, seg_b):
             return False
 
     return True

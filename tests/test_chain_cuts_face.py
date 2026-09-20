@@ -90,6 +90,49 @@ def test_a_chain_segment_that_crosses_out_of_a_concave_face_does_not_cut():
     assert chain_cuts_face(s, [v[4], interior, v[1]]) is None
 
 
+def test_a_chain_that_exits_and_reenters_exactly_at_loop_vertices_does_not_cut():
+    """A chain can leave the polygon and come back without a single proper
+    (transversal) edge crossing anywhere, if the exit and the re-entry both
+    happen exactly AT a loop vertex rather than through an edge's interior.
+    Each such touch alone is a tangent (an orientation of exactly zero
+    against at least one of the two edges meeting there), which a
+    crossing-only test cannot tell apart from a vertex the chain safely
+    grazes without ever leaving -- only a real sub-interval/containment
+    test built on the actual intersection parameters can.
+
+    Built as a small zigzag-boundary loop: it goes up through y=2 at x=2
+    (P1, a genuine vertex), peaks, back down through y=2 at x=4.5 (P2),
+    dips into a narrow valley, back up through y=2 at x=5.5 (P3), then
+    climbs the rest of the way up through y=2 at x=13 (P4) on a long final
+    rise. P1 and P4 are the chain's own two endpoints (legitimately on the
+    loop). P2 and P3 are two OTHER vertices the straight chain passes
+    through in between, exactly at the polygon's boundary, framing a narrow
+    exterior sliver (x in roughly (4.5, 5.5)) that the chain's own single
+    segment midpoint (at x=7.5, deep in the following wide interior stretch)
+    never samples. Mirrors an axis-aligned T-slot floor-plan shape reachable
+    by ordinary endpoint snapping -- the case that matters most, per the
+    finding this pins."""
+    s = Scene()
+    pts = [
+        (0.0, -2.0, 0.0),
+        (20.0, -2.0, 0.0),
+        (20.0, 1.0, 0.0),  # E, valley
+        (13.0, 2.0, 0.0),  # P4, chain end
+        (6.0, 3.0, 0.0),  # D, peak
+        (5.5, 2.0, 0.0),  # P3
+        (5.0, 1.0, 0.0),  # C, narrow valley
+        (4.5, 2.0, 0.0),  # P2
+        (4.0, 3.0, 0.0),  # B, peak
+        (2.0, 2.0, 0.0),  # P1, chain start
+        (0.0, 1.0, 0.0),  # A, valley
+    ]
+    v = [s.add_vertex(np.array(p, dtype=np.float32)) for p in pts]
+    s.add_face_from_loop(v)
+    p1, p4 = v[9], v[3]
+    s.add_edge(p1, p4)
+    assert chain_cuts_face(s, [p1, p4]) is None
+
+
 def test_a_chain_between_two_different_faces_does_not_cut():
     """Two disjoint quads. Each end lies on a boundary loop, but no single
     face's loop contains both, so there is no candidate at all -- distinct
