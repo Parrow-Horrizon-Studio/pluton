@@ -1,9 +1,12 @@
 """The Eraser tool (E).
 
-Hover/drag over EDGES to delete them. Erasing an edge cascades to its incident
-faces (a face can't survive losing a boundary edge), so removal is composed as:
-remove incident face(s) first, then the edge. A press-drag-release stroke
-accumulates into one undoable CompositeCommand.
+Hover/drag over EDGES to delete them. An interior edge whose two incident
+faces are coplanar dissolves them into one instead (M7.6a) -- this is what
+makes erasing the line a split just drew undo that split by hand, rather
+than blowing a hole through both halves. Anything else -- a boundary edge, a
+crease between faces at an angle, an edge shared by more than one pair of
+faces -- cascades as before: remove incident face(s) first, then the edge.
+A press-drag-release stroke accumulates into one undoable CompositeCommand.
 """
 
 from __future__ import annotations
@@ -15,7 +18,7 @@ from PySide6.QtGui import QMouseEvent
 from pluton.annotations.picking import pick_annotation
 from pluton.commands import CompositeCommand
 from pluton.commands.annotation_commands import DeleteAnnotationsCommand
-from pluton.commands.scene_commands import RemoveEdgeCommand, RemoveFaceCommand
+from pluton.commands.scene_commands import DissolveEdgeCommand, RemoveEdgeCommand, RemoveFaceCommand
 from pluton.geometry.transforms import apply_mat, is_identity_transform
 from pluton.tools.tool import Tool, ToolContext, ToolOverlay
 from pluton.units import Units
@@ -111,13 +114,48 @@ class EraserTool(Tool):
             self._units(),
         )
 
+    def _try_dissolve(self, e_id: int) -> bool:
+        """Attempt the coplanar-seam merge in place of the cascade.
+
+        Only applies with two live incident faces on the same plane (a
+        boundary edge or a crease falls straight through to the cascade in
+        `_erase_edge`). Even then the kernel can still refuse -- a pair of
+        faces sharing more than one edge dissolves to INVALID_ID -- and that
+        refusal is read back here (the edge stays live) rather than
+        duplicated as a separate Python-side check.
+
+        Returns True, having appended the executed DissolveEdgeCommand to
+        the active stroke, on success; False leaves the edge and its faces
+        untouched for the caller to cascade instead.
+        """
+        f1, f2 = self._scene.edge_faces(e_id)
+        if f1 is None or f2 is None:
+            return False
+        if not self._scene.faces_are_coplanar(f1, f2):
+            return False
+        cmd = DissolveEdgeCommand(e_id)
+        cmd.do(self._scene)
+        if self._scene.edge_is_live(e_id):
+            return False  # kernel refused (e.g. faces share more than one edge)
+        self._stroke.children.append(cmd)
+        return True
+
     def _erase_edge(self, e_id: int) -> None:
-        """Append (and execute) the cascade for one edge into the active stroke."""
+        """Append (and execute) the removal for one edge into the active stroke.
+
+        Tries the coplanar-seam dissolve first; anything it declines (a
+        boundary edge, a crease, a kernel-refused multi-shared edge) falls
+        through to the original cascade: remove incident face(s), then the
+        edge.
+        """
         if self._stroke is None or e_id in self._erased:
             return
         try:
             self._scene.edge(e_id)
         except KeyError:
+            return
+        if self._try_dissolve(e_id):
+            self._erased.add(e_id)
             return
         for f_id in self._scene.edge_faces(e_id):
             if f_id is None:

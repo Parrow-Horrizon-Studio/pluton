@@ -118,14 +118,17 @@ def test_erase_interior_edge_removes_both_faces(qtbot):
     from pluton.commands import CommandStack
     from pluton.scene import Scene
 
-    # Two coplanar quads sharing the edge (1,0)-(1,1).
+    # Two quads meeting at a right-angle crease along (1,0)-(1,1) -- NOT
+    # coplanar. M7.6a (#31) makes a COPLANAR interior seam dissolve into one
+    # face instead of cascading (see test_erase_dissolves.py); this fixture
+    # is folded specifically so it keeps exercising the cascade path.
     s = Scene()
     v00 = s.add_vertex(np.array([0.0, 0.0, 0.0], dtype=np.float32))
     v10 = s.add_vertex(np.array([1.0, 0.0, 0.0], dtype=np.float32))
     v11 = s.add_vertex(np.array([1.0, 1.0, 0.0], dtype=np.float32))
     v01 = s.add_vertex(np.array([0.0, 1.0, 0.0], dtype=np.float32))
-    v20 = s.add_vertex(np.array([2.0, 0.0, 0.0], dtype=np.float32))
-    v21 = s.add_vertex(np.array([2.0, 1.0, 0.0], dtype=np.float32))
+    v20 = s.add_vertex(np.array([1.0, 0.0, 1.0], dtype=np.float32))
+    v21 = s.add_vertex(np.array([1.0, 1.0, 1.0], dtype=np.float32))
     s.add_face_from_loop((v00, v10, v11, v01))
     s.add_face_from_loop((v10, v20, v21, v11))
     assert len(list(s.faces_iter())) == 2

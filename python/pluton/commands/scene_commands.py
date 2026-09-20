@@ -299,7 +299,7 @@ class DissolveEdgeCommand(Command):
             # Redo — the original edge id is stale (undo recreated the edge with
             # a fresh id). Re-resolve the current live edge id from the captured
             # endpoint pair via the non-mutating edge_between lookup.
-            assert self._shared_verts is not None
+            assert self._shared_verts is not None, "DissolveEdgeCommand.do (redo) before first do"
             va, vb = self._shared_verts
             found = scene.edge_between(va, vb)
             if found is None:
@@ -321,9 +321,13 @@ class DissolveEdgeCommand(Command):
         if self._was_noop:
             return
         assert self._merged_face_id is not None, "DissolveEdgeCommand.undo before do"
-        assert self._captured_f1 is not None and self._captured_f2 is not None
-        assert self._shared_verts is not None
-        assert self._f1_id is not None and self._f2_id is not None
+        assert self._captured_f1 is not None and self._captured_f2 is not None, (
+            "DissolveEdgeCommand.undo before do"
+        )
+        assert self._shared_verts is not None, "DissolveEdgeCommand.undo before do"
+        assert self._f1_id is not None and self._f2_id is not None, (
+            "DissolveEdgeCommand.undo before do"
+        )
 
         # Remove the merged face, then restore the dissolved edge and BOTH source
         # faces to their ORIGINAL ids. Id-preserving restore (not add_face_from_loop)

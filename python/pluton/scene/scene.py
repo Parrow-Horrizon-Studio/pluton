@@ -149,6 +149,47 @@ def _project_loop_to_2d_for_earcut(positions_3d: np.ndarray) -> np.ndarray:
     return np.stack([positions_3d[:, u], positions_3d[:, v]], axis=1).astype(np.float32)
 
 
+def _merge_corner_uvs(
+    uv1: np.ndarray | None,
+    loop1: Sequence[int],
+    uv2: np.ndarray | None,
+    loop2: Sequence[int],
+    merged_loop: Sequence[int],
+) -> np.ndarray | None:
+    """Gather one side's per-corner UVs for a dissolve's merged loop.
+
+    Both parents must have stored UVs at all -- one missing means the merged
+    face gets none, per the agree-or-drop rule. Where a merged-loop vertex
+    was a corner of only one parent, that parent's value is used outright.
+    Where it was a corner of BOTH (the two endpoints of the dissolved edge),
+    the two must agree within floating-point noise or the whole array is
+    dropped rather than picking a side.
+    """
+    if uv1 is None or uv2 is None:
+        return None
+    map1 = {int(v): (float(u), float(w)) for v, (u, w) in zip(loop1, uv1, strict=True)}
+    map2 = {int(v): (float(u), float(w)) for v, (u, w) in zip(loop2, uv2, strict=True)}
+    merged: list[tuple[float, float]] = []
+    for raw_v in merged_loop:
+        v = int(raw_v)
+        a = map1.get(v)
+        b = map2.get(v)
+        if a is not None and b is not None:
+            if not np.allclose(a, b, atol=1e-6):
+                return None
+            merged.append(a)
+        elif a is not None:
+            merged.append(a)
+        elif b is not None:
+            merged.append(b)
+        else:
+            # A merged-loop vertex came from neither parent's loop, which
+            # should not happen: dissolve only ever combines corners the
+            # two original faces already had.
+            return None
+    return np.asarray(merged, dtype=np.float32)
+
+
 class Scene:
     """Editable polygonal scene with stable integer IDs (C++ HalfEdgeMesh backed)."""
 
@@ -394,11 +435,60 @@ class Scene:
 
         Returns the new (surviving) face id on success, or None if the edge
         is boundary / dead / would create a degenerate result.
+
+        The merged face's sidecars follow an agree-or-drop rule (M7.6a,
+        revising M7.5c's D4a): for each of the four face-keyed sidecars, on
+        each side, the merged face keeps a value only when BOTH parents
+        carried the identical one. Absence counts as a value, so a painted
+        face merged with an unpainted one comes out unpainted rather than
+        spreading paint onto geometry the user never painted. This is what
+        makes a split-then-erase round trip lossless when the two halves
+        still agree with each other.
         """
+        try:
+            f1, f2 = self.edge_faces(edge_id)
+        except KeyError:
+            return None
+        if f1 is None or f2 is None:
+            return None
+
+        loop1 = self.face_loop(f1)
+        loop2 = self.face_loop(f2)
+        materials = {
+            side: (self.face_material(f1, side), self.face_material(f2, side))
+            for side in (Side.FRONT, Side.BACK)
+        }
+        placements = {
+            side: (self.face_placement(f1, side), self.face_placement(f2, side))
+            for side in (Side.FRONT, Side.BACK)
+        }
+        stored_uvs = {
+            side: (self.face_uvs(f1, side), self.face_uvs(f2, side))
+            for side in (Side.FRONT, Side.BACK)
+        }
+
         result = self._mesh.dissolve_edge(edge_id)
         if result == self._mesh.INVALID_ID:
             return None
-        return int(result)
+        merged = int(result)
+        merged_loop = self.face_loop(merged)
+
+        for side in (Side.FRONT, Side.BACK):
+            m1, m2 = materials[side]
+            if m1 == m2:
+                self.set_face_material(merged, m1, side)
+
+            p1, p2 = placements[side]
+            if p1 == p2:
+                self.set_face_placement(merged, p1, side)
+
+            uv1, uv2 = stored_uvs[side]
+            merged_uv = _merge_corner_uvs(uv1, loop1, uv2, loop2, merged_loop)
+            if merged_uv is not None:
+                self.set_face_uvs(merged, merged_uv, side)
+
+        self._render_dirty = True
+        return merged
 
     def faces_are_coplanar(self, f1_id: int, f2_id: int) -> bool:
         """True iff the two faces' normals and planes agree within tolerance.
@@ -610,9 +700,9 @@ class Scene:
 
         This is the verbatim sibling of `_transfer_face_attributes`, which
         handles the one case where a rebuilt face's loop GREW: a split inserts
-        a corner and interpolates a UV for it. Merges are handled by neither,
-        deliberately (decision D4a: two candidate sources, no defensible
-        winner).
+        a corner and interpolates a UV for it. A dissolve's merge -- a loop
+        SHRINKING two faces into one -- is handled by `dissolve_edge`'s own
+        agree-or-drop rule (M7.6a), not by this method.
         """
         src_fid = int(src_fid)
         dst_fid = int(dst_fid)
