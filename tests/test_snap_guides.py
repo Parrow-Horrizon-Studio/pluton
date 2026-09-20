@@ -85,6 +85,62 @@ def test_guide_point_beats_on_edge_but_loses_to_endpoint():
     assert res2.vertex_id == vid
 
 
+def test_on_edge_beats_on_guide_when_only_those_two_compete():
+    """D12's real-geometry-outranks-construction-geometry rule, isolated.
+
+    An edge you can actually build on beats a guide drawn only to help you
+    aim: ON_EDGE outranks ON_GUIDE. Task 8's other precedence tests establish
+    this only as a side effect of a stronger kind (INTERSECTION) beating
+    both at once, which never exercises the ON_EDGE-versus-ON_GUIDE relation
+    itself -- a mutant that ranked ON_GUIDE above ON_EDGE would pass every
+    other test in this file. This test puts only those two candidates on the
+    board.
+
+    The scene edge and the guide are placed skew to each other (no real 3D
+    crossing, so no INTERSECTION candidate), but each is positioned to cross
+    the SAME camera ray at a different depth: any point on that ray
+    reprojects to the exact same pixel, so both an ON_EDGE and an ON_GUIDE
+    candidate land in tolerance at the cursor with nothing else competing --
+    the edge is built asymmetrically around its crossing point so that point
+    is neither the segment's midpoint nor either endpoint, ruling out
+    MIDPOINT and ENDPOINT too.
+    """
+    from pluton.scene import Scene
+    from pluton.viewport.snap_engine import SnapEngine, SnapKind
+
+    cam = _camera_at_default()
+    cursor = _screen_of(cam, [4.0, 0.0, 0.0])
+    ray_origin, ray_dir = cam.ray_from_screen(cursor[0], cursor[1], 1280, 800)
+    ray_origin = np.asarray(ray_origin, dtype=np.float64)
+    ray_dir = np.asarray(ray_dir, dtype=np.float64)
+
+    guide_origin = ray_origin + 10.0 * ray_dir
+    guide_direction = np.array([0.0, 1.0, 0.0])
+
+    edge_crossing = ray_origin + 15.0 * ray_dir
+    edge_direction = np.array([0.0, 0.0, 1.0])
+    # Asymmetric around the crossing point: not the midpoint, not an end.
+    p1 = edge_crossing - edge_direction * 0.5
+    p2 = edge_crossing + edge_direction * 3.5
+
+    eng = SnapEngine()
+    scene = Scene()
+    va = scene.add_vertex(p1.astype(np.float32))
+    vb = scene.add_vertex(p2.astype(np.float32))
+    eid = scene.add_edge(va, vb)
+
+    res = eng.snap(
+        cursor,
+        (1280, 800),
+        cam,
+        scene,
+        guides=[(guide_origin, guide_direction)],
+        guide_points=[],
+    )
+    assert res.kind == SnapKind.ON_EDGE
+    assert res.edge_id == eid
+
+
 def test_guide_crossing_scene_edge_yields_intersection_not_on_guide():
     from pluton.scene import Scene
     from pluton.viewport.snap_engine import SnapEngine, SnapKind
