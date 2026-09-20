@@ -234,6 +234,18 @@ class ArcTool(Tool):
         if result is None:
             return
         composite, chain = result
+        # KNOWN LIMITATION (branch review Finding 3): unlike LineTool, ArcTool
+        # has no `_vertex_for_snap` edge-splitting step, so an endpoint that
+        # merely lands on an edge's INTERIOR is never turned into a loop
+        # vertex first -- build_open_polyline only reuses a vertex already
+        # within _COINCIDENT_EPS and otherwise drops a free-floating one that
+        # is not part of any face's boundary loop. chain_cuts_face requires
+        # both chain ends to already be loop vertices, so an arc whose
+        # endpoints land mid-edge (the common case) never splits, even
+        # though the identical corner-to-corner gesture does. See
+        # tests/test_arc_tool_face_split.py for the pinned-behaviour test;
+        # do not "fix" this here without reading Finding 3's rationale in
+        # the M7.6a final-fix-wave review first.
         fid = chain_cuts_face(s, chain)
         if fid is not None:
             split_cmd = SplitFaceCommand(fid, chain)

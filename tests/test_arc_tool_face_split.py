@@ -104,6 +104,36 @@ def test_one_undo_after_a_splitting_arc_returns_to_one_face():
     assert stack.can_undo is False
 
 
+def test_an_arc_whose_endpoints_land_on_edge_interiors_does_not_split_known_limitation():
+    """PINS a known limitation (branch review Finding 3) -- this is NOT the
+    desired behaviour, just what ArcTool actually does today.
+
+    Every other case in this file is corner to corner. Here both chord
+    endpoints land on edge INTERIORS (the midpoints of two opposite sides),
+    which is how most arcs get drawn in practice, and the split does not
+    happen. The reason: ArcTool has no equivalent of LineTool's
+    `_vertex_for_snap`, which is what turns a mid-edge snap into a real loop
+    vertex (via SplitEdgeCommand) before the chain is even built. Without
+    that step, build_open_polyline drops a free-floating vertex at each
+    midpoint that is not part of the quad's boundary loop, so
+    chain_cuts_face -- which requires both chain ends to already be loop
+    vertices -- finds nothing to split. Do not "fix" ArcTool to match
+    LineTool here without reading Finding 3's rationale first: giving a
+    second interactive tool a new edge-splitting behaviour at merge time is
+    how a new bug ships.
+    """
+    scene = Scene()
+    fid, _v = _quad(scene, size=4.0)
+    tool, _stack = _make_tool(scene)
+
+    # Chord between the midpoints of the bottom and top edges -- both ON an
+    # edge, neither AT a corner.
+    _draw_arc_across(tool, (2, 0, 0), (2, 4, 0), (3.0, 2.0, 0))
+
+    assert sum(1 for _ in scene.faces_iter()) == 1
+    assert scene._mesh.face_is_live(fid)
+
+
 def test_an_arc_that_does_not_cross_a_face_leaves_face_count_unchanged():
     scene = Scene()
     fid, _v = _quad(scene)
