@@ -878,6 +878,51 @@ TEST(HalfEdgeMeshTest, DissolveEdge_RejectsMultiSharedEdges) {
     EXPECT_TRUE(m.edge_is_live(shared_edge));
 }
 
+// Whole-branch review Finding 2 (IMPORTANT): two coplanar faces sharing
+// EXACTLY one edge can still merge into a self-touching loop when an extra
+// vertex is present in both loops away from the shared edge. The kernel's
+// only pre-existing guard is "more than one shared edge", which this shape
+// passes cleanly -- Task 1's loop_is_simple guard on split_face has no
+// inverse-operation counterpart until this fix.
+TEST(HalfEdgeMeshTest, DissolveEdge_RejectsAPinchedMergedLoop) {
+    //   A = (v0, v1, v2)              edges: v0-v1, v1-v2, v2-v0
+    //   B = (v1, v0, v3, v2, v4)      edges: v1-v0, v0-v3, v3-v2, v2-v4, v4-v1
+    // A and B share only v0-v1, but vertex v2 appears in BOTH loops at a
+    // position other than the shared edge, so the naive splice produces
+    // merged loop (v0, v3, v2, v4, v1, v2) -- v2 twice, exactly the pinch
+    // measured in the branch review.
+    pluton::HalfEdgeMesh m;
+    auto v0 = m.add_vertex(0, 0, 0);
+    auto v1 = m.add_vertex(1, 0, 0);
+    auto v2 = m.add_vertex(1, 1, 0);
+    auto v3 = m.add_vertex(0, 2, 0);
+    auto v4 = m.add_vertex(2, 2, 0);
+    m.add_halfedge_pair(v0, v1);  // shared edge
+    m.add_halfedge_pair(v1, v2);
+    m.add_halfedge_pair(v2, v0);
+    m.add_halfedge_pair(v0, v3);
+    m.add_halfedge_pair(v3, v2);
+    m.add_halfedge_pair(v2, v4);
+    m.add_halfedge_pair(v4, v1);
+
+    auto f1 = m.add_face_from_loop({v0, v1, v2}, {(int)v0, (int)v1, (int)v2});
+    auto f2 = m.add_face_from_loop(
+        {v1, v0, v3, v2, v4},
+        {(int)v1, (int)v0, (int)v3, (int)v1, (int)v3, (int)v2, (int)v1, (int)v2, (int)v4});
+
+    std::uint32_t shared_edge = m.edge_between(v0, v1);
+    ASSERT_NE(shared_edge, pluton::HalfEdgeMesh::INVALID_ID);
+
+    EXPECT_EQ(m.dissolve_edge(shared_edge), pluton::HalfEdgeMesh::INVALID_ID);
+    // Mesh left unchanged: both faces and the edge remain live, and the
+    // splice used to walk the candidate merged loop must have been undone.
+    EXPECT_TRUE(m.face_is_live(f1));
+    EXPECT_TRUE(m.face_is_live(f2));
+    EXPECT_TRUE(m.edge_is_live(shared_edge));
+    EXPECT_EQ(m.face_loop_vertices(f1).size(), 3u);
+    EXPECT_EQ(m.face_loop_vertices(f2).size(), 5u);
+}
+
 // ---- split_edge -------------------------------------------------------------
 
 namespace {
@@ -1571,9 +1616,13 @@ namespace {
 // pointers, a rewritten loop cache) that a live/dead flag and a face count
 // alone would miss -- a rejection path that mangled the half-edge chain but
 // left the tombstone bits untouched would still pass the checks below it.
+// expected_live_faces defaults to 1 (every pre-existing caller has only the
+// one parent face in the mesh); the fin-theft repro below passes 2, since its
+// mesh also carries an unrelated live face that must survive untouched.
 void expect_rejected_and_untouched(pluton::HalfEdgeMesh& m, std::uint32_t f,
                                    const std::vector<std::uint32_t>& loop_before,
-                                   const std::array<std::uint32_t, 2>& out) {
+                                   const std::array<std::uint32_t, 2>& out,
+                                   std::uint32_t expected_live_faces = 1) {
     EXPECT_EQ(out[0], pluton::HalfEdgeMesh::INVALID_ID);
     EXPECT_EQ(out[1], pluton::HalfEdgeMesh::INVALID_ID);
     EXPECT_TRUE(m.face_is_live(f)) << "a rejected split must not remove the face";
@@ -1583,7 +1632,7 @@ void expect_rejected_and_untouched(pluton::HalfEdgeMesh& m, std::uint32_t f,
     for (auto g = m.next_live_face(0); g != pluton::HalfEdgeMesh::INVALID_ID;
          g = m.next_live_face(g + 1))
         ++live;
-    EXPECT_EQ(live, 1u);
+    EXPECT_EQ(live, expected_live_faces);
 }
 }  // namespace
 
@@ -1763,4 +1812,54 @@ TEST(SplitFace, DissolvingTheChordReturnsTheParentsLoop) {
     const std::uint32_t merged = m.dissolve_edge(m.edge_between(v[0], v[2]));
     ASSERT_NE(merged, pluton::HalfEdgeMesh::INVALID_ID);
     EXPECT_EQ(m.face_loop_vertices(merged).size(), parent_loop.size());
+}
+
+// Whole-branch review Finding 1 (CRITICAL): loop_is_buildable checked that
+// every chain edge exists and is live, but never that the directed
+// half-edge each child loop would CLAIM is unowned. add_face_from_loop does
+// not check either -- it unconditionally overwrites halfedges_[he].face --
+// so a chain edge that is already a live edge of some unrelated face got
+// silently stolen out from under it.
+TEST(SplitFace, RejectsStealingAHalfEdgeFromAnUnrelatedLiveFace) {
+    // Floor quad [v0,v1,v2,v3] on z=0. A 'fin' triangle [v0,vt,v2] stands on
+    // the floor's diagonal (v0,v2), which is NOT one of the floor's four
+    // boundary edges: it is a free chord until the fin's own
+    // add_face_from_loop call auto-creates and claims it. This is exactly
+    // the state two ordinary Line-tool gestures leave behind: close a loop
+    // from v0 up to a point and back to v2 (creating the fin, which
+    // deliberately does not split anything), then draw v0 to v2 and press
+    // Enter -- chain_cuts_face returns the floor and split_face runs.
+    pluton::HalfEdgeMesh m;
+    auto v0 = m.add_vertex(0, 0, 0);
+    auto v1 = m.add_vertex(1, 0, 0);
+    auto v2 = m.add_vertex(1, 1, 0);
+    auto v3 = m.add_vertex(0, 1, 0);
+    auto vt = m.add_vertex(2, 2, 1);
+    m.add_halfedge_pair(v0, v1);
+    m.add_halfedge_pair(v1, v2);
+    m.add_halfedge_pair(v2, v3);
+    m.add_halfedge_pair(v3, v0);
+    const std::uint32_t floor = m.add_face_from_loop(
+        {v0, v1, v2, v3}, {(int)v0, (int)v1, (int)v2, (int)v0, (int)v2, (int)v3});
+
+    // The fin's loop is [v0, vt, v2]; its own add_face_from_loop call
+    // auto-creates (v0,vt), (vt,v2) and (v2,v0) -- the last of which is the
+    // floor's diagonal, previously a non-edge, now a live edge owned by the
+    // fin alone.
+    m.add_halfedge_pair(v0, vt);
+    m.add_halfedge_pair(vt, v2);
+    m.add_halfedge_pair(v2, v0);
+    const std::uint32_t fin = m.add_face_from_loop({v0, vt, v2}, {(int)v0, (int)vt, (int)v2});
+
+    const std::uint32_t diagonal = m.edge_between(v0, v2);
+    ASSERT_NE(diagonal, pluton::HalfEdgeMesh::INVALID_ID);
+    ASSERT_TRUE(m.face_is_live(fin));
+    const auto floor_loop_before = m.face_loop_vertices(floor);
+
+    auto out = m.split_face(floor, {v0, v1, v2}, {(int)v0, (int)v1, (int)v2}, {v2, v3, v0},
+                            {(int)v2, (int)v3, (int)v0});
+
+    expect_rejected_and_untouched(m, floor, floor_loop_before, out, /*expected_live_faces=*/2u);
+    EXPECT_TRUE(m.face_is_live(fin))
+        << "the fin must not be silently detached from its own boundary edge";
 }

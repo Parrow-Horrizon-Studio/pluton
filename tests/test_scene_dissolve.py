@@ -49,6 +49,41 @@ def test_dissolve_edge_returns_none_on_boundary_edge():
     assert scene.dissolve_edge(e) is None
 
 
+def test_dissolve_edge_refuses_a_pinched_merged_loop():
+    """Whole-branch review Finding 2 (IMPORTANT).
+
+    A = (v0, v1, v2); B = (v1, v0, v3, v2, v4). A and B share EXACTLY one
+    edge (v0-v1), so the pre-existing "more than one shared edge" guard does
+    not fire -- but vertex v2 also appears in both loops away from that
+    shared edge, so the naive merge would build the pinched loop
+    (v0, v3, v2, v4, v1, v2) with v2 twice. Scene._merge_corner_uvs is
+    vertex-keyed, so a pinched loop like this would silently give both
+    corners at v2 the same UV, wrong by construction.
+    """
+    scene = Scene()
+    v0 = scene.add_vertex(np.array([0, 0, 0], dtype=np.float32))
+    v1 = scene.add_vertex(np.array([1, 0, 0], dtype=np.float32))
+    v2 = scene.add_vertex(np.array([1, 1, 0], dtype=np.float32))
+    v3 = scene.add_vertex(np.array([0, 2, 0], dtype=np.float32))
+    v4 = scene.add_vertex(np.array([2, 2, 0], dtype=np.float32))
+    scene.add_edge(v0, v1)  # shared edge
+    scene.add_edge(v1, v2)
+    scene.add_edge(v2, v0)
+    scene.add_edge(v0, v3)
+    scene.add_edge(v3, v2)
+    scene.add_edge(v2, v4)
+    scene.add_edge(v4, v1)
+    f1 = scene.add_face_from_loop([v0, v1, v2])
+    f2 = scene.add_face_from_loop([v1, v0, v3, v2, v4])
+    e_shared = scene.edge_between(v0, v1)
+    assert e_shared is not None
+
+    assert scene.dissolve_edge(e_shared) is None
+    assert scene._mesh.face_is_live(f1)
+    assert scene._mesh.face_is_live(f2)
+    assert scene.edge_is_live(e_shared)
+
+
 # ---- faces_are_coplanar wrapper -------------------------------------------
 
 def test_faces_are_coplanar_with_default_tolerances():

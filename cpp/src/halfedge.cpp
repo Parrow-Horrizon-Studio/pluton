@@ -718,6 +718,31 @@ std::uint32_t pluton::HalfEdgeMesh::dissolve_edge(std::uint32_t e_id) {
         } while (walk_cur != walk_start);
     }
 
+    // Refuse a merge that would build a vertex-revisiting (pinched) loop --
+    // e.g. two coplanar faces sharing exactly one edge PLUS an extra vertex
+    // present in both loops elsewhere. The only other guard above is "more
+    // than one shared edge", which this shape passes: it shares exactly one
+    // edge and still produces a loop that touches itself. split_face gained
+    // an equivalent loop_is_simple guard for exactly the same reason -- a
+    // self-touching loop corrupts add_face_from_loop's wiring, and here it
+    // additionally corrupts vertex-keyed UV merging downstream in
+    // Scene._merge_corner_uvs. Must run BEFORE anything is tombstoned; the
+    // splice above only rewrote two `next` pointers to make the loop
+    // walkable, and is undone here on rejection so the mesh comes back
+    // exactly as it was (EraserTool._try_dissolve reads INVALID_ID back as
+    // "cascade instead" and needs both source faces still intact for that).
+    {
+        std::unordered_set<std::uint32_t> seen;
+        seen.reserve(merged_loop.size());
+        for (auto v : merged_loop) {
+            if (!seen.insert(v).second) {
+                halfedges_[A].next = he_a;
+                halfedges_[C].next = he_b;
+                return INVALID_ID;
+            }
+        }
+    }
+
     // Retriangulate the merged loop with a simple fan (works for convex; the
     // merged shape from coplanar dissolves is convex by construction in M3c's
     // Case 2). For now use fan from vertex 0.
@@ -792,12 +817,33 @@ std::array<std::uint32_t, 2> pluton::HalfEdgeMesh::split_face(
 
     // Every loop vertex live, every loop edge present and live. add_face_from_loop
     // throws on both, and it would throw after remove_face had run.
-    auto loop_is_buildable = [this](const std::vector<std::uint32_t>& loop) {
+    //
+    // Beyond that: the directed half-edge each step will CLAIM must be
+    // unowned or already owned by f_id itself. add_face_from_loop
+    // unconditionally overwrites halfedges_[he].face with no ownership check
+    // of its own, so without this a chain edge that happens to already be a
+    // live edge of some OTHER, unrelated face -- e.g. a fin standing on the
+    // parent's own diagonal -- gets silently stolen: split_face would report
+    // success while quietly detaching that face from its own boundary.
+    // Refusal is correct here, not a fallback: the edge would need three
+    // incident faces (the fin plus both new children), and a half-edge mesh
+    // has exactly two slots per edge. A legitimate split's own non-chain
+    // steps are always owned by f_id (they retrace the parent's own directed
+    // loop) and its chain steps are always unowned (a chord freshly drawn
+    // across the face), so this rejects nothing that a real split needs.
+    auto loop_is_buildable = [this, f_id](const std::vector<std::uint32_t>& loop) {
         const std::size_t n = loop.size();
         for (std::size_t i = 0; i < n; ++i) {
-            if (!vertex_is_live(loop[i])) return false;
-            const std::uint32_t e = edge_between(loop[i], loop[(i + 1) % n]);
+            const std::uint32_t v_from = loop[i];
+            const std::uint32_t v_to = loop[(i + 1) % n];
+            if (!vertex_is_live(v_from)) return false;
+            const std::uint32_t e = edge_between(v_from, v_to);
             if (e == INVALID_ID || !edge_is_live(e)) return false;
+            // Same directed-half-edge convention as add_face_from_loop:
+            // he[2*e].origin == min(v_from, v_to).
+            const std::uint32_t he = (v_from < v_to) ? (e * 2) : (e * 2 + 1);
+            const std::uint32_t owner = halfedges_[he].face;
+            if (owner != INVALID_ID && owner != f_id) return false;
         }
         return true;
     };
