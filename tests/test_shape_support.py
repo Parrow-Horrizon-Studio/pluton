@@ -5,7 +5,7 @@ from __future__ import annotations
 import numpy as np
 
 
-def _snap(kind, world, *, face_id=None, vertex_id=None):  # noqa: ANN001
+def _snap(kind, world, *, face_id=None, vertex_id=None):
     from pluton.viewport.snap_engine import SnapResult
 
     return SnapResult(
@@ -40,9 +40,7 @@ def test_resolve_plane_uses_face_for_on_face_snap():
     d = scene.add_vertex(np.array([0.0, 0.0, 2.0], dtype=np.float32))
     fid = scene.add_face_from_loop((a, b, c, d))
 
-    plane = resolve_drawing_plane(
-        _snap(SnapKind.ON_FACE, (0.0, 1.0, 1.0), face_id=fid), scene
-    )
+    plane = resolve_drawing_plane(_snap(SnapKind.ON_FACE, (0.0, 1.0, 1.0), face_id=fid), scene)
     assert abs(abs(float(plane.normal[0])) - 1.0) < 1e-6  # ±X
 
 
@@ -91,9 +89,11 @@ def test_build_open_polyline_creates_edges_no_face():
     scene = Scene()
     stack = CommandStack()
     pts = np.array([[0, 0, 0], [1, 1, 0], [2, 0, 0]], dtype=np.float32)
-    composite = build_open_polyline(scene, pts, name="A")
-    assert composite is not None
+    result = build_open_polyline(scene, pts, name="A")
+    assert result is not None
+    composite, vids = result
     assert composite.children
+    assert len(vids) == 3
     stack.push_executed(composite, scene)
     assert len(list(scene.vertices_iter())) == 3
     assert len(list(scene.edges_iter())) == 2

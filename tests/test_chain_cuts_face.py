@@ -32,7 +32,7 @@ def test_a_chain_with_an_interior_vertex_cuts_the_face():
 def test_a_closing_loop_is_never_a_split():
     """Snapping back onto the first vertex is the face-creation path."""
     s = Scene()
-    fid, v = _quad(s)
+    _fid, v = _quad(s)
     assert chain_cuts_face(s, [v[0], v[1], v[2], v[0]]) is None
 
 
@@ -41,13 +41,13 @@ def test_a_chain_running_along_the_boundary_does_not_cut():
     the interior, so its midpoint sits on the boundary rather than strictly
     inside it. This is the case the midpoint test exists for."""
     s = Scene()
-    fid, v = _quad(s)
+    _fid, v = _quad(s)
     assert chain_cuts_face(s, [v[0], v[1]]) is None
 
 
 def test_a_chain_whose_interior_leaves_the_plane_does_not_cut():
     s = Scene()
-    fid, v = _quad(s)
+    _fid, v = _quad(s)
     off = s.add_vertex(np.array((1.0, 1.0, 5.0), dtype=np.float32))
     s.add_edge(v[0], off)
     s.add_edge(off, v[2])
@@ -69,8 +69,25 @@ def test_a_chain_whose_interior_leaves_the_polygon_does_not_cut():
 
 def test_an_interior_chain_vertex_that_is_on_the_loop_does_not_cut():
     s = Scene()
-    fid, v = _quad(s)
+    _fid, v = _quad(s)
     assert chain_cuts_face(s, [v[0], v[1], v[2]]) is None
+
+
+def test_a_chain_segment_that_crosses_out_of_a_concave_face_does_not_cut():
+    """Both the interior vertex and both segment midpoints can land strictly
+    inside a concave polygon while the straight segment between two of them
+    still exits and re-enters through a boundary edge. Sampling those points
+    alone cannot see that; only a real segment-vs-boundary-edge crossing test
+    can. Reproduces the exact case found on the brief's own L-shape: chain
+    (1,3) -> (0.6,1.8) -> (3,0) crosses out near (1, 1.5)."""
+    s = Scene()
+    pts = [(0, 0, 0), (3, 0, 0), (3, 1, 0), (1, 1, 0), (1, 3, 0), (0, 3, 0)]
+    v = [s.add_vertex(np.array(p, dtype=np.float32)) for p in pts]
+    s.add_face_from_loop(v)
+    interior = s.add_vertex(np.array((0.6, 1.8, 0.0), dtype=np.float32))
+    s.add_edge(v[4], interior)
+    s.add_edge(interior, v[1])
+    assert chain_cuts_face(s, [v[4], interior, v[1]]) is None
 
 
 def test_a_chain_between_two_different_faces_does_not_cut():

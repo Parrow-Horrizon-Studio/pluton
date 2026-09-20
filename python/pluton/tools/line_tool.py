@@ -203,8 +203,18 @@ class LineTool(Tool):
         lands back on the current tip, as a double-click's second click
         normally does) is a no-op, so by the time this fires the gesture
         state is whatever a single Enter press would also see.
+
+        Requires at least one committed segment (>= 2 gesture vertices).
+        Unlike Enter, double-click was previously a no-op inherited from the
+        Tool base class regardless of gesture state, so a double-click with
+        only the seed vertex placed must stay a no-op here too rather than
+        start discarding gestures a plain double-click never used to touch.
         """
-        if self._state != _State.DRAWING or self._composite is None:
+        if (
+            self._state != _State.DRAWING
+            or self._composite is None
+            or len(self._gesture_vertex_ids) < 2
+        ):
             return
         self._finish_open_polyline()
 
@@ -249,7 +259,7 @@ class LineTool(Tool):
             if self._command_stack is not None:
                 self._command_stack.push_executed(self._composite, self._scene)
         else:
-            # Only the start point was placed — nothing to commit; discard.
+            # Only the start point was placed, nothing to commit; discard.
             self._composite.undo(s)
         self._composite = None
         self._reset_gesture()

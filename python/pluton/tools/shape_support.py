@@ -4,6 +4,9 @@
 - build_closed_face / build_open_polyline: turn a ring/polyline of world points
   into one CompositeCommand over AddVertex/AddEdge(/AddFace), reusing existing
   vertices that coincide with a generated point (so undo stays correct).
+  build_open_polyline also hands back the resolved vertex-id chain alongside
+  the composite, since some of those ids may be pre-existing vertices the
+  composite's own children don't reveal.
 - polyline_segments: world points -> (2N, 3) GL_LINES pairs for overlay preview.
 - chain_cuts_face: the single face a drawn chain divides, if any (M7.6a).
 """
@@ -112,8 +115,16 @@ def build_closed_face(scene, world_points, name: str = "Draw Shape", world_trans
 
 def build_open_polyline(scene, world_points, name: str = "Draw Curve", world_transform=None):
     """Open polyline of world points → vertices + connecting edges (no face).
-    Returns the CompositeCommand (already executed), or None if degenerate
-    (fewer than 2 distinct vertices).
+    Returns (CompositeCommand, vertex_ids) with the composite already
+    executed, or None if degenerate (fewer than 2 distinct vertices).
+
+    vertex_ids is the resolved, order-preserving, consecutive-duplicate-free
+    chain of vertex ids the polyline actually touched, in Scene's own
+    coordinate frame -- some of these may be pre-existing vertices the
+    polyline snapped onto rather than ones this call created, so a caller
+    that needs to know which vertices were touched (M7.6a's face-split
+    detection is the first one) cannot reconstruct it from the composite's
+    children alone and gets it handed back here instead.
 
     world_transform: when non-identity, each point is converted from world space
     to the local frame before writing (so geometry lands at the correct position
@@ -137,7 +148,7 @@ def build_open_polyline(scene, world_points, name: str = "Draw Curve", world_tra
         e = AddEdgeCommand(a, b)
         e.do(scene)
         composite.children.append(e)
-    return composite
+    return composite, vids
 
 
 def polyline_segments(points: np.ndarray, closed: bool) -> np.ndarray:
@@ -205,6 +216,45 @@ def _strictly_inside_polygon(poly_2d: np.ndarray, pt: np.ndarray) -> bool:
     return inside
 
 
+def _orientation(o: np.ndarray, a: np.ndarray, b: np.ndarray) -> float:
+    """Signed area of (o, a, b); sign gives turn direction, 0.0 means collinear."""
+    return float((a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0]))
+
+
+def _segments_properly_cross(p1, p2, p3, p4) -> bool:
+    """True iff segment p1-p2 and segment p3-p4 cross at a point interior to
+    both -- a genuine transversal crossing.
+
+    A shared endpoint, a touch along one segment's interior, or a collinear
+    overlap all force at least one of the four orientation products below to
+    be zero or same-signed, so none of those register here -- deliberately:
+    a chain's own ends legitimately touch the boundary loop where they
+    attach to it. Only an actual crossing through a loop edge counts, which
+    is the case a sampled interior vertex and sampled segment midpoints can
+    both miss on a concave loop (see chain_cuts_face's own test suite for
+    the reproduction that motivated this).
+    """
+    d1 = _orientation(p3, p4, p1)
+    d2 = _orientation(p3, p4, p2)
+    d3 = _orientation(p1, p2, p3)
+    d4 = _orientation(p1, p2, p4)
+    return d1 * d2 < 0.0 and d3 * d4 < 0.0
+
+
+def _segment_crosses_loop_boundary(
+    poly_2d: np.ndarray, seg_a: np.ndarray, seg_b: np.ndarray
+) -> bool:
+    """True if the 2D segment (seg_a, seg_b) properly crosses any of the
+    polygon's own boundary edges."""
+    n = len(poly_2d)
+    for i in range(n):
+        edge_a = poly_2d[i]
+        edge_b = poly_2d[(i + 1) % n]
+        if _segments_properly_cross(seg_a, seg_b, edge_a, edge_b):
+            return True
+    return False
+
+
 def _face_is_cut_by_chain(scene, face, chain: list[int], chain_pos: np.ndarray) -> bool:
     """Rule 2 (candidacy) + rule 3 (geometric containment) for one face."""
     loop = face.loop_vertex_ids
@@ -233,8 +283,15 @@ def _face_is_cut_by_chain(scene, face, chain: list[int], chain_pos: np.ndarray) 
             return False
 
     for i in range(len(chain_pos) - 1):
+        seg_a, seg_b = chain_pos[i][[u, v]], chain_pos[i + 1][[u, v]]
         mid = (chain_pos[i] + chain_pos[i + 1]) / 2.0
         if not _strictly_inside_polygon(poly_2d, mid[[u, v]]):
+            return False
+        # The interior-vertex and midpoint samples above are point samples;
+        # a concave loop can dip outside the polygon strictly BETWEEN two
+        # sampled points and back in without either sample seeing it. This
+        # is the check that actually carries the guarantee.
+        if _segment_crosses_loop_boundary(poly_2d, seg_a, seg_b):
             return False
 
     return True
@@ -251,6 +308,15 @@ def chain_cuts_face(scene, chain: Sequence[int]) -> int | None:
 
     O(faces), once per gesture end. Scene has no vertex-to-faces accessor and
     this is not a per-frame path.
+
+    Containment is not just point sampling: every interior chain vertex and
+    every segment midpoint must land strictly inside the candidate's polygon,
+    AND every chain segment must not properly cross any of the polygon's own
+    boundary edges. The segment-crossing check exists because point samples
+    alone can both land inside a concave polygon while the straight segment
+    between them still dips outside and back through a notch (an ordinary
+    L-shaped floor plan is enough to hit this) -- an interior-vertex/midpoint
+    sample cannot see that, but a real segment-vs-edge crossing test can.
     """
     chain = list(chain)
     if len(chain) < 2 or chain[0] == chain[-1] or len(set(chain)) != len(chain):
