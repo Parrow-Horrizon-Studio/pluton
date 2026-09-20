@@ -22,6 +22,11 @@ from pluton.viewport.inference import InferenceState
 from pluton.viewport.scene_renderer import SceneRenderer
 from pluton.viewport.snap_engine import SnapEngine, SnapKind
 
+# M7.6b Task 7: annotation `kind`s that View > Guides hides/shows. Kept in
+# sync with (but not imported from) annotation_painter._GUIDE_KINDS -- that
+# one governs pen choice, this one governs whether a guide is painted at all.
+_GUIDE_KINDS = frozenset({"guide", "guide_point"})
+
 
 class ViewportWidget(QOpenGLWidget):
     """The 3D viewport. Renders scene + active tool overlay; routes mouse events."""
@@ -48,6 +53,10 @@ class ViewportWidget(QOpenGLWidget):
         # time (see _update_gesture_plane_normal / _drawing_plane_normal).
         self._gesture_plane_normal: np.ndarray | None = None
         self._gesture_plane_captured = False
+        # M7.6b Task 7: View > Guides. A filter on which annotation PLANS get
+        # PAINTED, not on which get collected -- hiding a guide must never
+        # renumber anyone's ids. Guides are visible by default (SketchUp).
+        self.show_guides = True
 
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         self.setMouseTracking(True)
@@ -377,6 +386,11 @@ class ViewportWidget(QOpenGLWidget):
         plans = collect_annotation_plans(self.model, self.camera, width, height, units)
         if not plans:
             return
+        # Task 7: show_guides filters what gets PAINTED, not what got
+        # COLLECTED above -- hiding a guide must never change any other
+        # annotation's id, which collecting fewer plans up front would risk.
+        if not self.show_guides:
+            plans = [(plan, dimmed) for plan, dimmed in plans if plan.kind not in _GUIDE_KINDS]
         active_plans = [plan for plan, dimmed in plans if not dimmed]
         dimmed_plans = [plan for plan, dimmed in plans if dimmed]
 

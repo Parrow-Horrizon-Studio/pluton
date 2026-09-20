@@ -162,6 +162,8 @@ ACTIONS: tuple[ActionSpec, ...] = (
     ActionSpec("edit_close_group", "Close Group", "_on_close_group"),
     ActionSpec("edit_paint_selection", "Paint with Active Material", "_on_paint_selection"),
     ActionSpec("edit_label_text", "Edit Text…", "_on_edit_label_text"),
+    # M7.6b Task 7. No icon: menu entry only, like edit_hide/edit_unhide above.
+    ActionSpec("edit_delete_guides", "Delete Guides", "_on_delete_guides"),
     # --- Units --------------------------------------------------------
     ActionSpec(
         "units_metric_m",
@@ -267,6 +269,9 @@ ACTIONS: tuple[ActionSpec, ...] = (
     # M7.5a Task 11. No icon: a menu entry only, like the units toggles above,
     # not a toolbar button.
     ActionSpec("view_color_by_tag", "Color by Tag", "_on_toggle_color_by_tag", checkable=True),
+    # M7.6b Task 7. No icon, same reason. Starts checked (see MainWindow.__init__):
+    # guides are visible by default, matching SketchUp.
+    ActionSpec("view_guides", "Guides", "_on_toggle_guides", checkable=True),
     ActionSpec(
         "view_zoom_extents",
         "Zoom Extents",
@@ -395,6 +400,8 @@ MENUS: tuple[MenuSpec, ...] = (
             "edit_unhide",
             "edit_unhide_all",
             None,
+            "edit_delete_guides",
+            None,
             "edit_clear_context",
         ),
     ),
@@ -445,6 +452,7 @@ MENUS: tuple[MenuSpec, ...] = (
             None,
             "view_xray",
             "view_color_by_tag",
+            "view_guides",
             None,
             "view_zoom_extents",
             None,

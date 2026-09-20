@@ -432,6 +432,11 @@ class MainWindow(QMainWindow):
         }
         self._xray_action = self._actions["view_xray"]
         self._color_by_tag_action = self._actions["view_color_by_tag"]
+        # M7.6b Task 7: guides are visible by default (SketchUp), matching
+        # ViewportWidget.show_guides's own default -- this just reflects that
+        # starting state into the menu's checkmark.
+        self._guides_action = self._actions["view_guides"]
+        self._guides_action.setChecked(True)
 
         # Dynamic View entries: the Properties panel is still a real dock, so
         # it keeps a genuine toggleViewAction. Materials/Tags/Scenes are now
@@ -1000,6 +1005,17 @@ class MainWindow(QMainWindow):
         self._refresh_selection_status()
         self._viewport.update()
 
+    def _on_delete_guides(self) -> None:
+        """Remove every guide in the active context, as one undoable step."""
+        from pluton.commands.annotation_commands import DeleteAnnotationsCommand
+
+        ctx = self._model.active_context
+        ids = [a.id for a in ctx.annotations if a.kind in ("guide", "guide_point")]
+        if not ids:
+            return
+        self._command_stack.execute(DeleteAnnotationsCommand(ids, ctx), self._model)
+        self._viewport.update()
+
     # --- M7.2 selection + view commands ------------------------------------
 
     def _on_select_all(self) -> None:
@@ -1504,6 +1520,11 @@ class MainWindow(QMainWindow):
     def _on_toggle_color_by_tag(self, checked: bool) -> None:
         self._render_style.color_by_tag = bool(checked)
         self._viewport.set_render_style(self._render_style)
+
+    def _on_toggle_guides(self, checked: bool) -> None:
+        """Hide or show every guide without deleting any."""
+        self._viewport.show_guides = bool(checked)
+        self._viewport.update()
 
     # --- Toolbars (M7.2, Task 11) -----------------------------------------
 
