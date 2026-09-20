@@ -21,7 +21,7 @@ from pluton.geometry.ray import (
 from pluton.geometry.ray import (
     closest_points_two_lines as _closest_points_two_lines,
 )
-from pluton.viewport.snap_types import Candidate, SnapKind
+from pluton.viewport.snap_types import AcquiredKind, Candidate, SnapKind
 
 _AXIS_NAMES = {0: "Red", 1: "Green", 2: "Blue"}
 
@@ -185,6 +185,125 @@ def intersection_candidates(px, py, width, height, camera, scene, anchor, pixel_
                         edge_t=float(t),
                     )
                 )
+    return out
+
+
+_PLANE_PARALLEL_EPS = 1e-4
+"""abs(dot(n, d)) above 1 - this means cross(n, d) is too short to normalise."""
+
+
+def _line_candidate(
+    px, py, width, height, camera, origin, direction, kind, label, pixel_tolerance, axis=None
+):
+    """One candidate on the infinite line through `origin` along `direction`.
+
+    The same shape axis_candidates already uses: the point on the line nearest
+    the cursor ray, projected and tested against the pixel tolerance.
+    """
+    ray_origin, ray_dir = camera.ray_from_screen(px, py, width, height)
+    _, _, _c_ray, c_line = _closest_points_two_lines(ray_origin, ray_dir, origin, direction)
+    proj = camera.world_to_screen(c_line, width, height)
+    if proj is None:
+        return None
+    sx, sy, depth = proj
+    d = math.hypot(sx - px, sy - py)
+    if d > pixel_tolerance:
+        return None
+    return Candidate(
+        kind=kind,
+        world_position=np.asarray(c_line, dtype=np.float32),
+        screen_dist=d,
+        depth=depth,
+        label=label,
+        axis=axis,
+    )
+
+
+def directional_candidates(
+    px, py, width, height, camera, anchor, acquired, plane_normal, pixel_tolerance
+):
+    """PARALLEL and PERPENDICULAR against an acquired EDGE, from the anchor.
+
+    Parallel is well defined in 3D: the line through the anchor along the edge.
+    Perpendicular is not, so it resolves inside the drawing plane. When the edge
+    runs along the plane normal the cross product degenerates and NO candidate is
+    offered, rather than a guessed direction.
+    """
+    out = []
+    if acquired is None or acquired.kind != AcquiredKind.EDGE or acquired.direction is None:
+        return out
+    if anchor is None:
+        return out
+
+    origin = np.asarray(anchor, dtype=np.float64).reshape(3)
+    d = np.asarray(acquired.direction, dtype=np.float64).reshape(3)
+
+    cand = _line_candidate(
+        px,
+        py,
+        width,
+        height,
+        camera,
+        origin,
+        d,
+        SnapKind.PARALLEL,
+        "Parallel to Edge",
+        pixel_tolerance,
+    )
+    if cand is not None:
+        out.append(cand)
+
+    if plane_normal is not None:
+        n = np.asarray(plane_normal, dtype=np.float64).reshape(3)
+        ln = float(np.linalg.norm(n))
+        if ln > 0.0:
+            n = n / ln
+            if abs(float(np.dot(n, d))) <= 1.0 - _PLANE_PARALLEL_EPS:
+                perp = np.cross(n, d)
+                perp = perp / float(np.linalg.norm(perp))
+                cand = _line_candidate(
+                    px,
+                    py,
+                    width,
+                    height,
+                    camera,
+                    origin,
+                    perp,
+                    SnapKind.PERPENDICULAR,
+                    "Perpendicular to Edge",
+                    pixel_tolerance,
+                )
+                if cand is not None:
+                    out.append(cand)
+    return out
+
+
+def from_point_candidates(px, py, width, height, camera, acquired, pixel_tolerance):
+    """The three axis lines radiating from an acquired VERTEX.
+
+    Anchored at the acquired point, not at the gesture anchor: the whole purpose
+    is aligning to geometry the line never touches.
+    """
+    out = []
+    if acquired is None or acquired.kind != AcquiredKind.VERTEX:
+        return out
+    origin = np.asarray(acquired.position, dtype=np.float64).reshape(3)
+    for axis_idx, axis_dir in _AXIS_DIRS.items():
+        cand = _line_candidate(
+            px,
+            py,
+            width,
+            height,
+            camera,
+            origin,
+            np.asarray(axis_dir, dtype=np.float64),
+            SnapKind.FROM_POINT,
+            f"From Point on {_AXIS_NAMES[axis_idx]} Axis",
+            pixel_tolerance,
+            axis=axis_idx,
+        )
+        if cand is not None:
+            out.append(cand)
     return out
 
 

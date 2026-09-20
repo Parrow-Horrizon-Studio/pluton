@@ -254,6 +254,8 @@ class ViewportWidget(QOpenGLWidget):
             self.scene,
             anchor=anchor,
             world_transform=wt,
+            acquired=self.inference.acquired,
+            plane_normal=self._drawing_plane_normal(),
         )
         # Acquisition reads the snap the engine just produced; the scene lives
         # here, not in InferenceState, so the edge direction is resolved here.
@@ -282,6 +284,22 @@ class ViewportWidget(QOpenGLWidget):
     def last_snap(self):
         """The most recent SnapResult, for key handlers that have no event."""
         return self._last_snap
+
+    def _drawing_plane_normal(self):
+        """The active gesture's plane normal, for Perpendicular. None if unknown.
+
+        Reads the PREVIOUS frame's snap, which is correct and deliberate: the
+        plane was established when the gesture's anchor was placed, and
+        re-deriving it from the current frame would make the perpendicular
+        direction chase the cursor.
+        """
+        snap = self._last_snap
+        if snap is None or snap.face_id is None or self.scene is None:
+            return None
+        try:
+            return np.asarray(self.scene.face_normal(snap.face_id), dtype=np.float64)
+        except (KeyError, ValueError):
+            return None
 
     def _paint_annotations(self, overlay=None) -> None:
         """M7d: draw every visible context's annotations in screen space, on

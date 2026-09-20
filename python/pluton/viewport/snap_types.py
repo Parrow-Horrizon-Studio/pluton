@@ -32,6 +32,9 @@ class SnapKind(IntEnum):
     ON_FACE = 5
     ON_EDGE = 6
     INTERSECTION = 7
+    PARALLEL = 8
+    PERPENDICULAR = 9
+    FROM_POINT = 10
 
 
 @dataclass(frozen=True, slots=True)

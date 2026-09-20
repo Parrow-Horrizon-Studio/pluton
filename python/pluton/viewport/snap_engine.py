@@ -21,6 +21,9 @@ from pluton.viewport.snap_candidates import (
     axis_candidates as _axis_candidates,
 )
 from pluton.viewport.snap_candidates import (
+    directional_candidates as _directional_candidates,
+)
+from pluton.viewport.snap_candidates import (
     edge_point_candidates as _edge_point_candidates,
 )
 from pluton.viewport.snap_candidates import (
@@ -28,6 +31,9 @@ from pluton.viewport.snap_candidates import (
 )
 from pluton.viewport.snap_candidates import (
     face_candidate as _face_candidate,
+)
+from pluton.viewport.snap_candidates import (
+    from_point_candidates as _from_point_candidates,
 )
 from pluton.viewport.snap_candidates import (
     intersection_candidates as _intersection_candidates,
@@ -61,7 +67,14 @@ MARKER_COLOR_BY_KIND = {
     SnapKind.ENDPOINT: (0.15, 0.75, 0.26),  # green
     SnapKind.ON_EDGE: (0.89, 0.23, 0.18),  # red
     SnapKind.ON_FACE: (0.18, 0.42, 0.88),  # blue
-    SnapKind.INTERSECTION: (0.82, 0.23, 0.82),  # magenta
+    # Magenta moved to the directional pair below (spec D14): SketchUp reserves
+    # magenta for Parallel and Perpendicular, so keeping it on INTERSECTION would
+    # collide with those once M7.6b's directional inferences ship. Deliberate
+    # change to shipped behaviour, not a bug fix.
+    SnapKind.INTERSECTION: (0.10, 0.10, 0.12),  # near-black, SketchUp's convention
+    SnapKind.PARALLEL: (0.82, 0.23, 0.82),  # magenta
+    SnapKind.PERPENDICULAR: (0.82, 0.23, 0.82),  # magenta
+    # FROM_POINT gets no entry: it renders in the colour of the axis it rides.
 }
 
 # Precedence, highest first. Decoupled from the enum's integer values.
@@ -77,6 +90,9 @@ _PRECEDENCE = [
     SnapKind.INTERSECTION,
     SnapKind.MIDPOINT,
     SnapKind.ON_EDGE,
+    SnapKind.PERPENDICULAR,
+    SnapKind.PARALLEL,
+    SnapKind.FROM_POINT,
     SnapKind.AXIS_LOCK,
     SnapKind.ON_FACE,
     SnapKind.GRID,
@@ -92,7 +108,15 @@ class SnapEngine:
     GRID_SIZE_WORLD = 1.0
 
     def snap(
-        self, cursor_screen, viewport_size, camera, scene, anchor=None, world_transform=None
+        self,
+        cursor_screen,
+        viewport_size,
+        camera,
+        scene,
+        anchor=None,
+        world_transform=None,
+        acquired=None,
+        plane_normal=None,
     ) -> SnapResult:
         """Return the chosen 3D snap for the given cursor.
 
@@ -103,6 +127,11 @@ class SnapEngine:
         None or identity → behaviour is identical to the no-arg call (regression-safe).
         When non-identity, vertex/edge positions are transformed to world before screen
         projection, and the camera ray is transformed to local space for face picking.
+
+        acquired: an optional Acquired (see inference.py) driving PARALLEL,
+        PERPENDICULAR and FROM_POINT. None reproduces the pre-M7.6b path exactly.
+        plane_normal: the active drawing plane's normal, used to resolve
+        PERPENDICULAR inside that plane. Ignored when acquired is not an edge.
         """
         if cursor_screen is None or camera is None or scene is None:
             return self._none()
@@ -163,6 +192,21 @@ class SnapEngine:
             )
             cands += _intersection_candidates(
                 px, py, width, height, camera, scene, a, self.PIXEL_TOLERANCE
+            )
+        if acquired is not None:
+            cands += _directional_candidates(
+                px,
+                py,
+                width,
+                height,
+                camera,
+                anchor,
+                acquired,
+                plane_normal,
+                self.PIXEL_TOLERANCE,
+            )
+            cands += _from_point_candidates(
+                px, py, width, height, camera, acquired, self.PIXEL_TOLERANCE
             )
 
         within = [c for c in cands if c.screen_dist <= self.PIXEL_TOLERANCE]
