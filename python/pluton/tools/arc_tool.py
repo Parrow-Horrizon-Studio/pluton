@@ -13,13 +13,17 @@ import numpy as np
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QKeyEvent, QMouseEvent
 
+from pluton.commands.scene_commands import SplitFaceCommand
 from pluton.geometry import arc_2pt, semicircle_snap
+from pluton.geometry.transforms import is_identity_transform
 from pluton.tools.shape_support import (
     build_open_polyline,
+    chain_cuts_face,
     polyline_segments,
     resolve_drawing_plane,
 )
 from pluton.tools.tool import Tool, ToolContext, ToolOverlay
+from pluton.viewport.picking import world_to_local_point
 from pluton.viewport.snap_engine import MARKER_COLOR_BY_KIND
 
 _NEUTRAL_COLOR = (0.85, 0.85, 0.85)
@@ -127,11 +131,7 @@ class ArcTool(Tool):
         if len(pts_uv) < 2:
             return
         world = self._plane.to_world(pts_uv).astype(np.float32)
-        composite = build_open_polyline(
-            s, world, name="Draw Arc", world_transform=self._world_transform()
-        )
-        if composite is not None and self._command_stack is not None:
-            self._command_stack.push_executed(composite, self._scene)
+        self._commit_polyline(world)
         self._reset_gesture()
 
     def on_key_press(self, event: QKeyEvent) -> None:
@@ -212,14 +212,56 @@ class ArcTool(Tool):
                 self._reset_gesture()
                 return False
             world = self._plane.to_world(pts_uv).astype(np.float32)
-            composite = build_open_polyline(
-                self._scene, world, name="Draw Arc", world_transform=self._world_transform()
-            )
-            if composite is not None and self._command_stack is not None:
-                self._command_stack.push_executed(composite, self._scene)
+            self._commit_polyline(world)
             self._reset_gesture()
             return True
         return False
+
+    def _commit_polyline(self, world: np.ndarray) -> None:
+        """Commit the drawn arc as one undo step, and split whichever single
+        face (if any) the chord crosses -- the same face-split check
+        LineTool applies on its own gesture-end paths (M7.6a task 5). The
+        split command is appended to the SAME composite build_open_polyline
+        already executed, before push_executed, so one undo reverses both
+        the arc and the split.
+        """
+        s = self._scene
+        composite = build_open_polyline(
+            s, world, name="Draw Arc", world_transform=self._world_transform()
+        )
+        if composite is None:
+            return
+        chain = self._resolve_chain(s, world)
+        if chain is not None:
+            fid = chain_cuts_face(s, chain)
+            if fid is not None:
+                split_cmd = SplitFaceCommand(fid, chain)
+                split_cmd.do(s)
+                composite.children.append(split_cmd)
+        if self._command_stack is not None:
+            self._command_stack.push_executed(composite, self._scene)
+
+    def _resolve_chain(self, scene, world_points: np.ndarray) -> list[int] | None:
+        """Reconstruct the ordered vertex-id chain build_open_polyline just
+        resolved for `world_points`, so chain_cuts_face can be asked about
+        it. build_open_polyline doesn't hand the resolved ids back out, and
+        Scene stores positions in the active context's LOCAL frame, so this
+        repeats its own world->local conversion before looking each point up
+        by position -- the same conversion, not a second one, done here only
+        because the composite alone doesn't expose it.
+        """
+        wt = self._world_transform()
+        points = world_points
+        if not is_identity_transform(wt):
+            points = [world_to_local_point(p, wt) for p in points]
+        chain: list[int] = []
+        for p in points:
+            vid = scene.find_vertex_near(np.asarray(p, dtype=np.float32), scene._DIST_TOL)
+            if vid is None:
+                return None
+            if not chain or chain[-1] != vid:
+                chain.append(vid)
+        return chain
 
     def _reset_gesture(self) -> None:
         self._state = _State.IDLE

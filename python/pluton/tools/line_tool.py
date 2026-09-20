@@ -22,7 +22,9 @@ from pluton.commands.scene_commands import (
     AddFaceCommand,
     AddVertexCommand,
     SplitEdgeCommand,
+    SplitFaceCommand,
 )
+from pluton.tools.shape_support import chain_cuts_face
 from pluton.tools.tool import Tool, ToolContext, ToolOverlay
 from pluton.viewport.picking import world_to_local_point
 from pluton.viewport.snap_engine import MARKER_COLOR_BY_KIND
@@ -193,6 +195,19 @@ class LineTool(Tool):
         self._preview_tip = target_world.copy()
         return True
 
+    def on_mouse_double_click(self, event: QMouseEvent, snap) -> None:
+        """Third gesture-end path, alongside Enter (below) and loop closure
+        (branch 1 of on_mouse_press). Finishes the open polyline exactly like
+        Enter, including the face-split check: Qt's own double-click delivers
+        a press first, and that press either extends the polyline or (when it
+        lands back on the current tip, as a double-click's second click
+        normally does) is a no-op, so by the time this fires the gesture
+        state is whatever a single Enter press would also see.
+        """
+        if self._state != _State.DRAWING or self._composite is None:
+            return
+        self._finish_open_polyline()
+
     def on_key_press(self, event: QKeyEvent) -> None:
         key = event.key()
         s = self._scene  # type: ignore[assignment]
@@ -200,23 +215,43 @@ class LineTool(Tool):
         if key in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
             # Finish the open polyline: register it as one undoable unit and end
             # the gesture (ready to start a new line). Matches SketchUp/CAD Enter.
+            # This is a split path (see module note above on_mouse_double_click);
+            # loop closure (branch 1 of on_mouse_press) and Escape (below) never
+            # split.
             if self._state == _State.DRAWING and self._composite is not None:
-                if len(self._gesture_vertex_ids) >= 2 and self._composite.children:
-                    if self._command_stack is not None:
-                        self._command_stack.push_executed(self._composite, self._scene)
-                else:
-                    # Only the start point was placed — nothing to commit; discard.
-                    self._composite.undo(s)
-                self._composite = None
-            self._reset_gesture()
+                self._finish_open_polyline()
             return
 
         if key != Qt.Key.Key_Escape:
             return
-        # ESC mid-gesture: roll back the in-progress composite.
+        # ESC mid-gesture: roll back the in-progress composite. Never a split.
         if self._composite is not None:
             self._composite.undo(s)
             self._composite = None
+        self._reset_gesture()
+
+    def _finish_open_polyline(self) -> None:
+        """Shared tail of the Enter and double-click gesture-end paths.
+
+        Registers the open polyline as one undoable unit; if the drawn chain
+        divides exactly one face (chain_cuts_face), the split is executed and
+        appended to this same composite BEFORE push_executed, so undoing the
+        line also undoes the split in a single step (M7.6a task 5).
+        """
+        assert self._composite is not None
+        s = self._scene  # type: ignore[assignment]
+        if len(self._gesture_vertex_ids) >= 2 and self._composite.children:
+            fid = chain_cuts_face(s, self._gesture_vertex_ids)
+            if fid is not None:
+                split_cmd = SplitFaceCommand(fid, self._gesture_vertex_ids)
+                split_cmd.do(s)
+                self._composite.children.append(split_cmd)
+            if self._command_stack is not None:
+                self._command_stack.push_executed(self._composite, self._scene)
+        else:
+            # Only the start point was placed — nothing to commit; discard.
+            self._composite.undo(s)
+        self._composite = None
         self._reset_gesture()
 
     def overlay(self) -> ToolOverlay:
