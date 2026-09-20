@@ -159,3 +159,114 @@ def test_an_active_lock_pins_the_result_to_the_locked_line():
     # A point on the Z axis through the origin has x = y = 0.
     assert abs(float(out.world_position[0])) < 1e-4
     assert abs(float(out.world_position[1])) < 1e-4
+
+
+def _edge_snap(edge_id=3, position=(0.0, 0.0, 0.0)):
+    from pluton.viewport.snap_engine import SnapKind, SnapResult
+
+    return SnapResult(
+        kind=SnapKind.MIDPOINT,
+        world_position=np.array(position, dtype=np.float32),
+        axis=None,
+        vertex_id=None,
+        label="Midpoint",
+        edge_id=edge_id,
+    )
+
+
+def _axis_snap(axis=2, position=(0.0, 0.0, 5.0)):
+    from pluton.viewport.snap_engine import SnapKind, SnapResult
+
+    return SnapResult(
+        kind=SnapKind.AXIS_LOCK,
+        world_position=np.array(position, dtype=np.float32),
+        axis=axis,
+        vertex_id=None,
+        label="on Blue Axis",
+    )
+
+
+def test_toggle_edge_lock_with_nothing_acquired_is_a_no_op():
+    from pluton.viewport.inference import InferenceState
+
+    state = InferenceState(now_ms=_FakeClock())
+    state.toggle_edge_lock()
+
+    assert state.lock is None
+
+
+def test_toggle_edge_lock_locks_to_the_acquired_edge_and_toggles_off():
+    from pluton.viewport.inference import DWELL_MS, InferenceState
+
+    clock = _FakeClock()
+    state = InferenceState(now_ms=clock)
+    direction = (1.0, 0.0, 0.0)
+
+    state.observe(_edge_snap(), (100.0, 100.0), edge_direction=direction)
+    clock.ms += DWELL_MS
+    state.observe(_edge_snap(), (100.0, 100.0), edge_direction=direction)
+    assert state.acquired is not None
+    assert state.acquired.direction is not None
+
+    state.toggle_edge_lock()
+    assert state.lock is not None
+    np.testing.assert_allclose(state.lock.direction, [1.0, 0.0, 0.0])
+
+    state.toggle_edge_lock()
+    assert state.lock is None
+
+
+def test_shift_lock_set_from_an_axis_bearing_snap_and_cleared_on_release():
+    from pluton.viewport.inference import InferenceState
+
+    state = InferenceState(now_ms=_FakeClock())
+
+    state.set_shift_lock(True, _axis_snap(axis=2))
+    assert state.lock is not None
+    assert state.lock.axis == 2
+
+    state.set_shift_lock(False, None)
+    assert state.lock is None
+
+
+def test_an_arrow_armed_axis_lock_survives_a_shift_press_and_release():
+    """Regression for Important 1: a Shift release anywhere in the app (the
+    eventFilter that drives set_shift_lock is installed application-wide)
+    must not discard a lock some other control armed."""
+    from pluton.viewport.inference import InferenceState
+
+    state = InferenceState(now_ms=_FakeClock())
+    state.toggle_axis_lock(0)
+    assert state.lock is not None
+
+    state.set_shift_lock(True, None)
+    state.set_shift_lock(False, None)
+
+    assert state.lock is not None
+    assert state.lock.axis == 0
+
+
+def test_a_shift_lock_with_no_axis_is_not_cleared_by_toggle_edge_lock():
+    """Regression for Minor 2: before the `source` field existed, a Shift
+    lock formed against a snap with no axis (e.g. a midpoint or on-face
+    inference) had `lock.axis is None`, indistinguishable from an edge lock's
+    own `axis is None`, so Down would wrongly toggle it off believing it was
+    toggling an edge lock. Built by hand: InferenceState.set_shift_lock only
+    derives a direction from an axis-bearing snap today, but the two lock
+    kinds must never be confused regardless of how the direction was formed.
+    """
+    from pluton.viewport.inference import InferenceState, Lock
+
+    state = InferenceState(now_ms=_FakeClock())
+    state._lock = Lock(
+        origin=np.zeros(3),
+        direction=np.array([0.0, 1.0, 0.0]),
+        axis=None,
+        label="Some Inference",
+        source="shift",
+    )
+
+    state.toggle_edge_lock()
+
+    assert state.lock is not None
+    assert state.lock.source == "shift"

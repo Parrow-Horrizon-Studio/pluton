@@ -56,6 +56,10 @@ class Lock:
     direction: np.ndarray
     axis: int | None
     label: str
+    # "axis" | "edge" | "shift": which control armed this lock. A lock's origin
+    # decides who is allowed to release it, so toggling one control never gets
+    # mistaken for releasing a lock a different control armed.
+    source: str
 
 
 class InferenceState:
@@ -108,7 +112,7 @@ class InferenceState:
         self._pending_snap = None
 
     def toggle_axis_lock(self, axis: int) -> None:
-        if self._lock is not None and self._lock.axis == axis:
+        if self._lock is not None and self._lock.source == "axis" and self._lock.axis == axis:
             self._lock = None
             return
         origin = self._acquired.position if self._acquired is not None else np.zeros(3)
@@ -117,11 +121,12 @@ class InferenceState:
             direction=_AXIS_DIRS[axis].copy(),
             axis=axis,
             label=f"on {_AXIS_NAMES[axis]} Axis",
+            source="axis",
         )
 
     def toggle_edge_lock(self) -> None:
         """Lock to the acquired edge's direction. A no-op with no acquired edge."""
-        if self._lock is not None and self._lock.axis is None:
+        if self._lock is not None and self._lock.source == "edge":
             self._lock = None
             return
         if self._acquired is None or self._acquired.direction is None:
@@ -131,12 +136,20 @@ class InferenceState:
             direction=self._acquired.direction.astype(np.float64),
             axis=None,
             label="Parallel to Edge",
+            source="edge",
         )
 
     def set_shift_lock(self, held: bool, snap) -> None:
-        """Hold the inference currently showing. Releasing Shift clears it."""
+        """Hold the inference currently showing. Releasing Shift clears it.
+
+        Only a lock this same method armed (`source == "shift"`) is released
+        here: MainWindow.eventFilter is installed application-wide, so any
+        Shift release anywhere -- a panel, a dialog, an unrelated Shift-click --
+        must not discard a lock some other control (an arrow key) armed.
+        """
         if not held:
-            self._lock = None
+            if self._lock is not None and self._lock.source == "shift":
+                self._lock = None
             return
         if self._lock is not None or snap is None:
             return
@@ -148,6 +161,7 @@ class InferenceState:
             direction=direction,
             axis=snap.axis,
             label=snap.label,
+            source="shift",
         )
 
     def release_lock(self) -> None:

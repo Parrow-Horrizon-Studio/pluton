@@ -43,7 +43,7 @@ class ViewportWidget(QOpenGLWidget):
         self._on_event_finished = None
         self._units_provider = None  # M7d — callable () -> pluton.units.Units (or None)
         self._camera_input_callback = None  # M7e — invoked when the user moves the camera
-        self._last_snap = None  # M7.6b — most recent SnapResult, for key handlers with no event
+        self._last_snap = None  # M7.6b: most recent SnapResult, for key handlers with no event
 
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         self.setMouseTracking(True)
