@@ -258,7 +258,12 @@ def _segment_intersection_params(
         return []  # parallel and offset -- never meet
     len_sq = float(d1[0] * d1[0] + d1[1] * d1[1])
     if len_sq < _PARAM_EPS:
-        return []  # p1 == p2 -- degenerate chain segment, nothing to report
+        # |p1 - p2| below ~3.2e-5 (sqrt of this squared-length threshold),
+        # not literally zero -- degenerate/near-degenerate chain segment
+        # where dividing by len_sq below would be unstable. Comfortably
+        # under Scene._DIST_TOL (1e-4), so no real chain segment is this
+        # short; nothing to report.
+        return []
     t_a = float((a[0] - p1[0]) * d1[0] + (a[1] - p1[1]) * d1[1]) / len_sq
     t_b = float((b[0] - p1[0]) * d1[0] + (b[1] - p1[1]) * d1[1]) / len_sq
     lo, hi = (t_a, t_b) if t_a <= t_b else (t_b, t_a)
@@ -362,14 +367,24 @@ def chain_cuts_face(scene, chain: Sequence[int]) -> int | None:
     O(faces), once per gesture end. Scene has no vertex-to-faces accessor and
     this is not a per-frame path.
 
-    Containment is not just point sampling: every interior chain vertex and
-    every segment midpoint must land strictly inside the candidate's polygon,
-    AND every chain segment must not properly cross any of the polygon's own
-    boundary edges. The segment-crossing check exists because point samples
-    alone can both land inside a concave polygon while the straight segment
-    between them still dips outside and back through a notch (an ordinary
-    L-shaped floor plan is enough to hit this) -- an interior-vertex/midpoint
-    sample cannot see that, but a real segment-vs-edge crossing test can.
+    Containment is not just point sampling: every interior chain vertex must
+    land strictly inside the candidate's polygon, AND every chain segment
+    must stay strictly inside it along its whole length, not just at its
+    midpoint. The latter is checked by finding every parameter along the
+    segment where it touches the polygon's boundary at all -- crossing,
+    vertex touch, or collinear overlap alike (see
+    _segment_stays_inside_polygon) -- and testing the midpoint of each
+    resulting sub-interval, because a single midpoint sample can land inside
+    a concave polygon while the segment still dips outside and back through
+    a notch in between (an ordinary L-shaped floor plan is enough to hit
+    this). A PROPER-CROSSING-ONLY test is not enough either, even though it
+    catches that L-shape case: a chain can exit and re-enter exactly through
+    two loop VERTICES rather than through an edge's interior, and a
+    transversal-crossing test cannot register that at all, since each touch
+    alone gives a zero-orientation, tangent-looking result against both
+    edges meeting there. This function used to rely on a crossing-only test
+    and was wrong on exactly that vertex-exit case; the sub-interval test
+    replaced it for that reason and is what carries the guarantee now.
     """
     chain = list(chain)
     if len(chain) < 2 or chain[0] == chain[-1] or len(set(chain)) != len(chain):
