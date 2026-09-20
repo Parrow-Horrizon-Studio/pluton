@@ -318,15 +318,7 @@ class Scene:
     def restore_face(self, f_id: int, ordered_vertex_ids: Sequence[int]) -> None:
         """Restore a previously-removed face with its original ID. Used by undo."""
         loop = tuple(ordered_vertex_ids)
-        xyz = np.empty((len(loop), 3), dtype=np.float32)
-        for i, vid in enumerate(loop):
-            pos = self._mesh.vertex_position(vid)
-            xyz[i] = (pos[0], pos[1], pos[2])
-        projected = _project_loop_to_2d_for_earcut(xyz)
-        ring_ends = np.array([len(loop)], dtype=np.uint32)
-        local_indices = mapbox_earcut.triangulate_float32(projected, ring_ends)
-        local_indices = np.asarray(local_indices, dtype=np.int32).reshape(-1, 3)
-        triangles = [int(loop[i]) for tri in local_indices for i in tri]
+        triangles = self._triangulate_loop(loop)
         self._mesh.restore_face(f_id, list(loop), triangles)
 
     def set_vertex_position(self, v_id: int, position: np.ndarray) -> None:
@@ -502,7 +494,6 @@ class Scene:
             if merged_uv is not None:
                 self.set_face_uvs(merged, merged_uv, side)
 
-        self._render_dirty = True
         return merged
 
     def faces_are_coplanar(self, f1_id: int, f2_id: int) -> bool:
@@ -687,7 +678,6 @@ class Scene:
         )
         if out[0] == self._mesh.INVALID_ID:
             return None
-        self._render_dirty = True
         new_a, new_b = int(out[0]), int(out[1])
         self._transfer_subloop_face_attributes(f_id, new_a, loop, self.face_loop(new_a))
         self._transfer_subloop_face_attributes(f_id, new_b, loop, self.face_loop(new_b))
