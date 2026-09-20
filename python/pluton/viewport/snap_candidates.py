@@ -322,6 +322,126 @@ def from_point_candidates(px, py, width, height, camera, acquired, pixel_toleran
     return out
 
 
+def guide_candidates(px, py, width, height, camera, guides, guide_points, pixel_tolerance):
+    """ON_GUIDE for each infinite guide line, GUIDE_POINT for each guide point.
+
+    `guides` is a sequence of world-space (origin, direction) pairs; a guide
+    is an infinite line, exactly what `_line_candidate` already handles.
+    `guide_points` is a sequence of world-space positions. Both are supplied
+    already in world space by the caller: this module never touches a
+    world_transform itself.
+    """
+    out: list[Candidate] = []
+    for origin, direction in guides:
+        cand = _line_candidate(
+            px,
+            py,
+            width,
+            height,
+            camera,
+            np.asarray(origin, dtype=np.float64),
+            np.asarray(direction, dtype=np.float64),
+            SnapKind.ON_GUIDE,
+            "On Guide",
+            pixel_tolerance,
+        )
+        if cand is not None:
+            out.append(cand)
+    for position in guide_points:
+        world_pos = np.asarray(position, dtype=np.float32)
+        proj = camera.world_to_screen(world_pos, width, height)
+        if proj is None:
+            continue
+        sx, sy, depth = proj
+        d = math.hypot(sx - px, sy - py)
+        if d <= pixel_tolerance:
+            out.append(
+                Candidate(
+                    kind=SnapKind.GUIDE_POINT,
+                    world_position=world_pos,
+                    screen_dist=d,
+                    depth=depth,
+                    label="Guide Point",
+                )
+            )
+    return out
+
+
+def guide_intersection_candidates(
+    px, py, width, height, camera, scene, guides, to_world, pixel_tolerance
+):
+    """INTERSECTION where a guide crosses a scene edge, or another guide.
+
+    Reuses `closest_points_two_lines` and the same skew-rejection
+    `intersection_candidates` already applies. A guide is infinite, so only
+    the scene EDGE's parameter is bound to [0, 1]; the guide side of a
+    guide-versus-edge crossing, and both sides of a guide-versus-guide
+    crossing, carry no such bound.
+
+    `guides` is a sequence of world-space (origin, direction) pairs, already
+    converted by the caller. Scene edges are local, so `to_world` (the same
+    local-to-world callable `snap_engine.snap` builds from the active world
+    transform) is applied to each edge's endpoints before the line math, so
+    both lines being intersected live in the same space.
+    """
+    guides = list(guides)
+    out: list[Candidate] = []
+    for origin, direction in guides:
+        o = np.asarray(origin, dtype=np.float64)
+        d = np.asarray(direction, dtype=np.float64)
+        for e in scene.edges_iter():
+            p1 = np.asarray(to_world(scene.vertex(e.v1_id).position), dtype=np.float64)
+            p2 = np.asarray(to_world(scene.vertex(e.v2_id).position), dtype=np.float64)
+            seg_dir = p2 - p1
+            _, t, c_guide, c_edge = _closest_points_two_lines(o, d, p1, seg_dir)
+            if t < 0.0 or t > 1.0:
+                continue  # the edge is finite; the guide is not
+            if float(np.linalg.norm(c_guide - c_edge)) > _INTERSECTION_EPS:
+                continue  # skew -- no genuine 3D crossing
+            proj = camera.world_to_screen(c_edge, width, height)
+            if proj is None:
+                continue
+            sx, sy, depth = proj
+            dist = math.hypot(sx - px, sy - py)
+            if dist <= pixel_tolerance:
+                out.append(
+                    Candidate(
+                        kind=SnapKind.INTERSECTION,
+                        world_position=np.asarray(c_edge, dtype=np.float32),
+                        screen_dist=dist,
+                        depth=depth,
+                        label="Intersection",
+                        edge_id=e.id,
+                        edge_t=float(t),
+                    )
+                )
+    for i in range(len(guides)):
+        o1 = np.asarray(guides[i][0], dtype=np.float64)
+        d1 = np.asarray(guides[i][1], dtype=np.float64)
+        for j in range(i + 1, len(guides)):
+            o2 = np.asarray(guides[j][0], dtype=np.float64)
+            d2 = np.asarray(guides[j][1], dtype=np.float64)
+            _, _, c1, c2 = _closest_points_two_lines(o1, d1, o2, d2)
+            if float(np.linalg.norm(c1 - c2)) > _INTERSECTION_EPS:
+                continue  # skew -- neither guide bounds the other
+            proj = camera.world_to_screen(c1, width, height)
+            if proj is None:
+                continue
+            sx, sy, depth = proj
+            dist = math.hypot(sx - px, sy - py)
+            if dist <= pixel_tolerance:
+                out.append(
+                    Candidate(
+                        kind=SnapKind.INTERSECTION,
+                        world_position=np.asarray(c1, dtype=np.float32),
+                        screen_dist=dist,
+                        depth=depth,
+                        label="Intersection",
+                    )
+                )
+    return out
+
+
 def face_candidate(ray_origin, ray_dir, scene):
     """On-Face via the C++ ray-mesh pick. Screen distance is 0 (under cursor)."""
     hit = scene.ray_pick_face(ray_origin, ray_dir)

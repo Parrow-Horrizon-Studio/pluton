@@ -36,6 +36,12 @@ from pluton.viewport.snap_candidates import (
     from_point_candidates as _from_point_candidates,
 )
 from pluton.viewport.snap_candidates import (
+    guide_candidates as _guide_candidates,
+)
+from pluton.viewport.snap_candidates import (
+    guide_intersection_candidates as _guide_intersection_candidates,
+)
+from pluton.viewport.snap_candidates import (
     intersection_candidates as _intersection_candidates,
 )
 from pluton.viewport.snap_types import SnapKind, SnapResult
@@ -74,6 +80,10 @@ MARKER_COLOR_BY_KIND = {
     SnapKind.INTERSECTION: (0.10, 0.10, 0.12),  # near-black, SketchUp's convention
     SnapKind.PARALLEL: (0.82, 0.23, 0.82),  # magenta
     SnapKind.PERPENDICULAR: (0.82, 0.23, 0.82),  # magenta
+    # Spec 2.2: both guide inferences share one neutral grey, matching the
+    # guide's own construction-geometry color (draw_plan/viewport_widget).
+    SnapKind.ON_GUIDE: (0.45, 0.45, 0.52),
+    SnapKind.GUIDE_POINT: (0.45, 0.45, 0.52),
     # FROM_POINT gets no entry, and every consumer looks this dict up as
     # MARKER_COLOR_BY_KIND.get(snap.kind, <neutral>), so today it just renders
     # neutral like any other unlisted kind. Colouring it by snap.axis (like
@@ -93,7 +103,9 @@ _PRECEDENCE = [
     SnapKind.ENDPOINT,
     SnapKind.INTERSECTION,
     SnapKind.MIDPOINT,
+    SnapKind.GUIDE_POINT,
     SnapKind.ON_EDGE,
+    SnapKind.ON_GUIDE,
     SnapKind.PERPENDICULAR,
     SnapKind.PARALLEL,
     SnapKind.FROM_POINT,
@@ -121,6 +133,8 @@ class SnapEngine:
         world_transform=None,
         acquired=None,
         plane_normal=None,
+        guides=None,
+        guide_points=None,
     ) -> SnapResult:
         """Return the chosen 3D snap for the given cursor.
 
@@ -136,6 +150,12 @@ class SnapEngine:
         PERPENDICULAR and FROM_POINT. None reproduces the pre-M7.6b path exactly.
         plane_normal: the active drawing plane's normal, used to resolve
         PERPENDICULAR inside that plane. Ignored when acquired is not an edge.
+        guides: an optional sequence of world-space (origin, direction) pairs
+        driving ON_GUIDE, and guide-versus-scene-edge / guide-versus-guide
+        INTERSECTION. guide_points: an optional sequence of world-space
+        positions driving GUIDE_POINT. Both already in world space; the
+        caller (ViewportWidget) is responsible for the local-to-world
+        conversion and for withholding hidden guides entirely.
         """
         if cursor_screen is None or camera is None or scene is None:
             return self._none()
@@ -189,6 +209,12 @@ class SnapEngine:
                 # Surface the snap result in world space.
                 face_cand.world_position = apply_mat(face_cand.world_position, wt)[0]
             cands.append(face_cand)
+        cands += _guide_candidates(
+            px, py, width, height, camera, guides or (), guide_points or (), self.PIXEL_TOLERANCE
+        )
+        cands += _guide_intersection_candidates(
+            px, py, width, height, camera, scene, guides or (), _to_world, self.PIXEL_TOLERANCE
+        )
         if anchor is not None:
             a = np.asarray(anchor, dtype=np.float32)
             cands += _axis_candidates(

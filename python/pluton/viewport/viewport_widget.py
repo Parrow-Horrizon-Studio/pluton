@@ -15,6 +15,7 @@ from PySide6.QtCore import QPoint, Qt, Signal
 from PySide6.QtGui import QMouseEvent, QWheelEvent
 from PySide6.QtOpenGLWidgets import QOpenGLWidget
 
+from pluton.geometry.transforms import apply_mat
 from pluton.tools.select_tool import _HOVER_EDGE_COLOR, SelectTool
 from pluton.units import Units, format_coordinates
 from pluton.viewport.camera import Camera
@@ -261,6 +262,7 @@ class ViewportWidget(QOpenGLWidget):
         anchor = active.anchor_or_none if active is not None else None
         self._update_gesture_plane_normal(anchor)
         wt = self.model.active_world_transform if self.model is not None else None
+        guides, guide_points = self._gather_guides()
         snap = self.snap_engine.snap(
             (float(pos.x()), float(pos.y())),
             (self.width(), self.height()),
@@ -270,6 +272,8 @@ class ViewportWidget(QOpenGLWidget):
             world_transform=wt,
             acquired=self.inference.acquired,
             plane_normal=self._drawing_plane_normal(),
+            guides=guides,
+            guide_points=guide_points,
         )
         # Acquisition reads the snap the engine just produced; the scene lives
         # here, not in InferenceState, so the edge direction is resolved here.
@@ -279,6 +283,39 @@ class ViewportWidget(QOpenGLWidget):
         )
         self._last_snap = result
         return result
+
+    def _gather_guides(self):
+        """World-space (lines, points) from the active context's guides.
+
+        Task 8: a guide is an inference target, so the snap engine needs it
+        in the same world space as everything else it snaps to, even though
+        `Guide`/`GuidePoint` store context-local coordinates. The origin (a
+        point) goes through the full `active_world_transform`; the direction
+        (a vector) goes through its linear block only, the same split
+        `draw_plan._to_world`/`_vec_to_world` use for painting a guide.
+
+        Returns ([], []) when `show_guides` is False, so a hidden guide never
+        reaches the snap engine -- Task 7 made a hidden guide unpickable on
+        the same reasoning: a hidden thing the user can still act on is a
+        trap. Filters what is gathered rather than mutating
+        `active_context.annotations`, so hiding a guide never touches any
+        annotation's id.
+        """
+        if not self.show_guides or self.model is None:
+            return [], []
+        wt = self.model.active_world_transform
+        linear = wt[:3, :3]
+        lines = []
+        points = []
+        for ann in self.model.active_context.annotations:
+            kind = getattr(ann, "kind", None)
+            if kind == "guide":
+                origin = apply_mat(ann.origin, wt)[0]
+                direction = linear @ np.asarray(ann.direction, dtype=np.float64)
+                lines.append((origin, direction))
+            elif kind == "guide_point":
+                points.append(apply_mat(ann.position, wt)[0])
+        return lines, points
 
     def _edge_direction(self, snap):
         """World-space unit direction of the snapped edge, or None."""

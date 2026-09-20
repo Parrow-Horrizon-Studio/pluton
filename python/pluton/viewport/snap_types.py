@@ -35,6 +35,8 @@ class SnapKind(IntEnum):
     PARALLEL = 8
     PERPENDICULAR = 9
     FROM_POINT = 10
+    ON_GUIDE = 11
+    GUIDE_POINT = 12
 
 
 @dataclass(frozen=True, slots=True)

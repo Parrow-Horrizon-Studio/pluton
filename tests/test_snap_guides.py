@@ -1,0 +1,212 @@
+"""Unit tests for guide inference (M7.6b Task 8): ON_GUIDE, GUIDE_POINT, and
+guide-crossing INTERSECTION, plus the show_guides gate that keeps a hidden
+guide from snapping at all.
+
+Follows tests/test_snap_engine.py's helper style: _camera_at_default,
+_screen_of, imports inside the test bodies.
+"""
+
+from __future__ import annotations
+
+import math
+
+import numpy as np
+
+
+def _camera_at_default():
+    from pluton.viewport.camera import Camera
+
+    cam = Camera()
+    cam.aspect = 1280.0 / 800.0
+    return cam
+
+
+def _screen_of(cam, world):
+    """Pixel coords that project onto `world` in a 1280x800 viewport."""
+    sx, sy, _ = cam.world_to_screen(np.asarray(world, dtype=np.float32), 1280, 800)
+    return (sx, sy)
+
+
+def test_cursor_on_guide_line_yields_on_guide():
+    from pluton.scene import Scene
+    from pluton.viewport.snap_engine import SnapEngine, SnapKind
+
+    eng = SnapEngine()
+    scene = Scene()
+    cam = _camera_at_default()
+    origin = np.array([0.0, 0.0, 0.0], dtype=np.float64)
+    direction = np.array([0.0, 0.0, 1.0], dtype=np.float64)
+    cursor = _screen_of(cam, [0.0, 0.0, 5.0])  # a point on the guide, off the origin
+    res = eng.snap(
+        cursor, (1280, 800), cam, scene, guides=[(origin, direction)], guide_points=[]
+    )
+    assert res.kind == SnapKind.ON_GUIDE
+    np.testing.assert_allclose(res.world_position, [0.0, 0.0, 5.0], atol=1e-3)
+
+
+def test_cursor_on_guide_point_yields_guide_point():
+    from pluton.scene import Scene
+    from pluton.viewport.snap_engine import SnapEngine, SnapKind
+
+    eng = SnapEngine()
+    scene = Scene()
+    cam = _camera_at_default()
+    point = [3.0, 1.0, 2.0]
+    cursor = _screen_of(cam, point)
+    res = eng.snap(cursor, (1280, 800), cam, scene, guides=[], guide_points=[point])
+    assert res.kind == SnapKind.GUIDE_POINT
+    np.testing.assert_allclose(res.world_position, point, atol=1e-3)
+
+
+def test_guide_point_beats_on_edge_but_loses_to_endpoint():
+    from pluton.scene import Scene
+    from pluton.viewport.snap_engine import SnapEngine, SnapKind
+
+    cam = _camera_at_default()
+
+    # A guide point sitting ON a live edge, away from its midpoint and ends,
+    # so ON_EDGE and GUIDE_POINT both land in tolerance at the same pixel.
+    eng = SnapEngine()
+    scene = Scene()
+    v0 = scene.add_vertex(np.array([0.0, 0.0, 2.0], dtype=np.float32))
+    v1 = scene.add_vertex(np.array([4.0, 0.0, 2.0], dtype=np.float32))
+    scene.add_edge(v0, v1)
+    guide_point = [1.0, 0.0, 2.0]  # on the segment, not the midpoint (2,0,2)
+    cursor = _screen_of(cam, guide_point)
+    res = eng.snap(cursor, (1280, 800), cam, scene, guides=[], guide_points=[guide_point])
+    assert res.kind == SnapKind.GUIDE_POINT
+
+    # The same point, now also a real vertex: ENDPOINT must win.
+    eng2 = SnapEngine()
+    scene2 = Scene()
+    vid = scene2.add_vertex(np.array(guide_point, dtype=np.float32))
+    res2 = eng2.snap(cursor, (1280, 800), cam, scene2, guides=[], guide_points=[guide_point])
+    assert res2.kind == SnapKind.ENDPOINT
+    assert res2.vertex_id == vid
+
+
+def test_guide_crossing_scene_edge_yields_intersection_not_on_guide():
+    from pluton.scene import Scene
+    from pluton.viewport.snap_engine import SnapEngine, SnapKind
+
+    cam = _camera_at_default()
+    origin = np.array([0.0, 0.0, 0.0], dtype=np.float64)
+    direction = np.array([1.0, 0.0, 0.0], dtype=np.float64)  # the guide is the X axis
+
+    # A segment that genuinely crosses the guide within its own bounds.
+    eng = SnapEngine()
+    scene = Scene()
+    va = scene.add_vertex(np.array([2.0, -1.0, 0.0], dtype=np.float32))
+    vb = scene.add_vertex(np.array([2.0, 1.0, 0.0], dtype=np.float32))
+    eid = scene.add_edge(va, vb)
+    crossing = [2.0, 0.0, 0.0]
+    cursor = _screen_of(cam, crossing)
+    res = eng.snap(
+        cursor, (1280, 800), cam, scene, guides=[(origin, direction)], guide_points=[]
+    )
+    assert res.kind == SnapKind.INTERSECTION
+    assert res.edge_id == eid
+    assert abs(res.edge_t - 0.5) < 1e-3
+    np.testing.assert_allclose(res.world_position, crossing, atol=1e-3)
+
+    # A segment whose INFINITE line crosses the guide at the same screen
+    # point, but only outside its own [0, 1] span: the edge's own bound must
+    # still be enforced for a guide crossing, so this must NOT be reported
+    # as an intersection -- the cursor is on the (unobstructed) guide only.
+    eng2 = SnapEngine()
+    scene2 = Scene()
+    va2 = scene2.add_vertex(np.array([2.0, 3.0, 0.0], dtype=np.float32))
+    vb2 = scene2.add_vertex(np.array([2.0, 5.0, 0.0], dtype=np.float32))
+    scene2.add_edge(va2, vb2)
+    res2 = eng2.snap(
+        cursor, (1280, 800), cam, scene2, guides=[(origin, direction)], guide_points=[]
+    )
+    assert res2.kind == SnapKind.ON_GUIDE
+
+
+def test_two_guides_crossing_yields_intersection():
+    from pluton.scene import Scene
+    from pluton.viewport.snap_engine import SnapEngine, SnapKind
+
+    eng = SnapEngine()
+    scene = Scene()
+    cam = _camera_at_default()
+    guide_a = (np.array([0.0, 0.0, 0.0], dtype=np.float64), np.array([1.0, 0.0, 0.0], dtype=np.float64))
+    guide_b = (np.array([2.0, -5.0, 0.0], dtype=np.float64), np.array([0.0, 1.0, 0.0], dtype=np.float64))
+    crossing = [2.0, 0.0, 0.0]
+    cursor = _screen_of(cam, crossing)
+    res = eng.snap(cursor, (1280, 800), cam, scene, guides=[guide_a, guide_b], guide_points=[])
+    assert res.kind == SnapKind.INTERSECTION
+    np.testing.assert_allclose(res.world_position, crossing, atol=1e-3)
+
+
+def test_hidden_guides_never_reach_the_snap_engine(qtbot):
+    """Task 7 made a hidden guide unpickable; a hidden guide that still snaps
+    is the same trap with nothing on screen to explain the cursor jump."""
+    from pluton.model.annotation import Guide, GuidePoint
+    from pluton.model.model import Model
+    from pluton.viewport.viewport_widget import ViewportWidget
+
+    model = Model()
+    model.active_context.annotations.append(Guide(1, (0.0, 0.0, 0.0), (1.0, 0.0, 0.0)))
+    model.active_context.annotations.append(GuidePoint(2, (3.0, 0.0, 0.0)))
+
+    widget = ViewportWidget(model=model)
+    qtbot.addWidget(widget)
+
+    widget.show_guides = False
+    lines, points = widget._gather_guides()
+    assert lines == []
+    assert points == []
+
+    widget.show_guides = True
+    lines, points = widget._gather_guides()
+    assert len(lines) == 1
+    assert len(points) == 1
+
+    # And driven all the way through the engine: with guides hidden, no
+    # ON_GUIDE/GUIDE_POINT candidate is produced even when the cursor sits
+    # right on top of one.
+    from pluton.scene import Scene
+    from pluton.viewport.snap_engine import SnapEngine, SnapKind
+
+    cam = _camera_at_default()
+    cursor = _screen_of(cam, [3.0, 0.0, 0.0])
+    widget.show_guides = False
+    hidden_lines, hidden_points = widget._gather_guides()
+    res = SnapEngine().snap(
+        cursor, (1280, 800), cam, Scene(), guides=hidden_lines, guide_points=hidden_points
+    )
+    assert res.kind not in (SnapKind.ON_GUIDE, SnapKind.GUIDE_POINT)
+
+
+def test_gather_guides_transforms_correctly_in_a_rotated_translated_context(qtbot):
+    """The Task 7 cautionary tale: mixed local/world math cancels exactly at
+    the model root, so a rotated + translated active context is the only
+    setup that can catch a wrong conversion. Directions transform by the
+    linear block only; points (the origin) transform by the full matrix."""
+    from pluton.geometry.transforms import mat_rotate, mat_translate
+    from pluton.model.annotation import Guide
+    from pluton.model.model import Model
+    from pluton.viewport.viewport_widget import ViewportWidget
+
+    model = Model()
+    grp_def = model.new_definition("Grp", is_group=True)
+    grp_def.annotations.append(Guide(1, (1.0, 0.0, 0.0), (1.0, 0.0, 0.0)))
+
+    # 90 degree rotation about Z, then a translation of +5 on X.
+    wt = mat_translate([5.0, 0.0, 0.0]) @ mat_rotate([0, 0, 0], [0, 0, 1], math.radians(90))
+    grp_inst = model.new_instance(grp_def, wt)
+    model.root.children.append(grp_inst)
+    model.enter(grp_inst)
+
+    widget = ViewportWidget(model=model)
+    qtbot.addWidget(widget)
+
+    lines, points = widget._gather_guides()
+    assert len(lines) == 1
+    origin, direction = lines[0]
+    # Local origin (1,0,0) rotates to (0,1,0), then translates by (5,0,0).
+    np.testing.assert_allclose(origin, [5.0, 1.0, 0.0], atol=1e-5)
+    # Local direction (1,0,0) rotates to (0,1,0); no translation applied.
+    np.testing.assert_allclose(direction, [0.0, 1.0, 0.0], atol=1e-5)
