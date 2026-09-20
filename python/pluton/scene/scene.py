@@ -437,13 +437,14 @@ class Scene:
         is boundary / dead / would create a degenerate result.
 
         The merged face's sidecars follow an agree-or-drop rule (M7.6a,
-        revising M7.5c's D4a): for each of the four face-keyed sidecars, on
-        each side, the merged face keeps a value only when BOTH parents
-        carried the identical one. Absence counts as a value, so a painted
-        face merged with an unpainted one comes out unpainted rather than
-        spreading paint onto geometry the user never painted. This is what
-        makes a split-then-erase round trip lossless when the two halves
-        still agree with each other.
+        revising M7.5c's D4a): for each of the three kinds of face-keyed
+        sidecar (material, placement, stored UVs), on each side, the merged
+        face keeps a value only when BOTH parents carried the identical one.
+        Absence counts as a value, so a painted face merged with an
+        unpainted one comes out unpainted rather than spreading paint onto
+        geometry the user never painted. This is what makes a
+        split-then-erase round trip lossless when the two halves still
+        agree with each other.
         """
         try:
             f1, f2 = self.edge_faces(edge_id)
@@ -473,6 +474,20 @@ class Scene:
         merged = int(result)
         merged_loop = self.face_loop(merged)
 
+        # Below, disagreement is handled by simply not writing anything --
+        # never by an explicit clear. That is only safe because `merged` is
+        # always a BRAND NEW id: face ids are never reused (`D5`, docs/
+        # 2026-09-15-M7.5c-uv-storage-design.md -- an orphan sidecar entry
+        # on a dead face can never be misattributed to a later face for the
+        # same reason), so a fresh id starts with no entry in any of the six
+        # sidecar dicts, and "don't write" already means "unpainted /
+        # identity placement / no stored UVs". This is the inverse use of
+        # that same fact: D5 relies on it to justify never CLEANING UP a
+        # dead face's entries; this relies on it to justify never CLEARING
+        # a new face's. If face ids ever became recyclable, both would need
+        # revisiting -- this method would need an explicit clear on
+        # disagreement to avoid inheriting a stale entry from whatever face
+        # last held this id.
         for side in (Side.FRONT, Side.BACK):
             m1, m2 = materials[side]
             if m1 == m2:

@@ -253,6 +253,24 @@ class DissolveEdgeCommand(Command):
           captured vertex pair. Boundary / dead / unresolvable edges make the
           command a clean no-op (do + undo both return early), keeping the
           undo stack consistent.
+
+          Id-preserving redo (M7.6a fix round 1): `Scene.dissolve_edge` has
+          no id-preserving variant of its own, so a redo's dissolve mints a
+          FRESH merged-face id every time. Undo, below, always restores the
+          two parents to their ORIGINAL ids regardless of how many times
+          do() has run, so a stale captured id would desync from the live
+          mesh the moment a second dissolve chains onto the first inside one
+          CompositeCommand (an ordinary "split a face twice, then
+          drag-erase both seams" gesture) and a redo happens in between:
+          the second command's undo would call remove_face on an id the
+          first command's undo/restore cycle never touches, which is
+          already dead. On any run after the first successful one, the
+          freshly minted face is immediately removed and the merged face is
+          restored to `self._merged_face_id` from the first run instead --
+          the same contract `SplitEdgeCommand` and `SplitFaceCommand` give
+          their own created ids. Restoring at that original id also revives
+          whatever sidecars (material/placement/UVs) the first run's merge
+          computed, still sitting under that id, with no recomputation.
     undo(): removes the merged face, then restores the dissolved edge and BOTH
             source faces to their ORIGINAL ids via restore_edge / restore_face
             (id-preserving — NOT add_face_from_loop). This is required so that,
@@ -270,6 +288,7 @@ class DissolveEdgeCommand(Command):
         self._f1_id: int | None = None
         self._f2_id: int | None = None
         self._merged_face_id: int | None = None
+        self._captured_merged_loop: tuple[int, ...] | None = None
         self._was_noop: bool = False
 
     def do(self, scene) -> None:
@@ -315,7 +334,19 @@ class DissolveEdgeCommand(Command):
             self._was_noop = True
             return
         self._was_noop = False
-        self._merged_face_id = result
+
+        if self._captured_merged_loop is None:
+            # First successful dissolve: this id and loop become the
+            # contract every later run (redo) preserves.
+            self._merged_face_id = result
+            self._captured_merged_loop = tuple(scene.face(result).loop_vertex_ids)
+        else:
+            # Redo: `result` is a freshly minted id (see the class
+            # docstring). Discard it immediately and restore the merged
+            # face at its first-run id instead, so the id this command
+            # exposes never changes across a redo.
+            scene.remove_face(result)
+            scene.restore_face(self._merged_face_id, self._captured_merged_loop)
 
     def undo(self, scene) -> None:
         if self._was_noop:
