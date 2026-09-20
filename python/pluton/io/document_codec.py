@@ -14,7 +14,7 @@ from typing import NamedTuple
 import numpy as np
 
 from pluton.io.errors import PlutonFormatError
-from pluton.model.annotation import Dimension, Label
+from pluton.model.annotation import Dimension, Guide, GuidePoint, Label
 from pluton.model.definition import Definition
 from pluton.model.instance import Instance
 from pluton.model.material import MaterialLibrary
@@ -177,8 +177,13 @@ def geometry_from_dict(scene: Scene, data: dict) -> None:
     _apply_face_uvs(data.get("face_uvs_back", {}), Side.BACK)
 
 
-def annotation_to_dict(ann: Dimension | Label) -> dict:
-    """Serialize a Dimension or Label, discriminated by `ann.kind`."""
+def annotation_to_dict(ann: Dimension | Label | Guide | GuidePoint) -> dict:
+    """Serialize an annotation, discriminated by `ann.kind`.
+
+    Dispatch is explicit on every kind. The previous shape fell through to
+    'label' for anything that was not a dimension, which would have silently
+    written a Guide out as a malformed label.
+    """
     if ann.kind == "dimension":
         return {
             "kind": "dimension",
@@ -187,19 +192,31 @@ def annotation_to_dict(ann: Dimension | Label) -> dict:
             "p2": list(ann.p2),
             "offset": list(ann.offset),
         }
-    return {
-        "kind": "label",
-        "id": ann.id,
-        "anchor": list(ann.anchor),
-        "text_pos": list(ann.text_pos),
-        "text": ann.text,
-    }
+    if ann.kind == "label":
+        return {
+            "kind": "label",
+            "id": ann.id,
+            "anchor": list(ann.anchor),
+            "text_pos": list(ann.text_pos),
+            "text": ann.text,
+        }
+    if ann.kind == "guide":
+        return {
+            "kind": "guide",
+            "id": ann.id,
+            "origin": list(ann.origin),
+            "direction": list(ann.direction),
+        }
+    if ann.kind == "guide_point":
+        return {"kind": "guide_point", "id": ann.id, "position": list(ann.position)}
+    raise PlutonFormatError(f"annotation has unknown kind: {ann.kind!r}")
 
 
-def annotation_from_dict(record: dict) -> Dimension | Label:
-    """Rebuild the Dimension or Label produced by `annotation_to_dict`.
+def annotation_from_dict(record: dict) -> Dimension | Label | Guide | GuidePoint:
+    """Rebuild the annotation produced by `annotation_to_dict`.
 
-    Raises PlutonFormatError if 'kind' is missing or unrecognized.
+    Raises PlutonFormatError if 'kind' is missing or unrecognized. A v8 file
+    read by an older build therefore fails loudly rather than dropping guides.
     """
     kind = record.get("kind")
     if kind == "dimension":
@@ -210,6 +227,10 @@ def annotation_from_dict(record: dict) -> Dimension | Label:
         return Label(
             record["id"], tuple(record["anchor"]), tuple(record["text_pos"]), record["text"]
         )
+    if kind == "guide":
+        return Guide(record["id"], tuple(record["origin"]), tuple(record["direction"]))
+    if kind == "guide_point":
+        return GuidePoint(record["id"], tuple(record["position"]))
     raise PlutonFormatError(f"annotation has unknown kind: {kind!r}")
 
 

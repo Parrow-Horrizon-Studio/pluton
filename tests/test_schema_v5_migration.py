@@ -57,11 +57,11 @@ def test_unpainted_backs_are_not_written():
 
 
 def test_schema_version_is_five():
-    # M7.5c bumped SCHEMA_VERSION to 7 (stored per-corner UVs); this pin
+    # M7.6b bumped SCHEMA_VERSION to 8 (construction guides); this pin
     # necessarily tracks whatever is current, same as every prior bump.
     from pluton.io.pluton_file import SCHEMA_VERSION
 
-    assert SCHEMA_VERSION == 7
+    assert SCHEMA_VERSION == 8
 
 
 def test_a_v4_geometry_payload_is_unchanged_except_for_the_new_key():

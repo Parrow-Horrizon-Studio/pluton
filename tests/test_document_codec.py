@@ -284,3 +284,36 @@ def test_document_from_dict_without_scenes_or_style_uses_defaults():
     loaded = document_from_dict(data)
     assert loaded.model.views.views() == []
     assert loaded.style == RenderStyle()   # RenderStyle default (SHADED, xray False)
+
+
+def test_guide_round_trips_through_the_codec():
+    from pluton.io.document_codec import annotation_from_dict, annotation_to_dict
+    from pluton.model.annotation import Guide
+
+    g = Guide(3, (1.0, 2.0, 3.0), (0.0, 1.0, 0.0))
+    back = annotation_from_dict(annotation_to_dict(g))
+    assert isinstance(back, Guide)
+    assert back.id == 3
+    assert back.origin == (1.0, 2.0, 3.0)
+    assert back.direction == (0.0, 1.0, 0.0)
+
+
+def test_guide_point_round_trips_through_the_codec():
+    from pluton.io.document_codec import annotation_from_dict, annotation_to_dict
+    from pluton.model.annotation import GuidePoint
+
+    gp = GuidePoint(4, (5.0, 6.0, 7.0))
+    back = annotation_from_dict(annotation_to_dict(gp))
+    assert isinstance(back, GuidePoint)
+    assert back.id == 4
+    assert back.position == (5.0, 6.0, 7.0)
+
+
+def test_an_unknown_annotation_kind_still_raises():
+    import pytest
+
+    from pluton.io.document_codec import annotation_from_dict
+    from pluton.io.errors import PlutonFormatError
+
+    with pytest.raises(PlutonFormatError):
+        annotation_from_dict({"kind": "sprocket", "id": 1})

@@ -9,6 +9,7 @@ document's units.
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 
 Point = tuple[float, float, float]
@@ -55,3 +56,41 @@ class Label:
         self.anchor = _pt(self.anchor)
         self.text_pos = _pt(self.text_pos)
         self.text = str(self.text)
+
+
+@dataclass
+class Guide:
+    """An infinite construction line: a point on it and a unit direction.
+
+    Construction geometry, not model geometry: guides are inference targets and
+    never contribute faces or edges. They live in Definition.annotations so they
+    inherit context-local placement, persistence, picking, selection and undo
+    from the rail Dimension and Label already ride.
+    """
+
+    id: int
+    origin: Point
+    direction: Point
+    kind: str = "guide"
+
+    def __post_init__(self) -> None:
+        self.id = int(self.id)
+        self.origin = _pt(self.origin)
+        d = _pt(self.direction)
+        length = math.sqrt(d[0] * d[0] + d[1] * d[1] + d[2] * d[2])
+        if length < 1e-12:
+            raise ValueError("Guide.direction must be non-zero")
+        self.direction = (d[0] / length, d[1] / length, d[2] / length)
+
+
+@dataclass
+class GuidePoint:
+    """A construction point with no geometry attached."""
+
+    id: int
+    position: Point
+    kind: str = "guide_point"
+
+    def __post_init__(self) -> None:
+        self.id = int(self.id)
+        self.position = _pt(self.position)

@@ -156,3 +156,31 @@ def test_annotation_from_dict_raises_on_unrecognized_kind():
     }
     with pytest.raises(PlutonFormatError):
         annotation_from_dict(record)
+
+
+def test_guides_survive_a_round_trip():
+    """M7.6b: Guide and GuidePoint ride the same annotations rail as Dimension
+    and Label, so they must round-trip the same way."""
+    from pluton.model.annotation import Guide, GuidePoint
+
+    model = Model()
+    ctx = model.active_context
+    ctx.annotations.append(Guide(model.new_annotation_id(), (1.0, 0.0, 0.0), (0.0, 0.0, 2.0)))
+    ctx.annotations.append(GuidePoint(model.new_annotation_id(), (4.0, 5.0, 6.0)))
+
+    restored, _cam, _units, _style = _roundtrip(model, Camera(), DocumentSettings())
+    kinds = sorted(a.kind for a in restored.active_context.annotations)
+    assert kinds == ["guide", "guide_point"]
+    guide = next(a for a in restored.active_context.annotations if a.kind == "guide")
+    assert guide.direction == (0.0, 0.0, 1.0), "direction must be normalised on load"
+
+
+def test_a_document_without_guides_still_loads():
+    """The schema bump to 8 must not break reading a document with no guides
+    in it, i.e. everything written before this task."""
+    model = Model()
+    model.active_context.annotations.append(
+        Dimension(model.new_annotation_id(), (0.0, 0.0, 0.0), (1.0, 0.0, 0.0), (0.0, 0.5, 0.0))
+    )
+    restored, _cam, _units, _style = _roundtrip(model, Camera(), DocumentSettings())
+    assert [a.kind for a in restored.active_context.annotations] == ["dimension"]

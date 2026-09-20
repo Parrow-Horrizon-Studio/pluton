@@ -19,7 +19,7 @@ from pluton.io.document_codec import (
 )
 from pluton.io.errors import PlutonFormatError, PlutonVersionError
 
-SCHEMA_VERSION = 7  # M7.5c: stored per-corner UVs
+SCHEMA_VERSION = 8  # M7.6b: construction guides (Guide, GuidePoint)
 _MANIFEST = "manifest.json"
 _DOCUMENT = "document.json"
 _TEXTURES_DIR = "textures/"

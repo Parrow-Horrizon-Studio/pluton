@@ -40,7 +40,7 @@ def _square(scene, z=0.0):
 def test_the_schema_version_is_current():
     # Tracks whatever SCHEMA_VERSION currently is, same as every prior bump;
     # not pinned to a specific number.
-    assert SCHEMA_VERSION == 7
+    assert SCHEMA_VERSION == 8
 
 
 def test_placement_round_trips_per_side():

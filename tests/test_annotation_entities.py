@@ -43,3 +43,29 @@ def test_annotations_are_stored_per_context():
     assert len(root.annotations) == 1
     assert len(grp.annotations) == 1
     assert root.annotations[0].id != grp.annotations[0].id
+
+
+def test_guide_normalises_its_direction():
+    from pluton.model.annotation import Guide
+
+    g = Guide(1, (0.0, 0.0, 0.0), (0.0, 0.0, 5.0))
+    assert g.kind == "guide"
+    assert abs(g.direction[2] - 1.0) < 1e-9
+    assert abs(g.direction[0]) < 1e-9
+
+
+def test_guide_rejects_a_zero_direction():
+    import pytest
+
+    from pluton.model.annotation import Guide
+
+    with pytest.raises(ValueError):
+        Guide(1, (0.0, 0.0, 0.0), (0.0, 0.0, 0.0))
+
+
+def test_guide_point_coerces_to_floats():
+    from pluton.model.annotation import GuidePoint
+
+    gp = GuidePoint(2, (1, 2, 3))
+    assert gp.kind == "guide_point"
+    assert gp.position == (1.0, 2.0, 3.0)
