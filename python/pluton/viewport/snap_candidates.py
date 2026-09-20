@@ -4,13 +4,14 @@ Each function turns geometry plus a cursor ray into zero or more `Candidate`s.
 No engine state, no acquisition, no locking: those live in `snap_engine.py` and
 `inference.py` respectively. Split out of `snap_engine.py` in M7.6b so the file
 that gained six new generators did not also own the selection policy.
+
+`Candidate` and `SnapKind` come from `snap_types.py`, not `snap_engine.py`: this
+module and `snap_engine` share that vocabulary without importing each other.
 """
 
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass
-from typing import TYPE_CHECKING
 
 import numpy as np
 
@@ -20,12 +21,7 @@ from pluton.geometry.ray import (
 from pluton.geometry.ray import (
     closest_points_two_lines as _closest_points_two_lines,
 )
-
-if TYPE_CHECKING:
-    # snap_engine imports this module, so a runtime top-level import of SnapKind
-    # here would deadlock on the circular import. Each function below imports it
-    # locally instead; this guarded import only serves the `Candidate.kind` annotation.
-    from pluton.viewport.snap_engine import SnapKind
+from pluton.viewport.snap_types import Candidate, SnapKind
 
 _AXIS_NAMES = {0: "Red", 1: "Green", 2: "Blue"}
 
@@ -37,25 +33,7 @@ _AXIS_DIRS = {
 }
 
 
-@dataclass
-class Candidate:
-    """One in-tolerance snap candidate, before precedence selection."""
-
-    kind: SnapKind
-    world_position: np.ndarray
-    screen_dist: float
-    depth: float
-    label: str
-    vertex_id: int | None = None
-    edge_id: int | None = None
-    face_id: int | None = None
-    axis: int | None = None
-    edge_t: float | None = None
-
-
 def endpoint_candidates(px, py, width, height, camera, scene, to_world, pixel_tolerance):
-    from pluton.viewport.snap_engine import SnapKind
-
     out: list[Candidate] = []
     for v in scene.vertices_iter():
         world_pos = to_world(v.position)
@@ -104,8 +82,6 @@ def edge_point_candidates(
     ray_origin_local / ray_dir_local: the camera ray in local space (for
     finding the closest point on local-space segments).
     """
-    from pluton.viewport.snap_engine import SnapKind
-
     if ray_origin_local is None:
         ray_origin_local = ray_origin
     if ray_dir_local is None:
@@ -157,8 +133,6 @@ def edge_point_candidates(
 
 
 def axis_candidates(px, py, width, height, camera, anchor, ray_origin, ray_dir, pixel_tolerance):
-    from pluton.viewport.snap_engine import SnapKind
-
     out: list[Candidate] = []
     for axis_idx, axis_dir in _AXIS_DIRS.items():
         # Point on the infinite axis line (through anchor) nearest the cursor ray.
@@ -183,8 +157,6 @@ def axis_candidates(px, py, width, height, camera, anchor, ray_origin, ray_dir, 
 
 
 def intersection_candidates(px, py, width, height, camera, scene, anchor, pixel_tolerance):
-    from pluton.viewport.snap_engine import SnapKind
-
     out: list[Candidate] = []
     for _axis_idx, axis_dir in _AXIS_DIRS.items():
         for e in scene.edges_iter():
@@ -218,8 +190,6 @@ def intersection_candidates(px, py, width, height, camera, scene, anchor, pixel_
 
 def face_candidate(ray_origin, ray_dir, scene):
     """On-Face via the C++ ray-mesh pick. Screen distance is 0 (under cursor)."""
-    from pluton.viewport.snap_engine import SnapKind
-
     hit = scene.ray_pick_face(ray_origin, ray_dir)
     if hit is None:
         return None

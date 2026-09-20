@@ -7,9 +7,6 @@ numeric value of `SnapKind` — higher wins.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from enum import IntEnum
-
 import numpy as np
 
 from pluton.geometry.ray import (
@@ -35,43 +32,24 @@ from pluton.viewport.snap_candidates import (
 from pluton.viewport.snap_candidates import (
     intersection_candidates as _intersection_candidates,
 )
+from pluton.viewport.snap_types import SnapKind, SnapResult
 
-# `_closest_point_on_segment_to_ray` and `_closest_points_two_lines` are no longer
-# called from this module directly (their call sites moved to snap_candidates.py
-# with the generators that used them); they are kept importable from here (and
-# listed below so lint does not treat them as unused) because existing code,
-# including tests/test_snap_engine.py, imports them from this module by name.
+# `SnapKind` and `SnapResult` move to `snap_types.py` in M7.6b (so `snap_engine`
+# and `snap_candidates` can share the vocabulary without importing each other)
+# but are re-exported here unchanged: every existing importer across
+# `python/pluton/tools/`, `python/pluton/viewport/` and `tests/` keeps working
+# with no edit. `_closest_point_on_segment_to_ray` and `_closest_points_two_lines`
+# are no longer called from this module directly (their call sites moved to
+# snap_candidates.py with the generators that used them); they are kept
+# importable from here because existing code, including
+# tests/test_snap_engine.py, imports them from this module by name. Both are
+# listed below so lint does not treat them as unused re-exports.
 __all__ = [
+    "SnapKind",
+    "SnapResult",
     "_closest_point_on_segment_to_ray",
     "_closest_points_two_lines",
 ]
-
-
-class SnapKind(IntEnum):
-    """Snap kinds, ordered by precedence (higher wins on a tie)."""
-
-    NONE = 0
-    GRID = 1
-    AXIS_LOCK = 2
-    MIDPOINT = 3
-    ENDPOINT = 4
-    ON_FACE = 5
-    ON_EDGE = 6
-    INTERSECTION = 7
-
-
-@dataclass(frozen=True, slots=True)
-class SnapResult:
-    """The chosen snap for one cursor position."""
-
-    kind: SnapKind
-    world_position: np.ndarray
-    axis: int | None  # 0=X (red), 1=Y (green), 2=Z (blue); only AXIS_LOCK
-    vertex_id: int | None  # only ENDPOINT
-    label: str
-    edge_id: int | None = None  # MIDPOINT / ON_EDGE / INTERSECTION
-    face_id: int | None = None  # ON_FACE
-    edge_t: float | None = None  # parameter along edge_id (drives split_edge)
 
 
 # Snap-marker colors, keyed by kind. Shared by tools (overlay color); the
