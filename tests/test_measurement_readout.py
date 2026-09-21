@@ -12,7 +12,7 @@ from __future__ import annotations
 import types
 
 import numpy as np
-from pluton.annotations.draw_plan import CHAR_W_PX, plan_cursor_readout
+from pluton.annotations.draw_plan import CHAR_W_PX, FONT_PX, plan_cursor_readout
 from pluton.commands.command_stack import CommandStack
 from pluton.scene.scene import Scene
 from pluton.selection import Selection
@@ -130,3 +130,18 @@ def test_cursor_readout_stays_inside_viewport_near_right_edge():
         assert draw.align == "left"
         assert draw.x >= 0.0
         assert draw.x + text_w <= width
+
+
+def test_cursor_readout_stays_inside_viewport_near_top_edge():
+    width, height = 800.0, 600.0
+    text = "3.500 m"
+    cursor_px = (400.0, 5.0)
+    plan = plan_cursor_readout(text, cursor_px, width, height)
+
+    assert plan.annotation_id == -1  # sentinel: never a real, pickable annotation
+    text_h = FONT_PX
+    assert plan.texts, "expected a text draw for the readout"
+    for draw in plan.texts:
+        assert draw.align == "left"
+        assert draw.y - text_h >= 0.0
+        assert draw.y <= height
