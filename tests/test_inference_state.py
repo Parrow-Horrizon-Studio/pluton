@@ -502,3 +502,26 @@ def test_main_window_drops_the_acquisition_on_enter_and_exit(qtbot):
     win._on_active_context_changed()
 
     assert win._viewport.inference.acquired is None
+
+
+def test_every_snap_kind_is_classified_as_point_like_or_line_like():
+    """The classification `_direction_of` leans on has to stay exhaustive.
+
+    Its docstring says a kind added later must be classified rather than
+    silently defaulting to unlockable. Nothing enforced that, which is how
+    PARALLEL, PERPENDICULAR and ON_GUIDE stayed unlockable for a milestone;
+    this makes the claim true.
+    """
+    from pluton.viewport.inference import _POINT_LIKE_KINDS
+    from pluton.viewport.snap_engine import SnapKind
+
+    line_kinds = {
+        SnapKind.AXIS_LOCK,
+        SnapKind.FROM_POINT,
+        SnapKind.PARALLEL,
+        SnapKind.PERPENDICULAR,
+        SnapKind.ON_GUIDE,
+    }
+    classified = set(_POINT_LIKE_KINDS) | line_kinds
+    assert classified == set(SnapKind), f"unclassified: {set(SnapKind) - classified}"
+    assert not (set(_POINT_LIKE_KINDS) & line_kinds)
