@@ -201,18 +201,32 @@ class MoveTool(Tool):
     def anchor_or_none(self) -> np.ndarray | None:
         return self._grab.copy() if (self._dragging and self._grab is not None) else None
 
+    def _move_distance_text(self) -> str | None:
+        """The live drag distance, formatted, or None while not dragging.
+
+        Reused by both status_text (prefixed prose) and measurement_text
+        (the bare value)."""
+        if not self._dragging:
+            return None
+        dist = float(np.linalg.norm(self._delta))
+        if self._units_provider is not None:
+            from pluton.units import format_length
+
+            return format_length(dist, self._units_provider())
+        return f"{dist:.3f}"
+
     @property
     def status_text(self) -> str | None:
         if self._selection is None or self._selection.is_empty():
             return "Select geometry first"
-        if self._dragging:
-            dist = float(np.linalg.norm(self._delta))
-            if self._units_provider is not None:
-                from pluton.units import format_length
-
-                return f"Move {format_length(dist, self._units_provider())}"
-            return f"Move {dist:.3f}"
+        distance_text = self._move_distance_text()
+        if distance_text is not None:
+            return f"Move {distance_text}"
         return "Move: pick a grab point"
+
+    @property
+    def measurement_text(self) -> str | None:
+        return self._move_distance_text()
 
     # ---- internal ----
 

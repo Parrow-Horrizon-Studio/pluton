@@ -59,6 +59,7 @@ class LineTool(Tool):
     def __init__(self) -> None:
         self._scene = None
         self._model = None
+        self._units_provider = None
         self._state = _State.IDLE
         self._gesture_vertex_ids: list[int] = []
         self._preview_tip: np.ndarray | None = None
@@ -73,6 +74,7 @@ class LineTool(Tool):
         self._scene = ctx.scene  # type: ignore[assignment]
         self._command_stack = ctx.command_stack
         self._model = ctx.model
+        self._units_provider = ctx.units_provider
         self._reset_gesture()
 
     def _world_transform(self):
@@ -325,6 +327,26 @@ class LineTool(Tool):
         return apply_mat(anchor.astype(np.float64).reshape(1, 3), np.asarray(wt, dtype=np.float64))[
             0
         ]
+
+    def _gesture_length(self) -> float | None:
+        """Distance from the last placed vertex to the live preview tip, or
+        None with no in-progress segment. Reused by measurement_text -- the
+        same value apply_typed_value's committed segment length replaces."""
+        anchor = self.anchor_or_none
+        if anchor is None or self._preview_tip is None:
+            return None
+        return float(np.linalg.norm(np.asarray(self._preview_tip, np.float64) - anchor))
+
+    @property
+    def measurement_text(self) -> str | None:
+        length = self._gesture_length()
+        if length is None:
+            return None
+        if self._units_provider is not None:
+            from pluton.units import format_length
+
+            return format_length(length, self._units_provider())
+        return f"{length:.3f}"
 
     # ---- internal -------------------------------------------------------
     def _vertex_for_snap(self, snap, scene):

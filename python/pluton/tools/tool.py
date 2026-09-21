@@ -180,3 +180,15 @@ class Tool(ABC):
         current extrusion depth during DRAGGING.
         """
         return None
+
+    @property
+    def measurement_text(self) -> str | None:
+        """The numeric value for the Measurements box and the cursor readout.
+
+        Deliberately distinct from `status_text`, which is prose for the prompt
+        area. This is a bare value safe to drop into a small box beside the
+        cursor: lengths through `pluton.units.format_length`, angles as
+        "12 deg" matching rotate_tool.py:266, two-axis values joined with " x ".
+        Default None means the tool contributes no readout.
+        """
+        return None

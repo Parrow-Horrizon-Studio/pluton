@@ -57,6 +57,7 @@ class ArcTool(Tool):
         self._scene = None
         self._command_stack = None
         self._model = None
+        self._units_provider = None
         self._state = _State.IDLE
         self._plane = None
         self._start: np.ndarray | None = None  # world
@@ -70,6 +71,7 @@ class ArcTool(Tool):
         self._scene = ctx.scene  # type: ignore[assignment]
         self._command_stack = ctx.command_stack
         self._model = ctx.model
+        self._units_provider = ctx.units_provider
         self._reset_gesture()
 
     def _world_transform(self):
@@ -176,6 +178,25 @@ class ArcTool(Tool):
         if self._state == _State.PLACING_BULGE:
             return "Drag the bulge"
         return None
+
+    @property
+    def measurement_text(self) -> str | None:
+        """The live chord length while placing the end point.
+
+        Reuses the same norm(cursor_uv) apply_typed_value's PLACING_END
+        branch already computes to turn a typed length into the chord.
+        PLACING_BULGE has no equivalent already-tracked scalar (the bulge
+        preview only ever produces a 2D point, never a live sagitta
+        magnitude), so it reports nothing rather than invent one.
+        """
+        if self._state != _State.PLACING_END or self._cursor_uv is None:
+            return None
+        length = float(np.linalg.norm(np.asarray(self._cursor_uv, np.float64)))
+        if self._units_provider is not None:
+            from pluton.units import format_length
+
+            return format_length(length, self._units_provider())
+        return f"{length:.3f}"
 
     def apply_typed_value(self, text, units) -> bool:
         from pluton.units import parse_length

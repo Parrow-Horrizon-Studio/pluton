@@ -304,14 +304,28 @@ class ScaleTool(Tool):
     def anchor_or_none(self) -> np.ndarray | None:
         return None
 
+    def _factor_text(self) -> str | None:
+        """The live per-axis scale factors, formatted, or None with no
+        active grip. Reused by both status_text (prefixed prose) and
+        measurement_text (the bare value -- factors are dimensionless
+        ratios, not lengths, so format_length does not apply here)."""
+        if self._active is None:
+            return None
+        f = self._factor_vec
+        return f"({f[0]:.2f}, {f[1]:.2f}, {f[2]:.2f})"
+
     @property
     def status_text(self) -> str | None:
         if self._selection is None or self._selection.is_empty():
             return "Select geometry first"
-        if self._active is not None:
-            f = self._factor_vec
-            return f"Scale ({f[0]:.2f}, {f[1]:.2f}, {f[2]:.2f})"
+        factor_text = self._factor_text()
+        if factor_text is not None:
+            return f"Scale {factor_text}"
         return "Scale: drag a handle"
+
+    @property
+    def measurement_text(self) -> str | None:
+        return self._factor_text()
 
     # ---- factor math (pure; unit-tested) ----
     def _factors(self, grip, anchor, cursor, extent, uniform):

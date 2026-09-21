@@ -264,12 +264,20 @@ class TapeMeasureTool(Tool):
             return self._drag_press_point.astype(np.float32).copy()
         return self._a.copy() if self._a is not None else None
 
-    @property
-    def status_text(self):
+    def _live_delta(self) -> np.ndarray | None:
+        """Vector from the first point to the live end point, or None with
+        no first point yet or no live end. Reused by both status_text and
+        measurement_text so they never disagree on the underlying distance."""
         end = self._b if self._b is not None else self._cursor
         if self._a is None or end is None:
+            return None
+        return np.asarray(end, np.float32) - self._a
+
+    @property
+    def status_text(self):
+        delta = self._live_delta()
+        if delta is None:
             return "Tape Measure: pick the first point"
-        delta = np.asarray(end, np.float32) - self._a
         dist = float(np.linalg.norm(delta))
         if self._units_provider is not None:
             from pluton.units import format_length
@@ -280,6 +288,18 @@ class TapeMeasureTool(Tool):
             dz = format_length(abs(float(delta[2])), self._units_provider())
             return f"Distance {d}   Δ({dx}, {dy}, {dz})"
         return f"Distance {dist:.3f}"
+
+    @property
+    def measurement_text(self) -> str | None:
+        delta = self._live_delta()
+        if delta is None:
+            return None
+        dist = float(np.linalg.norm(delta))
+        if self._units_provider is not None:
+            from pluton.units import format_length
+
+            return format_length(dist, self._units_provider())
+        return f"{dist:.3f}"
 
     # ---- guide / guide-point creation -----------------------------------
 

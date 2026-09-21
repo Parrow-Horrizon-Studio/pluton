@@ -45,6 +45,11 @@ _SPAN_SCALE = 1.0e4  # the half-window scales as _SPAN_SCALE * max(h, camera.far
 # constant had for guides close to the eye. The 2D viewport clip is still what
 # actually decides where the drawn segment ends -- this only has to be generous
 # enough that the near-plane-clipped span reaches every point that clip needs to see.
+_READOUT_PAD_PX = 6.0  # safety margin kept between the cursor readout's box and
+# the viewport edge, on top of the box's own width/height -- plan_cursor_readout
+# flips sides once the box (plus this margin) would cross an edge, rather than
+# once it would land exactly on one.
+_READOUT_OFFSET_PX = (14.0, -14.0)  # right and above the cursor, out of its way
 _GUIDE_HIT_CHUNK_PX = 24.0  # a guide's pick area is chunked into boxes this long
 # along the drawn segment, not one box for the whole span. A dimension's line is
 # bounded by the geometry it measures, so one bounding box is tight; a guide's
@@ -389,3 +394,39 @@ def _plan_guide_point(point, world_transform, camera, width, height):
     draw.segments_px.append((x - r, y + r, x + r, y - r))
     draw.hit_boxes.append(_segment_box(draw.segments_px[0]))
     return draw
+
+
+def plan_cursor_readout(text, cursor_px, width, height):
+    """A one-line value box beside the cursor, kept inside the viewport.
+
+    Laid out here rather than painted ad hoc so the recording-stub painter the
+    annotation tests already use covers it headless, and so the readout obeys
+    the same single-source-of-truth rule as every other annotation.
+
+    Placed `_READOUT_OFFSET_PX` right and above the cursor by default, flipped
+    to the left when the box would cross the right edge, and flipped below the
+    cursor when it would cross the top edge -- a fixed offset alone runs off
+    screen whenever the cursor nears those edges.
+
+    Returns an `AnnotationDraw` with `annotation_id=-1`, a sentinel meaning
+    "not a real annotation": this plan must never be handed to
+    `pick_annotation` or added to the list `collect_annotation_plans` builds,
+    and no picker may ever try to select it. -1 is safe as a sentinel because
+    every real annotation id is non-negative.
+    """
+    cx, cy = float(cursor_px[0]), float(cursor_px[1])
+    dx, dy = _READOUT_OFFSET_PX
+    text_w = max(len(text), 1) * CHAR_W_PX
+    text_h = FONT_PX
+
+    x0 = cx + dx
+    if x0 + text_w + _READOUT_PAD_PX > width:
+        x0 = cx - dx - text_w
+
+    baseline_y = cy + dy
+    if baseline_y - text_h - _READOUT_PAD_PX < 0:
+        baseline_y = cy - dy + text_h
+
+    plan = AnnotationDraw(annotation_id=-1, kind="cursor_readout")
+    plan.texts.append(TextDraw(text=text, x=x0, y=baseline_y, align="left"))
+    return plan

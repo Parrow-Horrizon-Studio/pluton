@@ -85,15 +85,29 @@ class PushPullTool(Tool):
     def anchor_or_none(self) -> np.ndarray | None:
         return None  # Push/Pull doesn't drive axis-lock.
 
+    def _depth_text(self) -> str | None:
+        """The live extrusion depth, formatted, or None while not dragging.
+
+        Reused by both status_text (prefixed prose) and measurement_text
+        (the bare value)."""
+        if self._state != _State.DRAGGING:
+            return None
+        if self._units_provider is not None:
+            from pluton.units import format_length
+
+            return format_length(self._current_depth, self._units_provider())
+        return f"{self._current_depth:.3f}"
+
     @property
     def status_text(self) -> str | None:
-        if self._state == _State.DRAGGING:
-            if self._units_provider is not None:
-                from pluton.units import format_length
+        depth_text = self._depth_text()
+        if depth_text is None:
+            return None
+        return f"depth: {depth_text}"
 
-                return f"depth: {format_length(self._current_depth, self._units_provider())}"
-            return f"depth: {self._current_depth:.3f}"
-        return None
+    @property
+    def measurement_text(self) -> str | None:
+        return self._depth_text()
 
     def activate(self, ctx: ToolContext) -> None:
         self._scene = ctx.scene

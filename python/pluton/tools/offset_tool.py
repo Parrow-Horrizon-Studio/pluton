@@ -86,25 +86,44 @@ class OffsetTool(Tool):
     def anchor_or_none(self) -> np.ndarray | None:
         return None  # Offset doesn't drive axis-lock.
 
+    def _applied_distance(self) -> float | None:
+        """The distance committing NOW would actually apply, or None while
+        not dragging.
+
+        offset_polygon clamps a distance that would collapse the face; this
+        returns what the ghost overlay already stops growing at, not the raw
+        (possibly past-the-limit) drag distance. Reused by both status_text
+        and measurement_text so the two never disagree."""
+        if self._state != _State.DRAGGING:
+            return None
+        applied = self._current_distance
+        if self._armed_face_points is not None and self._armed_face_normal is not None:
+            _, applied = offset_polygon(
+                self._armed_face_points, self._armed_face_normal, self._current_distance
+            )
+        return applied
+
     @property
     def status_text(self) -> str | None:
-        if self._state == _State.DRAGGING:
-            applied = self._current_distance
-            if self._armed_face_points is not None and self._armed_face_normal is not None:
-                # offset_polygon clamps a distance that would collapse the
-                # face; show what committing NOW would actually apply, not
-                # the raw (possibly past-the-limit) drag distance -- the
-                # ghost overlay already stops growing at the limit, so the
-                # number here must agree with what the user sees.
-                _, applied = offset_polygon(
-                    self._armed_face_points, self._armed_face_normal, self._current_distance
-                )
-            if self._units_provider is not None:
-                from pluton.units import format_length
+        applied = self._applied_distance()
+        if applied is None:
+            return None
+        if self._units_provider is not None:
+            from pluton.units import format_length
 
-                return f"offset: {format_length(applied, self._units_provider())}"
-            return f"offset: {applied:.3f}"
-        return None
+            return f"offset: {format_length(applied, self._units_provider())}"
+        return f"offset: {applied:.3f}"
+
+    @property
+    def measurement_text(self) -> str | None:
+        applied = self._applied_distance()
+        if applied is None:
+            return None
+        if self._units_provider is not None:
+            from pluton.units import format_length
+
+            return format_length(applied, self._units_provider())
+        return f"{applied:.3f}"
 
     def activate(self, ctx: ToolContext) -> None:
         self._scene = ctx.scene

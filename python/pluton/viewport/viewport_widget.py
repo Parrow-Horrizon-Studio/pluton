@@ -48,6 +48,7 @@ class ViewportWidget(QOpenGLWidget):
         self._status_bar = None
         self._on_event_finished = None
         self._units_provider = None  # M7d — callable () -> pluton.units.Units (or None)
+        self._vcb_active_provider = None  # M7.6b Task 9 -- callable () -> bool (VCB.active)
         self._camera_input_callback = None  # M7e — invoked when the user moves the camera
         self._last_snap = None  # M7.6b: most recent SnapResult, for key handlers with no event
         # M7.6b Task 4: the active gesture's drawing plane, pinned once at anchor
@@ -65,6 +66,10 @@ class ViewportWidget(QOpenGLWidget):
         self._last_mouse_pos: QPoint | None = None
         self._dragging_button: Qt.MouseButton = Qt.MouseButton.NoButton
         self._dragging_modifiers: Qt.KeyboardModifier = Qt.KeyboardModifier.NoModifier
+        # M7.6b Task 9 -- the most recent cursor position, widget-local pixels,
+        # for the on-canvas measurement readout. None before the mouse has
+        # ever moved over the viewport.
+        self._last_cursor_px: tuple[float, float] | None = None
 
     @property
     def scene(self):
@@ -87,6 +92,15 @@ class ViewportWidget(QOpenGLWidget):
         _paint_annotations to format dimension text. Set by MainWindow
         (mirrors set_status_bar / set_event_finished_callback)."""
         self._units_provider = fn
+
+    def set_vcb_active_provider(self, fn) -> None:
+        """M7.6b Task 9: install a callable () -> bool, mirroring the
+        ValueControlBox's `active` flag. _paint_annotations consults this to
+        decide whether the cursor readout should draw: while the VCB is
+        active the typed buffer already occupies both sinks (the Measurements
+        box and, by extension, the user's attention), so the readout stands
+        down rather than show a second, stale number beside the cursor."""
+        self._vcb_active_provider = fn
 
     def set_camera_input_callback(self, fn) -> None:
         """M7e: install a zero-arg callable invoked when the user manipulates the
@@ -137,6 +151,9 @@ class ViewportWidget(QOpenGLWidget):
         super().mousePressEvent(event)
 
     def mouseMoveEvent(self, event: QMouseEvent) -> None:
+        pos = event.position()
+        self._last_cursor_px = (float(pos.x()), float(pos.y()))
+
         # Camera drag — unchanged from M1.
         if (
             self._dragging_button == Qt.MouseButton.MiddleButton
@@ -190,6 +207,14 @@ class ViewportWidget(QOpenGLWidget):
                 event.accept()
                 return
         super().mouseDoubleClickEvent(event)
+
+    def leaveEvent(self, event) -> None:
+        # M7.6b Task 9: the cursor readout is meaningless once the cursor has
+        # left the viewport -- drop the last known position so _paint_annotations
+        # stops drawing it at a stale spot rather than following the cursor
+        # onto other widgets.
+        self._last_cursor_px = None
+        super().leaveEvent(event)
 
     def mouseReleaseEvent(self, event: QMouseEvent) -> None:
         if event.button() == Qt.MouseButton.MiddleButton:
@@ -409,7 +434,11 @@ class ViewportWidget(QOpenGLWidget):
         to the active context only); doing so could otherwise collide."""
         from PySide6.QtGui import QColor, QFont, QPainter, QPen
 
-        from pluton.annotations.draw_plan import FONT_PX, collect_annotation_plans
+        from pluton.annotations.draw_plan import (
+            FONT_PX,
+            collect_annotation_plans,
+            plan_cursor_readout,
+        )
         from pluton.viewport.annotation_painter import paint_annotation_plans
         from pluton.viewport.scene_renderer import _DIM_ALPHA_BLEND
 
@@ -421,7 +450,25 @@ class ViewportWidget(QOpenGLWidget):
         # format_length expects, so default to Units() rather than None.
         units = self._units_provider() if self._units_provider is not None else Units()
         plans = collect_annotation_plans(self.model, self.camera, width, height, units)
-        if not plans:
+
+        # M7.6b Task 9: the on-canvas measurement readout, transient chrome
+        # beside the cursor -- NOT a collected annotation. It is built here,
+        # kept out of `plans` entirely, and painted separately below, so it
+        # can never reach pick_annotation or collide with a real annotation's
+        # id (it uses the sentinel id -1; see plan_cursor_readout). Shown only
+        # while a tool is active, has a live measurement, the cursor is known,
+        # and the VCB isn't already showing the typed buffer in the same box.
+        readout_plan = None
+        active_tool = self.tool_manager.active if self.tool_manager is not None else None
+        vcb_active = self._vcb_active_provider() if self._vcb_active_provider is not None else False
+        if active_tool is not None and not vcb_active and self._last_cursor_px is not None:
+            measurement_text = active_tool.measurement_text
+            if measurement_text is not None:
+                readout_plan = plan_cursor_readout(
+                    measurement_text, self._last_cursor_px, width, height
+                )
+
+        if not plans and readout_plan is None:
             return
         # Task 7: show_guides filters what gets PAINTED, not what got
         # COLLECTED above -- hiding a guide must never change any other
@@ -473,5 +520,10 @@ class ViewportWidget(QOpenGLWidget):
                 ),
                 guide_pen,
             )
+            if readout_plan is not None:
+                # Plain color, no selection/hover/guide styling -- this is
+                # chrome, not a selectable/dimmable annotation. Painted last
+                # so it sits on top of everything else.
+                paint_annotation_plans(painter, [readout_plan], color, set(), color)
         finally:
             painter.end()

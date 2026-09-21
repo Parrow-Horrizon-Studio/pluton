@@ -47,6 +47,7 @@ class RectangleTool(Tool):
     def __init__(self) -> None:
         self._scene = None
         self._model = None
+        self._units_provider = None
         self._state = _State.IDLE
         self._first_corner: np.ndarray | None = None
         self._preview_corner: np.ndarray | None = None
@@ -60,6 +61,7 @@ class RectangleTool(Tool):
         self._scene = ctx.scene  # type: ignore[assignment]
         self._command_stack = ctx.command_stack
         self._model = ctx.model
+        self._units_provider = ctx.units_provider
         self._reset_gesture()
 
     def _world_transform(self):
@@ -151,6 +153,34 @@ class RectangleTool(Tool):
     @property
     def anchor_or_none(self) -> np.ndarray | None:
         return None  # Rectangle tool doesn't drive axis-lock
+
+    def _current_size(self) -> tuple[float, float] | None:
+        """(width, height) of the live rectangle, or None with no drag yet.
+
+        Reused by measurement_text -- the same two magnitudes
+        apply_typed_value parses out of a typed "<w>x<h>" string."""
+        if (
+            self._state != _State.DRAGGING
+            or self._first_corner is None
+            or self._preview_corner is None
+        ):
+            return None
+        width = abs(float(self._preview_corner[0]) - float(self._first_corner[0]))
+        height = abs(float(self._preview_corner[1]) - float(self._first_corner[1]))
+        return width, height
+
+    @property
+    def measurement_text(self) -> str | None:
+        size = self._current_size()
+        if size is None:
+            return None
+        width, height = size
+        if self._units_provider is not None:
+            from pluton.units import format_length
+
+            units = self._units_provider()
+            return f"{format_length(width, units)} x {format_length(height, units)}"
+        return f"{width:.3f} x {height:.3f}"
 
     def apply_typed_value(self, text, units) -> bool:
         from pluton.units import parse_length

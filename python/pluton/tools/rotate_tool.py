@@ -270,6 +270,17 @@ class RotateTool(Tool):
             return f"Rotate: {format_angle(math.degrees(self._swept_angle_from_cur()))} (15° snap)"
         return f"Rotate: {math.degrees(self._swept_angle_from_cur()):.0f} deg (15 deg snap)"
 
+    @property
+    def measurement_text(self) -> str | None:
+        """The live swept angle in ASCII degrees, or None before HAVE_START.
+
+        Matches the status_text fallback's "12 deg" shape (rotate_tool.py's
+        own convention) rather than format_angle's degree glyph -- angles in
+        the numeric readout are always plain ASCII."""
+        if self._stage != _Stage.HAVE_START:
+            return None
+        return f"{math.degrees(self._swept_angle_from_cur()):.0f} deg"
+
     # ---- internal ----
 
     def _resolve_instances(self) -> list:

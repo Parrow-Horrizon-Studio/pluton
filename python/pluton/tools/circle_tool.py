@@ -188,15 +188,29 @@ class CircleTool(Tool):
         """Current segment count (remembered across gestures; see PolygonTool._sides)."""
         return self._segments
 
+    def _radius_text(self) -> str | None:
+        """The live radius, formatted, or None with no in-progress gesture.
+
+        Reused by both status_text (prefixed prose) and measurement_text
+        (the bare value)."""
+        if self._state != _State.DRAWING:
+            return None
+        if self._units_provider is not None:
+            from pluton.units import format_length
+
+            return format_length(self._radius, self._units_provider())
+        return f"{self._radius:.3f}"
+
     @property
     def status_text(self) -> str | None:
-        if self._state == _State.DRAWING:
-            if self._units_provider is not None:
-                from pluton.units import format_length
+        radius_text = self._radius_text()
+        if radius_text is None:
+            return None
+        return f"Radius: {radius_text}"
 
-                return f"Radius: {format_length(self._radius, self._units_provider())}"
-            return f"Radius: {self._radius:.3f}"
-        return None
+    @property
+    def measurement_text(self) -> str | None:
+        return self._radius_text()
 
     def _reset_gesture(self) -> None:
         self._state = _State.IDLE

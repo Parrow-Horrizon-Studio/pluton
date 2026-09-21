@@ -193,6 +193,10 @@ class MainWindow(QMainWindow):
         # carry-over) -- without this, _paint_annotations silently falls back
         # to a default Units() regardless of the document's unit setting.
         self._viewport.set_units_provider(lambda: self._doc.units)
+        # M7.6b Task 9: the cursor readout stands down while the VCB's typed
+        # buffer is active, so the two numeric sinks never show conflicting
+        # values at once.
+        self._viewport.set_vcb_active_provider(lambda: self._vcb.active)
         self._status_bar = StatusBar()
         # Follow Me is the first tool that must report a refusal (a forked
         # preselection, or a corner too tight for the profile) from inside
@@ -590,7 +594,12 @@ class MainWindow(QMainWindow):
         elif active is None:
             self._status_bar.set_status("")
         else:
-            self._status_bar.set_status(active.status_text or "")
+            # M7.6b Task 9: the Measurements box shows the tool's bare numeric
+            # value, not the prose status_text -- the same condition (a tool
+            # is active, the VCB is idle) also drives the on-canvas cursor
+            # readout in ViewportWidget._paint_annotations, so the two sinks
+            # never disagree.
+            self._status_bar.set_status(active.measurement_text or "")
         self._refresh_selection_status()
         self._update_selection_tag_indicator()
 

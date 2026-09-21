@@ -289,6 +289,13 @@ class _FakeViewport:
         self.camera = camera
         self.selection = None
         self._units_provider = None  # the case under test: no provider set
+        # M7.6b Task 9: _paint_annotations also reads these to build the
+        # cursor readout. None/None/None reproduces the pre-Task-9 behaviour
+        # exactly -- no tool manager means no active tool, so no readout is
+        # ever built and these tests are unaffected by its addition.
+        self.tool_manager = None
+        self._vcb_active_provider = None
+        self._last_cursor_px = None
 
     def width(self):
         return 800
