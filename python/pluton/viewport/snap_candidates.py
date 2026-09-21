@@ -132,9 +132,29 @@ def edge_point_candidates(
     return out
 
 
+_COLLINEAR_DEG = 1.0
+"""#31: `_closest_points_two_lines` solves via denom = |ray_dir x axis_dir|^2,
+proportional to sin^2 of the angle between the two directions. That collapses
+toward zero exactly when the cursor ray runs parallel (collinear) to the axis
+line, which is where the closest-point solve stops being trustworthy -- a
+sub-degree wobble in the cursor ray then swings the reported axis point by
+whole world units. Guarded below by comparing the angle's cosine (its
+magnitude, since anti-parallel is just as collinear as parallel) against a
+tolerance measured from true parallel."""
+_COLLINEAR_COS = math.cos(math.radians(_COLLINEAR_DEG))
+
+
 def axis_candidates(px, py, width, height, camera, anchor, ray_origin, ray_dir, pixel_tolerance):
     out: list[Candidate] = []
+    ray_dir_arr = np.asarray(ray_dir, dtype=np.float64)
+    ray_norm = float(np.linalg.norm(ray_dir_arr))
+    ray_unit = ray_dir_arr / ray_norm if ray_norm > 1e-12 else ray_dir_arr
     for axis_idx, axis_dir in _AXIS_DIRS.items():
+        if abs(float(np.dot(ray_unit, axis_dir))) >= _COLLINEAR_COS:
+            # Cursor ray within _COLLINEAR_DEG of parallel to this axis: the
+            # two-line solve below is ill-conditioned here, so skip the axis
+            # entirely rather than emit a wildly displaced candidate.
+            continue
         # Point on the infinite axis line (through anchor) nearest the cursor ray.
         _, _, _c_ray, c_axis = _closest_points_two_lines(ray_origin, ray_dir, anchor, axis_dir)
         proj = camera.world_to_screen(c_axis, width, height)

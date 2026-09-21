@@ -1,7 +1,8 @@
 """The Rectangle drawing tool.
 
 Two-corner gesture: first click sets the first corner, second click commits
-an axis-aligned rectangle on the ground plane (Z=0). ESC cancels mid-drag.
+an axis-aligned rectangle on the active context's local ground plane (local
+Z=0). ESC cancels mid-drag.
 """
 
 from __future__ import annotations
@@ -18,6 +19,7 @@ from pluton.commands.scene_commands import (
     AddFaceCommand,
     AddVertexCommand,
 )
+from pluton.geometry.transforms import apply_mat, is_identity_transform
 from pluton.tools.tool import Tool, ToolContext, ToolOverlay
 from pluton.viewport.picking import world_to_local_point
 from pluton.viewport.snap_engine import MARKER_COLOR_BY_KIND
@@ -118,8 +120,17 @@ class RectangleTool(Tool):
             and self._first_corner is not None
             and self._preview_corner is not None
         ):
-            x0, y0 = float(self._first_corner[0]), float(self._first_corner[1])
-            x1, y1 = float(self._preview_corner[0]), float(self._preview_corner[1])
+            # Resolve in the same frame _commit_rect will actually use -- the
+            # active context's local ground plane (local Z=0) -- rather than a
+            # literal world Z=0, then transform back to world for display.
+            # Inside a group translated or rotated in z, local Z=0 is not
+            # world Z=0, so a hardcoded 0.0 here would draw the rubber band on
+            # a different plane than where the rectangle is about to land.
+            wt = self._world_transform()
+            p0 = world_to_local_point(self._first_corner, wt)
+            p1 = world_to_local_point(self._preview_corner, wt)
+            x0, y0 = float(p0[0]), float(p0[1])
+            x1, y1 = float(p1[0]), float(p1[1])
             segments = np.array(
                 [
                     [x0, y0, 0.0],
@@ -131,8 +142,11 @@ class RectangleTool(Tool):
                     [x0, y1, 0.0],
                     [x0, y0, 0.0],
                 ],
-                dtype=np.float32,
+                dtype=np.float64,
             )
+            if wt is not None and not is_identity_transform(wt):
+                segments = apply_mat(segments, wt)
+            segments = segments.astype(np.float32)
         else:
             segments = np.zeros((0, 3), dtype=np.float32)
 
@@ -198,19 +212,40 @@ class RectangleTool(Tool):
         h = parse_length(parts[1], units)
         if w is None or h is None or w <= 0 or h <= 0:
             return False
-        fx, fy = float(self._first_corner[0]), float(self._first_corner[1])
-        sx = 1.0 if self._preview_corner[0] >= fx else -1.0
-        sy = 1.0 if self._preview_corner[1] >= fy else -1.0
-        second = np.array([fx + sx * w, fy + sy * h, 0.0], np.float32)
+        # Resolve in local (active-context) space, matching _commit_rect and
+        # overlay: a literal world z=0 second corner would land on a
+        # different plane than the drag itself under a rotated/translated
+        # active context.
+        wt = self._world_transform()
+        p0 = world_to_local_point(self._first_corner, wt)
+        p1 = world_to_local_point(self._preview_corner, wt)
+        fx, fy = float(p0[0]), float(p0[1])
+        sx = 1.0 if float(p1[0]) >= fx else -1.0
+        sy = 1.0 if float(p1[1]) >= fy else -1.0
+        local_second = np.array([fx + sx * w, fy + sy * h, 0.0], dtype=np.float64)
+        if wt is not None and not is_identity_transform(wt):
+            second = apply_mat(local_second, wt)[0]
+        else:
+            second = local_second.astype(np.float32)
         self._commit_rect(second)
         return True
 
     # ---- internal -------------------------------------------------------
     def _commit_rect(self, second) -> None:
-        """Normalize the two corners and commit a rectangle to the scene."""
+        """Normalize the two corners and commit a rectangle to the scene.
+
+        Resolves both corners in the active context's local frame first, then
+        builds the loop at local z=0 -- matching PrimitiveTool's frame
+        convergence. Converting a literal world z=0 corner to local (the old
+        order) sinks the rectangle onto the wrong plane whenever the active
+        context is translated or rotated in z.
+        """
         assert self._first_corner is not None
-        x0, y0 = float(self._first_corner[0]), float(self._first_corner[1])
-        x1, y1 = float(second[0]), float(second[1])
+        wt = self._world_transform()
+        p0 = world_to_local_point(self._first_corner, wt)
+        p1 = world_to_local_point(second, wt)
+        x0, y0 = float(p0[0]), float(p0[1])
+        x1, y1 = float(p1[0]), float(p1[1])
 
         # Normalize to a canonical CCW-from-above winding (min -> max on each
         # axis) so the face normal always points +Z (up), regardless of which
@@ -222,14 +257,13 @@ class RectangleTool(Tool):
 
         composite = CompositeCommand(name="Draw Rectangle")
         s = self._scene  # type: ignore[assignment]
-        wt = self._world_transform()
-        world_corners = [
+        local_corners = [
             np.array([xlo, ylo, 0.0], dtype=np.float32),
             np.array([xhi, ylo, 0.0], dtype=np.float32),
             np.array([xhi, yhi, 0.0], dtype=np.float32),
             np.array([xlo, yhi, 0.0], dtype=np.float32),
         ]
-        v_cmds = [AddVertexCommand(world_to_local_point(p, wt)) for p in world_corners]
+        v_cmds = [AddVertexCommand(p) for p in local_corners]
         for c in v_cmds:
             c.do(s)
             composite.children.append(c)

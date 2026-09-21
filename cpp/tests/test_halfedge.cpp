@@ -1057,6 +1057,51 @@ TEST(SplitEdge, RejectsSplitLandingOnExistingVertex) {
     EXPECT_EQ(faces_after, faces_before);
 }
 
+TEST(SplitEdge, SequentialSplitsOnSameFaceKeepLoopConsistent) {
+    // #31 remainder: split_edge is only ever exercised once per test elsewhere
+    // in this file. Splitting a second time, on one of the edges the FIRST
+    // split just created, is the case that actually exercises loop_with_inserted
+    // against a freshly rebuilt (not original) loop and a freshly rebuilt face id.
+    using pluton::HalfEdgeMesh;
+    HalfEdgeMesh m;
+    auto v0 = m.add_vertex(0.0f, 0.0f, 0.0f);
+    auto v1 = m.add_vertex(2.0f, 0.0f, 0.0f);
+    auto v2 = m.add_vertex(2.0f, 2.0f, 0.0f);
+    auto v3 = m.add_vertex(0.0f, 2.0f, 0.0f);
+    auto e01 = m.add_halfedge_pair(v0, v1);
+    m.add_halfedge_pair(v1, v2);
+    m.add_halfedge_pair(v2, v3);
+    m.add_halfedge_pair(v3, v0);
+    auto f = m.add_face_from_loop({v0, v1, v2, v3},
+                                  {(int)v0, (int)v1, (int)v2, (int)v0, (int)v2, (int)v3});
+
+    const auto assert_live_loop = [&](std::uint32_t face_id) {
+        EXPECT_TRUE(m.face_is_live(face_id));
+        auto loop = m.face_loop_vertices(face_id);
+        for (auto vid : loop) {
+            EXPECT_TRUE(m.vertex_is_live(vid));
+        }
+        return loop;
+    };
+
+    auto loop0 = assert_live_loop(f);
+    ASSERT_EQ(loop0.size(), 4u);
+
+    auto first = m.split_edge(e01, 0.5f);
+    ASSERT_TRUE(first.has_value());
+    const std::uint32_t face_after_first =
+        first->face_a != HalfEdgeMesh::INVALID_ID ? first->face_a : first->face_b;
+    auto loop1 = assert_live_loop(face_after_first);
+    EXPECT_EQ(loop1.size(), loop0.size() + 1u);
+
+    auto second = m.split_edge(first->edge_a, 0.5f);
+    ASSERT_TRUE(second.has_value());
+    const std::uint32_t face_after_second =
+        second->face_a != HalfEdgeMesh::INVALID_ID ? second->face_a : second->face_b;
+    auto loop2 = assert_live_loop(face_after_second);
+    EXPECT_EQ(loop2.size(), loop1.size() + 1u);
+}
+
 TEST(HalfEdgeSetVertexPosition, MovesVertexAndUpdatesIndex) {
     pluton::HalfEdgeMesh m;
     auto a = m.add_vertex(0.0f, 0.0f, 0.0f);

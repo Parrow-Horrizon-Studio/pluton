@@ -251,6 +251,35 @@ class SnapEngine:
                 chosen.face_id = face_cand.face_id
             return self._to_result(chosen)
 
+        if use_wt:
+            # The grid fallback belongs on the active context's own local
+            # ground plane, not literal world Z=0: inside a group translated
+            # or rotated in z, those disagree, and building [gx, gy, 0.0] in
+            # world space (as below) would land off the context's floor and,
+            # under a rotation, corrupt local x/y too once the wrong point is
+            # converted back. Intersect the already-computed local ray with
+            # local z=0 instead, round in local space, then go back to world.
+            dz_local = float(ray_dir_local[2])
+            if abs(dz_local) > 1e-9:
+                t_local = -float(ray_origin_local[2]) / dz_local
+                if t_local > 0.0:
+                    hit_local = np.asarray(
+                        ray_origin_local, dtype=np.float64
+                    ) + t_local * np.asarray(ray_dir_local, dtype=np.float64)
+                    lx = round(float(hit_local[0]) / self.GRID_SIZE_WORLD) * self.GRID_SIZE_WORLD
+                    ly = round(float(hit_local[1]) / self.GRID_SIZE_WORLD) * self.GRID_SIZE_WORLD
+                    local_point = np.array([lx, ly, 0.0], dtype=np.float64)
+                    world_point = apply_mat(local_point, wt)[0]
+                    return SnapResult(
+                        kind=SnapKind.GRID,
+                        world_position=world_point,
+                        axis=None,
+                        vertex_id=None,
+                        label="Grid",
+                    )
+            # Ray parallel to (or behind, for) the local ground plane: fall
+            # back to the world-ground-plane behaviour below, same as identity.
+
         if ground_hit is not None:
             gx = round(float(ground_hit[0]) / self.GRID_SIZE_WORLD) * self.GRID_SIZE_WORLD
             gy = round(float(ground_hit[1]) / self.GRID_SIZE_WORLD) * self.GRID_SIZE_WORLD

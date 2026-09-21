@@ -164,3 +164,80 @@ def test_rectangle_face_normal_always_points_up(second_corner):
         f"Rectangle dragged to {second_corner} has normal {normal}; "
         f"expected +Z (up) so push/pull extrudes upward."
     )
+
+
+def test_rectangle_commits_local_z_zero_under_rotated_translated_context(group_factory):
+    """#108: RectangleTool must resolve both corners in the ACTIVE CONTEXT's
+    local frame before building the loop, exactly the fix PrimitiveTool got
+    in M7.5a (see test_primitive_footprint_plane.py). A translation-only
+    fixture cannot prove this: a wrong world z=0, converted to local, stays
+    a wrong-but-consistent z under pure translation. Under a ROTATION, that
+    same wrong z feeds through the inverse transform and corrupts local x
+    and y too, so this fixture rotates the active context (90 degrees about
+    world X) as well as translating it.
+    """
+    import math
+
+    from pluton.geometry.transforms import apply_mat, mat_compose, mat_rotate, mat_translate
+    from pluton.model.model import Model
+    from pluton.tools import ToolContext
+    from pluton.tools.rectangle_tool import RectangleTool
+
+    model = Model()
+    scene = model.active_context.mesh
+    v = [
+        scene.add_vertex(np.array([0.0, 0.0, 0.0], dtype=np.float32)),
+        scene.add_vertex(np.array([1.0, 0.0, 0.0], dtype=np.float32)),
+        scene.add_vertex(np.array([1.0, 1.0, 0.0], dtype=np.float32)),
+        scene.add_vertex(np.array([0.0, 1.0, 0.0], dtype=np.float32)),
+    ]
+    for a, b in zip(v, v[1:] + v[:1], strict=True):
+        scene.add_edge(a, b)
+    scene.add_face_from_loop(v)
+    inst = group_factory(model)
+    # Rotate 90 degrees about world X (local +Z now points along world +Y),
+    # then translate: the group's own local floor no longer coincides with
+    # world Z=0 on any axis.
+    rot = mat_rotate([0.0, 0.0, 0.0], [1.0, 0.0, 0.0], math.radians(90.0))
+    trans = mat_translate([5.0, 0.0, 7.0])
+    inst.transform = mat_compose(rot, trans)
+    model.enter(inst)
+
+    inner_scene = model.active_context.mesh
+    before_ids = {vv.id for vv in inner_scene.vertices_iter()}
+
+    tool = RectangleTool()
+    tool.activate(ToolContext(scene=inner_scene, model=model))
+
+    wt = model.active_world_transform
+    # Well clear of the pre-existing square (local (0,0,0)-(1,1,0)) so no
+    # corner collides with an existing vertex (add_vertex is idempotent on
+    # an exact position match).
+    local_first = np.array([5.0, 5.0, 0.0], dtype=np.float64)
+    local_second = np.array([8.0, 7.0, 0.0], dtype=np.float64)
+    # World-space corners a real vertex/edge snap onto the group's own
+    # (rotated + translated) floor would report.
+    world_first = apply_mat(local_first, wt)[0]
+    world_second = apply_mat(local_second, wt)[0]
+
+    tool.on_mouse_press(None, _snap_at(world_first))  # type: ignore[arg-type]
+    tool.on_mouse_press(None, _snap_at(world_second))  # type: ignore[arg-type]
+
+    new_ids = {vv.id for vv in inner_scene.vertices_iter()} - before_ids
+    assert len(new_ids) == 4, "expected exactly 4 new (committed) vertices"
+
+    committed_local_xy = set()
+    for vid in new_ids:
+        pos = inner_scene.vertex(vid).position
+        assert round(float(pos[2]), 4) == 0.0, (
+            f"vertex {vid} local z={pos[2]!r}; expected local z=0 "
+            f"(a wrong world z=0 would have corrupted this under the fix's "
+            f"absence)"
+        )
+        committed_local_xy.add((round(float(pos[0]), 4), round(float(pos[1]), 4)))
+
+    assert committed_local_xy == {(5.0, 5.0), (8.0, 5.0), (8.0, 7.0), (5.0, 7.0)}, (
+        f"committed local x/y {committed_local_xy} do not match the drawn "
+        f"footprint; a wrong z fed through the rotated inverse transform "
+        f"would corrupt local x/y as well as z"
+    )

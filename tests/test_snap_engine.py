@@ -65,6 +65,52 @@ def test_grid_fallback_on_empty_ground():
     np.testing.assert_allclose(res.world_position, [2.0, -1.0, 0.0], atol=1e-3)
 
 
+def test_grid_fallback_lands_on_a_rotated_translated_contexts_own_floor():
+    """The grid fallback used to build [gx, gy, 0.0] in WORLD space regardless
+    of the active transform (`world_transform`), by intersecting the cursor
+    ray with the WORLD Z=0 plane. Inside a context rotated and translated
+    away from that plane, the correct floor is the context's own LOCAL Z=0,
+    which the fix reaches by intersecting the already-available
+    `ray_origin_local` / `ray_dir_local` instead.
+
+    Fixture: a context rotated 35 degrees about world Z and translated up by
+    4 world units. Because the rotation axis IS the world Z axis, the
+    context's local floor is still a flat (unrotated-in-tilt) plane, just
+    spun and raised -- which makes the expected answer exact to compute
+    independently: pick a local grid point, rotate+translate it forward to
+    get the world point the user's cursor is aimed at, and assert the snap
+    reproduces that same world point (not the unrotated world floor at Z=0,
+    which is where the pre-fix code would land it).
+    """
+    import math
+
+    from pluton.geometry.transforms import apply_mat, mat_compose, mat_rotate, mat_translate
+    from pluton.scene import Scene
+    from pluton.viewport.snap_engine import SnapEngine, SnapKind
+
+    eng = SnapEngine()
+    scene = Scene()
+    cam = _camera_at_default()
+
+    rot = mat_rotate([0.0, 0.0, 0.0], [0.0, 0.0, 1.0], math.radians(35.0))
+    trans = mat_translate([0.0, 0.0, 4.0])
+    wt = mat_compose(rot, trans)
+
+    # An on-grid point in the context's LOCAL frame (already an integer, so
+    # GRID_SIZE_WORLD=1.0 rounding is a no-op and the expectation is exact).
+    local_point = np.array([2.0, -1.0, 0.0], dtype=np.float64)
+    world_point = apply_mat(local_point, wt)[0]
+
+    cursor = _screen_of(cam, world_point)
+    res = eng.snap(cursor, (1280, 800), cam, scene, world_transform=wt)
+
+    assert res.kind == SnapKind.GRID
+    np.testing.assert_allclose(res.world_position, world_point, atol=1e-3)
+    # The pre-fix behaviour intersected WORLD Z=0 and returned a literal
+    # world z=0.0 -- clearly distinct from this context's floor at world z=4.
+    assert abs(float(res.world_position[2]) - 4.0) < 1e-2
+
+
 def test_none_when_scene_is_none():
     from pluton.viewport.snap_engine import SnapEngine, SnapKind
 
@@ -248,6 +294,45 @@ def test_axis_lock_wins_over_a_face():
     assert res.axis == 0, "expected the red (X) axis"
     # The face is still reported, so a shape started here lands on the quad.
     assert res.face_id is not None
+
+
+def test_axis_candidates_skips_a_ray_collinear_with_its_axis():
+    """#31: `closest_points_two_lines`' solve divides by
+    |ray_dir x axis_dir|^2, proportional to sin^2 of the angle between the
+    cursor ray and the axis direction. That collapses toward zero exactly
+    when the ray runs parallel (collinear) to the axis -- e.g. a view nearly
+    end-on down that axis -- and a sub-degree wobble in the cursor ray then
+    swings the reported axis point by hundreds of world units.
+
+    Builds a ray within 0.5 degrees of the red (X) axis and hands back, as
+    the cursor, the exact screen projection the UNGUARDED solve's own result
+    would land on -- guaranteeing that result would read as "under the
+    cursor" (distance 0) if the guard did not skip it first.
+    """
+    import math
+
+    from pluton.geometry.ray import closest_points_two_lines
+    from pluton.viewport.snap_candidates import axis_candidates
+
+    cam = _camera_at_default()
+    anchor = np.array([0.0, 0.0, 0.0], dtype=np.float32)
+
+    theta = math.radians(0.5)  # within the 1-degree guard
+    ray_dir = np.array([math.cos(theta), math.sin(theta), 0.0], dtype=np.float64)
+    ray_origin = np.array([2.0, 3.0, 5.0], dtype=np.float64)
+
+    _, _, _c_ray, c_axis_red = closest_points_two_lines(
+        ray_origin, ray_dir, anchor, np.array([1.0, 0.0, 0.0], dtype=np.float32)
+    )
+    proj = cam.world_to_screen(c_axis_red, 1280, 800)
+    assert proj is not None, "fixture's ill-conditioned point must still project"
+    px, py, _ = proj
+
+    out = axis_candidates(px, py, 1280, 800, cam, anchor, ray_origin, ray_dir, 8.0)
+    red_candidates = [c for c in out if c.axis == 0]
+    assert red_candidates == [], (
+        f"expected the near-collinear red axis to be skipped, got {red_candidates}"
+    )
 
 
 def test_same_kind_tiebreak_prefers_the_candidate_under_the_cursor():
