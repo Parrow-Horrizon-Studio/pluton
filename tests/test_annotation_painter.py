@@ -11,6 +11,16 @@ import numpy as np
 from pluton.annotations.draw_plan import AnnotationDraw, TextDraw
 from pluton.viewport.annotation_painter import paint_annotation_plans
 
+# M7.6b Task 9 fix round 3: this file used to hand-roll its own
+# `_FakeViewport`, which is exactly how it drifted from the real
+# ViewportWidget when Task 7 added a `show_guides` read (fix round 1 patched
+# that one attribute locally). Now shared with test_annotation_render_scope.py
+# (and any future file that needs to drive _paint_annotations headlessly) via
+# tests/_annotation_paint_fakes.py, so a future read added to
+# _paint_annotations only needs updating in one place. See that module's
+# docstring for the full attribute list and why it must stay in sync.
+from tests._annotation_paint_fakes import FakeViewport as _FakeViewport
+
 
 class _RecordingPainter:
     """Stands in for a QPainter. Exposes Qt's camelCase method names (setPen /
@@ -276,40 +286,6 @@ class _FakeModel:
 
     def definition_is_dimmed(self, definition):
         return False
-
-
-class _FakeViewport:
-    """Duck-typed stand-in for ViewportWidget: exposes exactly what
-    _paint_annotations reads from `self`, without needing a real QWidget/
-    QApplication (ViewportWidget._paint_annotations is called directly as an
-    unbound method against this)."""
-
-    def __init__(self, model, camera):
-        self.model = model
-        self.camera = camera
-        self.selection = None
-        self._units_provider = None  # the case under test: no provider set
-        # M7.6b Task 7 fix round 1: _paint_annotations reads this to decide
-        # whether guide/guide_point plans get painted at all. True matches
-        # the real ViewportWidget's own default (guides visible), and is the
-        # attribute Task 7 forgot to add here -- its absence crashed every
-        # test in this file that reached the `if not self.show_guides:`
-        # line with a non-empty plan list (main was red on this file from
-        # Task 7 onward until this fix).
-        self.show_guides = True
-        # M7.6b Task 9: _paint_annotations also reads these to build the
-        # cursor readout. None/None/None reproduces the pre-Task-9 behaviour
-        # exactly -- no tool manager means no active tool, so no readout is
-        # ever built and these tests are unaffected by its addition.
-        self.tool_manager = None
-        self._vcb_active_provider = None
-        self._last_cursor_px = None
-
-    def width(self):
-        return 800
-
-    def height(self):
-        return 600
 
 
 def test_paint_annotations_defaults_to_real_units_when_no_provider_set(monkeypatch):

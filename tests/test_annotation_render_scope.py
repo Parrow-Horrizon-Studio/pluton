@@ -5,6 +5,16 @@ from pluton.model.model import Model
 from pluton.units import Units
 from pluton.viewport.camera import Camera
 
+# M7.6b Task 9 fix round 3: this file used to hand-roll its own
+# `_FakeViewport`, missing every attribute Task 9 added a read for
+# (tool_manager, _vcb_active_provider, _last_cursor_px) -- the same class of
+# drift that broke test_annotation_painter.py's own copy over `show_guides`
+# in fix round 1. Now shared via tests/_annotation_paint_fakes.py, so a
+# future read added to _paint_annotations only needs updating in one place.
+# See that module's docstring for the full attribute list and why it must
+# stay in sync.
+from tests._annotation_paint_fakes import FakeViewport as _FakeViewport
+
 
 def _model_with_annotation_inside_a_group():
     model = Model()
@@ -116,24 +126,6 @@ class _RecordingQPainter:
 
     def end(self):
         pass
-
-
-class _FakeViewport:
-    """Duck-typed stand-in for ViewportWidget -- a real Model is used
-    underneath (it now provides traverse_visible/definition_is_dimmed for
-    real), only the QPainter/QWidget parts are faked."""
-
-    def __init__(self, model, camera):
-        self.model = model
-        self.camera = camera
-        self.selection = None
-        self._units_provider = None
-
-    def width(self):
-        return 800
-
-    def height(self):
-        return 600
 
 
 def test_paint_annotations_still_draws_the_groups_dimension_from_the_root(monkeypatch):
