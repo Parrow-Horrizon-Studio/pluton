@@ -141,6 +141,86 @@ def test_on_edge_beats_on_guide_when_only_those_two_compete():
     assert res.edge_id == eid
 
 
+def test_midpoint_beats_guide_point_when_both_compete():
+    """D12: inserting GUIDE_POINT between MIDPOINT and ON_EDGE created a new
+    adjacent pair on MIDPOINT's other side that nothing previously pinned.
+    Real geometry (an edge's own midpoint) still outranks a construction
+    point placed at the same spot.
+
+    Placing the guide point exactly at the edge's geometric midpoint also
+    puts an ON_EDGE candidate at that identical world point (the midpoint
+    IS a point on the segment, so the ray through it is the segment's own
+    closest approach too). That does not weaken this test: ON_EDGE already
+    ranks below both MIDPOINT and GUIDE_POINT and stays there regardless of
+    which of those two wins, so its presence cannot mask a MIDPOINT/
+    GUIDE_POINT reordering the way INTERSECTION masked ON_EDGE/ON_GUIDE in
+    the fix-round-1 tests.
+    """
+    from pluton.scene import Scene
+    from pluton.viewport.snap_engine import SnapEngine, SnapKind
+
+    eng = SnapEngine()
+    scene = Scene()
+    cam = _camera_at_default()
+    v0 = scene.add_vertex(np.array([0.0, 0.0, 2.0], dtype=np.float32))
+    v1 = scene.add_vertex(np.array([4.0, 0.0, 2.0], dtype=np.float32))
+    scene.add_edge(v0, v1)
+    midpoint = [2.0, 0.0, 2.0]
+    cursor = _screen_of(cam, midpoint)
+    res = eng.snap(cursor, (1280, 800), cam, scene, guides=[], guide_points=[midpoint])
+    assert res.kind == SnapKind.MIDPOINT
+
+
+def test_on_guide_beats_perpendicular_when_only_those_two_compete():
+    """D12: inserting ON_GUIDE between ON_EDGE and PERPENDICULAR created a
+    second new adjacent pair, on ON_GUIDE's other side, that nothing
+    previously pinned. Guides outrank the directional inferences: a
+    construction line the user placed still beats a direction merely
+    inferred from an acquired edge.
+
+    The guide is placed exactly along the same infinite line the
+    PERPENDICULAR inference resolves to (through the anchor, perpendicular
+    to the acquired edge within the drawing plane), so both land on the
+    cursor with nothing else in tolerance to interfere: the anchor also
+    sits on the world Y axis here, so an AXIS_LOCK candidate tags along too,
+    but it ranks below both ON_GUIDE and PERPENDICULAR and stays there
+    regardless of their relative order, so it cannot mask this pair either.
+    """
+    from pluton.scene import Scene
+    from pluton.viewport.inference import Acquired, AcquiredKind
+    from pluton.viewport.snap_engine import SnapEngine, SnapKind
+
+    eng = SnapEngine()
+    scene = Scene()
+    cam = _camera_at_default()
+    anchor = np.array([0.0, 0.0, 0.0], dtype=np.float32)
+    acquired = Acquired(
+        kind=AcquiredKind.EDGE,
+        position=np.array([3.0, 0.0, 0.0], dtype=np.float64),
+        direction=np.array([1.0, 0.0, 0.0], dtype=np.float64),
+        entity_id=0,
+    )
+    # Perpendicular to (1,0,0) in the Z-normal plane runs along (0,1,0),
+    # through the anchor -- the same infinite line as this guide.
+    guide_origin = np.array([0.0, 0.0, 0.0], dtype=np.float64)
+    guide_direction = np.array([0.0, 1.0, 0.0], dtype=np.float64)
+    probe = [0.0, 3.0, 0.0]
+    cursor = _screen_of(cam, probe)
+
+    res = eng.snap(
+        cursor,
+        (1280, 800),
+        cam,
+        scene,
+        anchor=anchor,
+        acquired=acquired,
+        plane_normal=np.array([0.0, 0.0, 1.0]),
+        guides=[(guide_origin, guide_direction)],
+        guide_points=[],
+    )
+    assert res.kind == SnapKind.ON_GUIDE
+
+
 def test_guide_crossing_scene_edge_yields_intersection_not_on_guide():
     from pluton.scene import Scene
     from pluton.viewport.snap_engine import SnapEngine, SnapKind
@@ -266,3 +346,65 @@ def test_gather_guides_transforms_correctly_in_a_rotated_translated_context(qtbo
     np.testing.assert_allclose(origin, [5.0, 1.0, 0.0], atol=1e-5)
     # Local direction (1,0,0) rotates to (0,1,0); no translation applied.
     np.testing.assert_allclose(direction, [0.0, 1.0, 0.0], atol=1e-5)
+
+
+def test_gather_guides_direction_uses_the_vector_convention_under_nonuniform_scale(qtbot):
+    """A pure rotation is orthogonal (R == inv(R).T), so the previous test
+    cannot tell the correct convention for transforming a direction (the
+    plain linear block) from the wrong one (the inverse-transpose, correct
+    only for surface NORMALS) -- both give the same answer whenever the
+    context's linear part is a rotation alone. `model.py`'s
+    `pick_face_local` uses the inverse-transpose for normals in code
+    adjacent to this exact distinction, and Task 7 of this milestone had to
+    be fixed for getting it wrong here, so this needs its own test with a
+    non-uniform scale, the only case that separates the two.
+
+    Expected value derived BY HAND, independent of `_gather_guides`:
+
+    Context linear block L = R @ S, R a 90 degree rotation about Z
+    ((x,y,z) -> (-y,x,z)) and S = diag(2,1,1):
+
+        R = [[0,-1,0],[1,0,0],[0,0,1]]      S = diag(2,1,1)
+        L = R @ S = [[0,-1,0],[2,0,0],[0,0,1]]
+
+    `Guide.__post_init__` normalises (1,1,0) to d = (1/sqrt2, 1/sqrt2, 0).
+
+    Correct (vector) convention -- plain L applied to d:
+        L @ d = (0*d0 + -1*d1, 2*d0 + 0*d1, 0) = (-1/sqrt2, 2/sqrt2, 0)
+              = (-0.70710678, 1.41421356, 0.0)
+
+    Wrong (normal) convention -- inverse-transpose of L applied to d:
+        L^-1 = S^-1 @ R^-1 = diag(0.5,1,1) @ R^T = [[0,0.5,0],[-1,0,0],[0,0,1]]
+        (L^-1)^T = [[0,-1,0],[0.5,0,0],[0,0,1]]
+        (L^-1)^T @ d = (-1/sqrt2, 0.5/sqrt2, 0) = (-0.70710678, 0.35355339, 0.0)
+
+    The two are not scalar multiples of each other (the y-component ratio is
+    4, the x-component ratio is 1), so this is a genuine direction
+    difference, not just a magnitude difference an allclose on a normalised
+    vector could miss.
+    """
+    from pluton.geometry.transforms import mat_rotate, mat_scale, mat_translate
+    from pluton.model.annotation import Guide
+    from pluton.model.model import Model
+    from pluton.viewport.viewport_widget import ViewportWidget
+
+    model = Model()
+    grp_def = model.new_definition("Grp", is_group=True)
+    grp_def.annotations.append(Guide(1, (1.0, 0.0, 0.0), (1.0, 1.0, 0.0)))
+
+    wt = (
+        mat_translate([5.0, 0.0, 0.0])
+        @ mat_rotate([0, 0, 0], [0, 0, 1], math.radians(90))
+        @ mat_scale([0, 0, 0], [2.0, 1.0, 1.0])
+    )
+    grp_inst = model.new_instance(grp_def, wt)
+    model.root.children.append(grp_inst)
+    model.enter(grp_inst)
+
+    widget = ViewportWidget(model=model)
+    qtbot.addWidget(widget)
+
+    lines, _points = widget._gather_guides()
+    assert len(lines) == 1
+    _origin, direction = lines[0]
+    np.testing.assert_allclose(direction, [-0.70710678, 1.41421356, 0.0], atol=1e-5)
