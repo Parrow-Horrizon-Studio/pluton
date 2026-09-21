@@ -217,20 +217,31 @@ def annotation_from_dict(record: dict) -> Dimension | Label | Guide | GuidePoint
 
     Raises PlutonFormatError if 'kind' is missing or unrecognized. A v8 file
     read by an older build therefore fails loudly rather than dropping guides.
+
+    A structurally well-formed record whose VALUES an entity rejects (today:
+    `Guide.__post_init__` on a zero-length direction) raises ValueError, not
+    PlutonFormatError. `document_from_dict`'s blanket catch does translate
+    that, but only because this function happens to be called from inside it;
+    a corrupt record is this module's own business to report, so it is
+    translated here too, with the record named the way every other malformed
+    record in this module is named.
     """
     kind = record.get("kind")
-    if kind == "dimension":
-        return Dimension(
-            record["id"], tuple(record["p1"]), tuple(record["p2"]), tuple(record["offset"])
-        )
-    if kind == "label":
-        return Label(
-            record["id"], tuple(record["anchor"]), tuple(record["text_pos"]), record["text"]
-        )
-    if kind == "guide":
-        return Guide(record["id"], tuple(record["origin"]), tuple(record["direction"]))
-    if kind == "guide_point":
-        return GuidePoint(record["id"], tuple(record["position"]))
+    try:
+        if kind == "dimension":
+            return Dimension(
+                record["id"], tuple(record["p1"]), tuple(record["p2"]), tuple(record["offset"])
+            )
+        if kind == "label":
+            return Label(
+                record["id"], tuple(record["anchor"]), tuple(record["text_pos"]), record["text"]
+            )
+        if kind == "guide":
+            return Guide(record["id"], tuple(record["origin"]), tuple(record["direction"]))
+        if kind == "guide_point":
+            return GuidePoint(record["id"], tuple(record["position"]))
+    except ValueError as e:
+        raise PlutonFormatError(f"malformed {kind} annotation: {e}") from e
     raise PlutonFormatError(f"annotation has unknown kind: {kind!r}")
 
 

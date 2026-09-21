@@ -1,10 +1,15 @@
-"""Annotation entities (M7d): linear dimensions and leader text labels.
+"""Annotation entities: the rail every non-geometric entity rides.
 
-Both store CONTEXT-LOCAL coordinates as plain 3-tuples and live in
-Definition.annotations, so they ride along when their group/component moves.
-Pure data — no Model/Scene/Qt/GL imports. A dimension's measurement text is
-NOT stored; it is derived at draw time from the world distance and the
-document's units.
+Dimensions and leader text labels (M7d), plus construction geometry added in
+M7.6b: infinite `Guide` lines and `GuidePoint`s, which are inference targets
+and never contribute faces or edges (D7).
+
+All of them store CONTEXT-LOCAL coordinates as plain 3-tuples and live in
+Definition.annotations, so they ride along when their group/component moves,
+and so they inherit placement, persistence, picking, selection, erasing and
+undo from one rail rather than four. Pure data, with no Model/Scene/Qt/GL
+imports. A dimension's measurement text is NOT stored; it is derived at draw
+time from the world distance and the document's units.
 """
 
 from __future__ import annotations

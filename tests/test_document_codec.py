@@ -317,3 +317,38 @@ def test_an_unknown_annotation_kind_still_raises():
 
     with pytest.raises(PlutonFormatError):
         annotation_from_dict({"kind": "sprocket", "id": 1})
+
+
+def test_a_degenerate_guide_direction_is_reported_as_a_format_error():
+    """`Guide.__post_init__` rejects a zero-length direction with ValueError.
+
+    A malformed record is this module's own business to report, and
+    PlutonFormatError is the one exception `load_document`'s callers are
+    told to catch. Today the outer `document_from_dict` also catches
+    ValueError, so the whole-document path was already covered; translating
+    here means `annotation_from_dict` keeps its own contract whoever calls
+    it, and names the offending record the way every other malformed record
+    in this module is named.
+    """
+    from pluton.io.document_codec import annotation_from_dict
+
+    record = {"kind": "guide", "id": 4, "origin": [0, 0, 0], "direction": [0.0, 0.0, 0.0]}
+    with pytest.raises(PlutonFormatError) as excinfo:
+        annotation_from_dict(record)
+    assert "guide" in str(excinfo.value)
+
+
+def test_a_degenerate_guide_direction_never_escapes_the_whole_document_load():
+    """The path MainWindow._on_file_open actually catches on."""
+    from pluton.model.annotation import Guide
+
+    model = Model()
+    model.active_context.annotations.append(Guide(0, (0.0, 0.0, 0.0), (1.0, 0.0, 0.0)))
+    data = document_to_dict(model, Camera(), DocumentSettings(), RenderStyle())
+    for rec in data["model"]["definitions"]:
+        for ann in rec.get("annotations", []):
+            if ann.get("kind") == "guide":
+                ann["direction"] = [0.0, 0.0, 0.0]
+
+    with pytest.raises(PlutonFormatError):
+        document_from_dict(data)

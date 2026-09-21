@@ -18,7 +18,9 @@ class Definition:
         self.mesh = mesh if mesh is not None else Scene()
         self.children: list[Instance] = []
         self.instances: list[Instance] = []
-        self.annotations: list = []  # M7d: per-context Dimension/Label entities
+        # The annotation rail: per-context Dimension / Label (M7d) and
+        # Guide / GuidePoint construction geometry (M7.6b, D7).
+        self.annotations: list = []
 
     def local_aabb(self) -> tuple[np.ndarray, np.ndarray] | None:
         """Axis-aligned bounds over this definition's live vertices, or None if empty."""
