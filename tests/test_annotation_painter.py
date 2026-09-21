@@ -289,6 +289,14 @@ class _FakeViewport:
         self.camera = camera
         self.selection = None
         self._units_provider = None  # the case under test: no provider set
+        # M7.6b Task 7 fix round 1: _paint_annotations reads this to decide
+        # whether guide/guide_point plans get painted at all. True matches
+        # the real ViewportWidget's own default (guides visible), and is the
+        # attribute Task 7 forgot to add here -- its absence crashed every
+        # test in this file that reached the `if not self.show_guides:`
+        # line with a non-empty plan list (main was red on this file from
+        # Task 7 onward until this fix).
+        self.show_guides = True
         # M7.6b Task 9: _paint_annotations also reads these to build the
         # cursor readout. None/None/None reproduces the pre-Task-9 behaviour
         # exactly -- no tool manager means no active tool, so no readout is
