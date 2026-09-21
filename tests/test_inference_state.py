@@ -525,3 +525,138 @@ def test_every_snap_kind_is_classified_as_point_like_or_line_like():
     classified = set(_POINT_LIKE_KINDS) | line_kinds
     assert classified == set(SnapKind), f"unclassified: {set(SnapKind) - classified}"
     assert not (set(_POINT_LIKE_KINDS) & line_kinds)
+
+
+def _press_event(x, y):
+    from PySide6.QtCore import QEvent, QPointF, Qt
+    from PySide6.QtGui import QMouseEvent
+
+    return QMouseEvent(
+        QEvent.Type.MouseButtonPress,
+        QPointF(float(x), float(y)),
+        Qt.MouseButton.LeftButton,
+        Qt.MouseButton.LeftButton,
+        Qt.KeyboardModifier.NoModifier,
+    )
+
+
+def test_a_lock_armed_after_a_key_driven_gesture_end_survives_the_next_mouse_move(qtbot):
+    """The gesture-end edge must be consumed before a lock is armed, not after.
+
+    A gesture can end on a key (Enter, Escape, a typed value), and the user
+    is then free to press an arrow before moving the mouse at all: D6's "a
+    lock often outlives the keypress", and the arm-then-click-the-start-point
+    workflow. Detecting the edge lazily on the next mouse event fires it
+    AFTER the arming keypress and destroys the lock it just created.
+    """
+    from PySide6.QtCore import Qt
+
+    from pluton.ui.main_window import MainWindow
+
+    win = MainWindow()
+    qtbot.addWidget(win)
+    win._viewport.resize(1280, 800)
+    win._viewport.camera.aspect = 1280.0 / 800.0
+    assert win._tool_manager.activate_by_id("line")
+
+    # Start a line, then let one mouse move record the live gesture.
+    win._viewport.mousePressEvent(_press_event(600.0, 400.0))
+    win._viewport._snap_for_event(_move_event(640.0, 420.0))
+    assert win._tool_manager.active.has_active_gesture
+
+    # Escape ends it. No mouse event has happened since.
+    win._on_escape()
+    assert not win._tool_manager.active.has_active_gesture
+
+    # Arm the red axis lock, then move the mouse.
+    win._on_tool_key(Qt.Key.Key_Right)
+    assert win._viewport.inference.lock is not None
+    win._viewport._snap_for_event(_move_event(660.0, 430.0))
+
+    assert win._viewport.inference.lock is not None, (
+        "the stale gesture-end edge destroyed a lock armed after the gesture ended"
+    )
+
+
+def test_a_lock_armed_over_a_stale_selection_gesture_flag_survives(qtbot):
+    """The same defect with no key timing involved at all.
+
+    `SelectTool.has_active_gesture` is True for a merely non-empty selection,
+    and the selection survives a tool switch, so switching to a drawing tool
+    with something selected leaves a gesture-end edge pending on the very
+    first frame.
+    """
+    from PySide6.QtCore import Qt
+
+    from pluton.ui.main_window import MainWindow
+
+    win = MainWindow()
+    qtbot.addWidget(win)
+    win._viewport.resize(1280, 800)
+    win._viewport.camera.aspect = 1280.0 / 800.0
+
+    scene = win._model.active_scene
+    v0 = scene.add_vertex(np.array([0.0, 0.0, 0.0], dtype=np.float32))
+    v1 = scene.add_vertex(np.array([4.0, 0.0, 0.0], dtype=np.float32))
+    eid = scene.add_edge(v0, v1)
+
+    assert win._tool_manager.activate_by_id("select")
+    win._selection.replace(edges=[eid])
+    win._viewport._snap_for_event(_move_event(600.0, 400.0))
+    assert win._tool_manager.active.has_active_gesture
+
+    # Switch to a drawing tool. deactivate() does not clear the selection,
+    # but the new tool reports no gesture, so an edge is now pending.
+    assert win._tool_manager.activate_by_id("line")
+    win._on_tool_key(Qt.Key.Key_Right)
+    assert win._viewport.inference.lock is not None
+    win._viewport._snap_for_event(_move_event(620.0, 410.0))
+
+    assert win._viewport.inference.lock is not None, (
+        "the stale selection-based gesture edge destroyed a freshly armed lock"
+    )
+
+
+def test_a_shift_lock_armed_after_a_gesture_ends_survives_the_next_mouse_move(qtbot):
+    """The third arming site, same rule.
+
+    Shift is momentary, so a lock it forms is destroyed before the user has
+    released the key -- the same regression as the arrow keys, reached
+    through `MainWindow.eventFilter` instead of `_on_tool_key`.
+    """
+    from PySide6.QtCore import QEvent, Qt
+    from PySide6.QtGui import QKeyEvent
+
+    from pluton.ui.main_window import MainWindow
+    from pluton.viewport.snap_engine import SnapKind, SnapResult
+
+    win = MainWindow()
+    qtbot.addWidget(win)
+    win._viewport.resize(1280, 800)
+    win._viewport.camera.aspect = 1280.0 / 800.0
+    assert win._tool_manager.activate_by_id("line")
+
+    win._viewport.mousePressEvent(_press_event(600.0, 400.0))
+    win._viewport._snap_for_event(_move_event(640.0, 420.0))
+    assert win._tool_manager.active.has_active_gesture
+
+    win._on_escape()
+
+    # Pin the showing inference to a direction-bearing one, so what Shift
+    # holds does not depend on where the default camera happens to look.
+    win._viewport._last_snap = SnapResult(
+        kind=SnapKind.AXIS_LOCK,
+        world_position=np.array([3.0, 0.0, 0.0], dtype=np.float32),
+        axis=0,
+        vertex_id=None,
+        label="on Red Axis",
+        direction=np.array([1.0, 0.0, 0.0]),
+    )
+    press = QKeyEvent(QEvent.Type.KeyPress, Qt.Key.Key_Shift, Qt.KeyboardModifier.ShiftModifier)
+    win.eventFilter(win, press)
+    assert win._viewport.inference.lock is not None
+    win._viewport._snap_for_event(_move_event(660.0, 430.0))
+
+    assert win._viewport.inference.lock is not None, (
+        "the stale gesture-end edge destroyed a Shift lock armed after the gesture ended"
+    )

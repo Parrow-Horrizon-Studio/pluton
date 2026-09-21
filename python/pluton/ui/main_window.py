@@ -647,6 +647,11 @@ class MainWindow(QMainWindow):
 
         if event.type() in (QEvent.Type.KeyPress, QEvent.Type.KeyRelease):
             if event.key() == Qt.Key.Key_Shift:
+                # Same arming-order rule as _on_tool_key: a Shift lock formed
+                # right after a key-driven gesture end would otherwise be
+                # destroyed by the stale edge on the next mouse move.
+                if event.type() == QEvent.Type.KeyPress:
+                    self._viewport.settle_gesture_lifecycle()
                 self._viewport.inference.set_shift_lock(
                     event.type() == QEvent.Type.KeyPress, self._viewport.last_snap
                 )
@@ -818,6 +823,12 @@ class MainWindow(QMainWindow):
             return
 
         inference = self._viewport.inference
+        # Settle any pending gesture-end edge BEFORE arming. A gesture that
+        # ended on a key (Enter, Escape, a typed value) leaves that edge
+        # undetected until the next mouse event, which would otherwise fire
+        # it AFTER this keypress and release the lock it just armed. D6: "a
+        # lock often outlives the keypress".
+        self._viewport.settle_gesture_lifecycle()
         if qt_key == Qt.Key.Key_Down:
             inference.toggle_edge_lock()
         else:

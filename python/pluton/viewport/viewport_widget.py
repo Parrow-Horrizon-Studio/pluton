@@ -318,6 +318,26 @@ class ViewportWidget(QOpenGLWidget):
         self._last_snap = result
         return result
 
+    def settle_gesture_lifecycle(self) -> None:
+        """Resolve a pending gesture-end edge NOW, before a lock is armed.
+
+        `_sync_gesture_lifecycle` otherwise runs only from `_snap_for_event`,
+        i.e. on the next MOUSE event, and a gesture can end on a key: Enter,
+        Escape, a typed VCB value. The user is then free to arm a lock before
+        moving the mouse at all, which is exactly D6's "a lock often outlives
+        the keypress" and the arm-then-click-the-start-point workflow C1
+        exists to serve. Left lazy, the stale edge fires on the first mouse
+        move afterwards and destroys the lock armed after it.
+
+        `MainWindow` calls this immediately before every arming site, so by
+        the time a lock exists the edge has already been consumed and cannot
+        fire later. Settling early is never wrong on its own terms either:
+        the gesture really has ended, and this only brings the release
+        forward from the next mouse move to now.
+        """
+        active = self.tool_manager.active if self.tool_manager is not None else None
+        self._sync_gesture_lifecycle(active)
+
     def _sync_gesture_lifecycle(self, active) -> None:
         """Release lock + acquisition on the frame after a gesture finishes.
 
@@ -329,6 +349,10 @@ class ViewportWidget(QOpenGLWidget):
         the top of `_snap_for_event`, i.e. before the snap it precedes is
         computed, so no frame is ever snapped against a finished gesture's
         state.
+
+        Detection is by edge, so the edge has to be consumed before anything
+        that would be destroyed by it is created: see
+        `settle_gesture_lifecycle`.
         """
         live = bool(active is not None and active.has_active_gesture)
         if self._gesture_was_active and not live:
