@@ -87,7 +87,7 @@ from pluton.ui.window_state import (
 from pluton.viewport.render_style import FaceStyle, RenderStyle
 from pluton.viewport.texture_cache import decode_image, sniff_format
 from pluton.viewport.view_animator import ViewAnimator
-from pluton.viewport.viewport_widget import ViewportWidget
+from pluton.viewport.viewport_widget import _GUIDE_KINDS, ViewportWidget
 from pluton.views.capture import apply_tags_and_style, capture_view
 
 # M7.5b Task 11 (#78): container thumbnails are for a file browser preview, so
@@ -1259,6 +1259,7 @@ class MainWindow(QMainWindow):
     def _on_active_context_changed(self) -> None:
         """Called by SelectTool after enter/exit to rebuild the tool context
         for the new active editing context and update the breadcrumb."""
+        self._viewport.on_active_context_changed()
         self._rebuild_tool_context()
         self._refresh_breadcrumb()
         self._rebuild_outliner()
@@ -1536,8 +1537,26 @@ class MainWindow(QMainWindow):
         self._viewport.set_render_style(self._render_style)
 
     def _on_toggle_guides(self, checked: bool) -> None:
-        """Hide or show every guide without deleting any."""
+        """Hide or show every guide without deleting any.
+
+        Hiding also deselects any guide that was selected. Task 7 made a
+        hidden guide unpickable and unsnappable on the reasoning that a
+        hidden thing the user can still act on is a trap; a selected guide
+        left selected is that same trap on the other half of the path, and
+        the sharpest form of it -- Delete then destroys an annotation with
+        nothing on screen to say what went.
+        """
         self._viewport.show_guides = bool(checked)
+        if not checked:
+            hidden = {
+                ann.id
+                for ann in self._model.active_context.annotations
+                if getattr(ann, "kind", None) in _GUIDE_KINDS
+                and ann.id in self._selection.annotations
+            }
+            if hidden:
+                self._selection.remove(annotations=hidden)
+                self._refresh_selection_status()
         self._viewport.update()
 
     # --- Toolbars (M7.2, Task 11) -----------------------------------------

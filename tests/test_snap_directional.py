@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import math
+
 import numpy as np
 
 
@@ -276,3 +278,98 @@ def test_marker_colors_reflect_the_d14_intersection_move():
     assert MARKER_COLOR_BY_KIND[SnapKind.INTERSECTION] == (0.10, 0.10, 0.12)
     assert MARKER_COLOR_BY_KIND[SnapKind.PARALLEL] == (0.82, 0.23, 0.82)
     assert MARKER_COLOR_BY_KIND[SnapKind.PERPENDICULAR] == (0.82, 0.23, 0.82)
+
+
+def _snap_at(cam, probe, **kwargs):
+    from pluton.scene import Scene
+    from pluton.viewport.snap_engine import SnapEngine
+
+    return SnapEngine().snap(_screen_of(cam, probe), (1280, 800), cam, Scene(), **kwargs)
+
+
+def test_shift_locks_a_parallel_inference():
+    """Spec 2.3: Shift holds "whatever inference is currently showing".
+
+    Magenta Parallel is one of the inferences a SketchUp user reaches for
+    Shift with most. Before the fix `_direction_of` only understood a snap
+    that carried an `axis`, which PARALLEL never does, so holding Shift over
+    one silently did nothing at all.
+    """
+    from pluton.viewport.inference import InferenceState
+    from pluton.viewport.snap_engine import SnapKind
+
+    cam = _camera_at_default()
+    anchor = np.array([0.0, 0.0, 0.0], dtype=np.float32)
+    acquired = _acquired_edge((5.0, 5.0, 0.0), (1.0, 1.0, 0.0))
+    snap = _snap_at(cam, [2.0, 2.0, 0.0], anchor=anchor, acquired=acquired)
+    assert snap.kind == SnapKind.PARALLEL
+
+    state = InferenceState()
+    state.set_shift_lock(True, snap)
+
+    assert state.lock is not None
+    unit = np.array([1.0, 1.0, 0.0]) / math.sqrt(2.0)
+    np.testing.assert_allclose(state.lock.direction, unit, atol=1e-6)
+
+
+def test_shift_locks_a_perpendicular_inference():
+    """Perpendicular carries no axis either, and its direction depends on the
+    drawing plane, which InferenceState never sees. It rides on the snap."""
+    from pluton.viewport.inference import InferenceState
+    from pluton.viewport.snap_engine import SnapKind
+
+    cam = _camera_at_default()
+    anchor = np.array([0.0, 0.0, 0.0], dtype=np.float32)
+    acquired = _acquired_edge((5.0, 0.0, 0.0), (1.0, 0.0, 0.0))
+    snap = _snap_at(
+        cam,
+        [0.0, 3.0, 0.0],
+        anchor=anchor,
+        acquired=acquired,
+        plane_normal=np.array([0.0, 0.0, 1.0]),
+    )
+    assert snap.kind == SnapKind.PERPENDICULAR
+
+    state = InferenceState()
+    state.set_shift_lock(True, snap)
+
+    assert state.lock is not None
+    np.testing.assert_allclose(np.abs(state.lock.direction), [0.0, 1.0, 0.0], atol=1e-6)
+
+
+def test_shift_locks_an_on_guide_inference():
+    """A guide's direction is nowhere in the snapped point's own geometry and
+    nowhere near the gesture anchor, so it has to be carried on the snap."""
+    from pluton.viewport.inference import InferenceState
+    from pluton.viewport.snap_engine import SnapKind
+
+    cam = _camera_at_default()
+    guide_origin = np.array([1.0, 0.0, 0.0], dtype=np.float64)
+    guide_direction = np.array([0.0, 0.0, 1.0], dtype=np.float64)
+    snap = _snap_at(cam, [1.0, 0.0, 4.0], guides=[(guide_origin, guide_direction)])
+    assert snap.kind == SnapKind.ON_GUIDE
+
+    state = InferenceState()
+    state.set_shift_lock(True, snap)
+
+    assert state.lock is not None
+    np.testing.assert_allclose(np.abs(state.lock.direction), [0.0, 0.0, 1.0], atol=1e-6)
+
+
+def test_shift_over_a_point_inference_locks_nothing():
+    """An endpoint answers "where", not "which way". There is no line to
+    hold, so Shift declines rather than inventing a direction."""
+    from pluton.scene import Scene
+    from pluton.viewport.inference import InferenceState
+    from pluton.viewport.snap_engine import SnapEngine, SnapKind
+
+    cam = _camera_at_default()
+    scene = Scene()
+    scene.add_vertex(np.array([2.0, 1.0, 0.0], dtype=np.float32))
+    snap = SnapEngine().snap(_screen_of(cam, [2.0, 1.0, 0.0]), (1280, 800), cam, scene)
+    assert snap.kind == SnapKind.ENDPOINT
+
+    state = InferenceState()
+    state.set_shift_lock(True, snap)
+
+    assert state.lock is None

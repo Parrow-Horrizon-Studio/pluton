@@ -64,6 +64,10 @@ def test_viewport_forwards_lmb_release_to_active_tool(qtbot):
     class _Recorder:
         @property
         def anchor_or_none(self): return None
+        # Abstract on Tool, so every real tool has it; _snap_for_event reads
+        # it to spot the end of a gesture (M7.6b whole-branch fix, I1).
+        @property
+        def has_active_gesture(self): return False
         def on_mouse_release(self, event, snap):
             calls.append(("release", event.position().x()))
 

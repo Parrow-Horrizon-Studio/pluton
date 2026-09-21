@@ -1,8 +1,13 @@
-"""Snap & inference engine for M2 drawing tools.
+"""Snap & inference engine: the selection policy over the candidate generators.
 
-Evaluates four snap kinds (Grid, Axis-lock, Midpoint, Endpoint) and picks
-the highest-precedence one within tolerance. Precedence is encoded in the
-numeric value of `SnapKind` — higher wins.
+Gathers candidates for every `SnapKind` in tolerance (the generators live in
+`snap_candidates.py`) and picks one. Precedence is D12's explicit table,
+`_PRECEDENCE` below, NOT the numeric value of `SnapKind`: the two were
+decoupled in M7.6b so kinds could be added to the enum without renumbering
+the ordering. Ties inside one kind break on screen distance, then depth.
+
+Stateless by design (D1). Acquisition (hover-dwell) and inference locking are
+stateful and live in `inference.py`, which wraps this.
 """
 
 from __future__ import annotations
@@ -314,6 +319,7 @@ class SnapEngine:
             edge_id=c.edge_id,
             face_id=c.face_id,
             edge_t=c.edge_t,
+            direction=c.direction,
         )
 
     def _none(self) -> SnapResult:

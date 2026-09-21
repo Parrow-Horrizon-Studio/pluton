@@ -367,3 +367,136 @@ def test_same_kind_tiebreak_prefers_the_candidate_under_the_cursor():
     res = SnapEngine().snap(cursor, (1280, 800), cam, scene)
     assert res.kind == SnapKind.ENDPOINT
     assert res.vertex_id == v_far, "expected the endpoint under the cursor, not the nearer one"
+
+
+# --- D12 adjacent-pair precedence ---------------------------------------
+#
+# Design section 7 names pairwise tests as the sole mitigation for "the
+# precedence table is a behavioural contract with no single owner". The four
+# tests below close the adjacencies nothing else pinned: ENDPOINT >
+# INTERSECTION, PERPENDICULAR > PARALLEL, PARALLEL > FROM_POINT and
+# FROM_POINT > AXIS_LOCK. Each puts exactly those two kinds in play, or says
+# in its own docstring which lower-ranked kind tags along and why it cannot
+# mask the pair.
+
+
+def test_endpoint_beats_intersection_when_both_land_on_the_same_point():
+    """D12's top adjacency. A real vertex beats a computed crossing.
+
+    The vertex sits exactly where an axis line through the anchor crosses a
+    live edge, so ENDPOINT and INTERSECTION are both in tolerance at one
+    pixel. The crossed edge is built asymmetrically about that point so it
+    contributes neither a MIDPOINT nor an ENDPOINT of its own there; the
+    ON_EDGE and AXIS_LOCK candidates that also land there rank below both
+    members of the pair and stay there whichever way the pair is ordered.
+    """
+    from pluton.scene import Scene
+    from pluton.viewport.snap_engine import SnapEngine, SnapKind
+
+    scene = Scene()
+    cam = _camera_at_default()
+    anchor = np.array([0.0, 0.0, 0.0], dtype=np.float32)
+    crossing = [3.0, 0.0, 0.0]  # on the red axis through the anchor
+    # An edge along +Y crossing the red axis at (3, 0, 0), t = 0.25.
+    scene.add_edge(
+        scene.add_vertex(np.array([3.0, -1.0, 0.0], dtype=np.float32)),
+        scene.add_vertex(np.array([3.0, 3.0, 0.0], dtype=np.float32)),
+    )
+    vid = scene.add_vertex(np.array(crossing, dtype=np.float32))
+
+    res = SnapEngine().snap(_screen_of(cam, crossing), (1280, 800), cam, scene, anchor=anchor)
+    assert res.kind == SnapKind.ENDPOINT, f"got {res.kind}"
+    assert res.vertex_id == vid
+
+
+def test_perpendicular_beats_parallel_where_the_two_lines_meet():
+    """Task 4 created this adjacency and nothing pinned it.
+
+    Both inferences are drawn from the SAME acquired edge through the SAME
+    gesture anchor, so the only point where both are in tolerance at once is
+    the anchor itself. The scene is empty, so nothing geometric competes;
+    the AXIS_LOCK and GRID candidates that the anchor's position also
+    produces both rank below the pair and cannot mask its ordering.
+    """
+    from pluton.scene import Scene
+    from pluton.viewport.inference import Acquired, AcquiredKind
+    from pluton.viewport.snap_engine import SnapEngine, SnapKind
+
+    cam = _camera_at_default()
+    anchor = np.array([0.0, 0.0, 0.0], dtype=np.float32)
+    acquired = Acquired(
+        kind=AcquiredKind.EDGE,
+        position=np.array([4.0, 0.0, 0.0], dtype=np.float64),
+        direction=np.array([1.0, 0.0, 0.0], dtype=np.float64),
+        entity_id=0,
+    )
+    res = SnapEngine().snap(
+        _screen_of(cam, [0.0, 0.0, 0.0]),
+        (1280, 800),
+        cam,
+        Scene(),
+        anchor=anchor,
+        acquired=acquired,
+        plane_normal=np.array([0.0, 0.0, 1.0], dtype=np.float64),
+    )
+    assert res.kind == SnapKind.PERPENDICULAR, f"got {res.kind}"
+
+
+def test_parallel_beats_from_point_in_the_precedence_table():
+    """The one adjacency the full pipeline structurally cannot stage.
+
+    PARALLEL needs an acquired EDGE and FROM_POINT an acquired VERTEX, and
+    at most one reference is acquired at a time (spec 2.3), so `snap()` can
+    never emit both. The contract still has to hold -- the two kinds are
+    adjacent in D12 and the table is consulted by rank, not by which
+    generator ran -- so it is pinned where it lives, at the selection step,
+    with exactly those two candidates and every tiebreaker equal.
+    """
+    from pluton.viewport.snap_engine import SnapEngine, SnapKind
+    from pluton.viewport.snap_types import Candidate
+
+    def _cand(kind):
+        return Candidate(
+            kind=kind,
+            world_position=np.array([1.0, 1.0, 0.0], dtype=np.float32),
+            screen_dist=0.0,
+            depth=10.0,
+            label=str(kind),
+        )
+
+    chosen = SnapEngine()._select([_cand(SnapKind.FROM_POINT), _cand(SnapKind.PARALLEL)])
+    assert chosen.kind == SnapKind.PARALLEL
+
+
+def test_from_point_beats_axis_lock_where_their_lines_cross():
+    """The pair that genuinely competes: two axis-direction lines differing
+    only in origin.
+
+    The acquired vertex is at (0, 2, 0) and the gesture anchor at the world
+    origin, so the red axis through the acquired point crosses the green
+    axis through the anchor at (0, 2, 0). The acquired reference is built by
+    hand rather than added to the scene, so no ENDPOINT candidate appears
+    there; the GRID fallback does land on the same ground-plane point, but
+    it is the bottom of D12 and cannot mask this pair either way.
+    """
+    from pluton.scene import Scene
+    from pluton.viewport.inference import Acquired, AcquiredKind
+    from pluton.viewport.snap_engine import SnapEngine, SnapKind
+
+    cam = _camera_at_default()
+    anchor = np.array([0.0, 0.0, 0.0], dtype=np.float32)
+    acquired = Acquired(
+        kind=AcquiredKind.VERTEX,
+        position=np.array([0.0, 2.0, 0.0], dtype=np.float64),
+        direction=None,
+        entity_id=0,
+    )
+    res = SnapEngine().snap(
+        _screen_of(cam, [0.0, 2.0, 0.0]),
+        (1280, 800),
+        cam,
+        Scene(),
+        anchor=anchor,
+        acquired=acquired,
+    )
+    assert res.kind == SnapKind.FROM_POINT, f"got {res.kind}"

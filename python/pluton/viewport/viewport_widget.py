@@ -15,7 +15,7 @@ from PySide6.QtCore import QPoint, Qt, Signal
 from PySide6.QtGui import QMouseEvent, QWheelEvent
 from PySide6.QtOpenGLWidgets import QOpenGLWidget
 
-from pluton.geometry.transforms import apply_mat
+from pluton.geometry.transforms import apply_mat, is_identity_transform, mat_invert
 from pluton.tools.select_tool import _HOVER_EDGE_COLOR, SelectTool
 from pluton.units import Units, format_coordinates
 from pluton.viewport.camera import Camera
@@ -55,6 +55,10 @@ class ViewportWidget(QOpenGLWidget):
         # time (see _update_gesture_plane_normal / _drawing_plane_normal).
         self._gesture_plane_normal: np.ndarray | None = None
         self._gesture_plane_captured = False
+        # M7.6b: previous frame's `has_active_gesture`, for the True -> False
+        # edge that releases the lock and the acquisition (see
+        # _sync_gesture_lifecycle).
+        self._gesture_was_active = False
         # M7.6b Task 7: View > Guides. A filter on which annotation PLANS get
         # PAINTED, not on which get collected -- hiding a guide must never
         # renumber anyone's ids. Guides are visible by default (SketchUp).
@@ -285,6 +289,7 @@ class ViewportWidget(QOpenGLWidget):
         pos = event.position()
         active = self.tool_manager.active if self.tool_manager is not None else None
         anchor = active.anchor_or_none if active is not None else None
+        self._sync_gesture_lifecycle(active)
         self._update_gesture_plane_normal(anchor)
         wt = self.model.active_world_transform if self.model is not None else None
         guides, guide_points = self._gather_guides()
@@ -304,10 +309,41 @@ class ViewportWidget(QOpenGLWidget):
         # here, not in InferenceState, so the edge direction is resolved here.
         self.inference.observe(snap, (float(pos.x()), float(pos.y())), self._edge_direction(snap))
         result = self.inference.apply_lock(
-            snap, self.camera, (self.width(), self.height()), (float(pos.x()), float(pos.y()))
+            snap,
+            self.camera,
+            (self.width(), self.height()),
+            (float(pos.x()), float(pos.y())),
+            anchor=anchor,
         )
         self._last_snap = result
         return result
+
+    def _sync_gesture_lifecycle(self, active) -> None:
+        """Release lock + acquisition on the frame after a gesture finishes.
+
+        Spec 2.3: "a lock also releases when the gesture ends". Watching the
+        active tool's `has_active_gesture` for a True -> False edge from here
+        covers every way a gesture can end -- a commit click, a double-click,
+        Enter, Escape, a typed VCB value, or the tool being swapped out --
+        without twenty tools each having to remember to notify. This runs at
+        the top of `_snap_for_event`, i.e. before the snap it precedes is
+        computed, so no frame is ever snapped against a finished gesture's
+        state.
+        """
+        live = bool(active is not None and active.has_active_gesture)
+        if self._gesture_was_active and not live:
+            self.inference.end_gesture()
+        self._gesture_was_active = live
+
+    def on_active_context_changed(self) -> None:
+        """Drop the acquired reference when the user enters or leaves a group.
+
+        `Acquired` holds a world position and a per-context entity id. Both
+        are meaningless once the context changes: the position is stale, and
+        the id names whatever entity happens to carry it in the new context,
+        which may be a different edge or none at all.
+        """
+        self.inference.clear_acquisition()
 
     def _gather_guides(self):
         """World-space (lines, points) from the active context's guides.
@@ -343,7 +379,18 @@ class ViewportWidget(QOpenGLWidget):
         return lines, points
 
     def _edge_direction(self, snap):
-        """World-space unit direction of the snapped edge, or None."""
+        """World-space unit direction of the snapped edge, or None.
+
+        `self.scene` is the ACTIVE CONTEXT's mesh, so the two vertices come
+        back in local coordinates. Everything downstream is world:
+        `Acquired.position` is `snap.world_position`, tool anchors are world,
+        and `snap_candidates.directional_candidates` adds this direction to
+        the world anchor. An ordinary direction transforms by the world
+        transform's linear block -- the same split `_gather_guides` applies
+        seventeen lines above, and `tape_measure_tool._local_vec_to_world`
+        applies to the same quantity. A normal would need the inverse
+        transpose instead; an edge direction is not a normal.
+        """
         if snap is None or snap.edge_id is None or self.scene is None:
             return None
         try:
@@ -353,6 +400,9 @@ class ViewportWidget(QOpenGLWidget):
         except (KeyError, AttributeError):
             return None
         d = np.asarray(p2, dtype=np.float64) - np.asarray(p1, dtype=np.float64)
+        wt = self.model.active_world_transform if self.model is not None else None
+        if wt is not None and not is_identity_transform(wt):
+            d = np.asarray(wt, dtype=np.float64)[:3, :3] @ d
         n = float(np.linalg.norm(d))
         return None if n < 1e-12 else d / n
 
@@ -390,11 +440,29 @@ class ViewportWidget(QOpenGLWidget):
         if snap is None or snap.face_id is None or self.scene is None:
             return
         try:
-            self._gesture_plane_normal = np.asarray(
-                self.scene.face_normal(snap.face_id), dtype=np.float64
-            )
+            normal_local = np.asarray(self.scene.face_normal(snap.face_id), dtype=np.float64)
         except (KeyError, ValueError):
             self._gesture_plane_normal = None
+            return
+        self._gesture_plane_normal = self._normal_to_world(normal_local)
+
+    def _normal_to_world(self, normal_local):
+        """Take a local face normal into world space, or None if degenerate.
+
+        A normal is not an ordinary vector: under a non-uniform scale the
+        plain linear block tilts it off perpendicular, so it goes through the
+        INVERSE TRANSPOSE of that block instead. Same rule, same reason, and
+        the same M7.4 issue (#92) as `Model.pick_face_local`,
+        `paint_tool` and `tape_measure_tool._plane_normal_world`. Contrast
+        `_edge_direction` just above, which is an ordinary direction and so
+        uses the plain linear block.
+        """
+        wt = self.model.active_world_transform if self.model is not None else None
+        n = np.asarray(normal_local, dtype=np.float64)
+        if wt is not None and not is_identity_transform(wt):
+            n = mat_invert(np.asarray(wt, dtype=np.float64))[:3, :3].T @ n
+        length = float(np.linalg.norm(n))
+        return None if length < 1e-12 else n / length
 
     def _drawing_plane_normal(self):
         """The active gesture's plane normal, for Perpendicular. None if unknown.

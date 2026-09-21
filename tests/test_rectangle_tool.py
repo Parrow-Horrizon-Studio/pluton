@@ -241,3 +241,54 @@ def test_rectangle_commits_local_z_zero_under_rotated_translated_context(group_f
         f"footprint; a wrong z fed through the rotated inverse transform "
         f"would corrupt local x/y as well as z"
     )
+
+
+def test_measurement_text_reports_local_width_and_height_under_a_rotated_context(group_factory):
+    """The readout is the number the VCB invites the user to type back.
+
+    `_current_size` alone read raw world x and y while `overlay`,
+    `apply_typed_value` and `_commit_rect` all resolve through
+    `world_to_local_point`. In a context rotated 90 degrees about Z, local
+    +X is world +Y, so a 2-by-4 local drag was announced as "4 m x 2 m" and
+    typing that back would have built a 4-by-2 rectangle instead.
+    """
+    import math
+
+    from pluton.geometry.transforms import apply_mat, mat_compose, mat_rotate, mat_translate
+    from pluton.model.model import Model
+    from pluton.tools import ToolContext
+    from pluton.tools.rectangle_tool import RectangleTool
+    from pluton.units import Units
+
+    model = Model()
+    scene = model.active_context.mesh
+    v = [
+        scene.add_vertex(np.array([0.0, 0.0, 0.0], dtype=np.float32)),
+        scene.add_vertex(np.array([1.0, 0.0, 0.0], dtype=np.float32)),
+        scene.add_vertex(np.array([1.0, 1.0, 0.0], dtype=np.float32)),
+        scene.add_vertex(np.array([0.0, 1.0, 0.0], dtype=np.float32)),
+    ]
+    for a, b in zip(v, v[1:] + v[:1], strict=True):
+        scene.add_edge(a, b)
+    scene.add_face_from_loop(v)
+    inst = group_factory(model)
+    rot = mat_rotate([0.0, 0.0, 0.0], [0.0, 0.0, 1.0], math.radians(90.0))
+    trans = mat_translate([5.0, 0.0, 0.0])
+    inst.transform = mat_compose(rot, trans)
+    model.enter(inst)
+
+    inner_scene = model.active_context.mesh
+    tool = RectangleTool()
+    tool.activate(ToolContext(scene=inner_scene, model=model, units_provider=Units))
+
+    wt = model.active_world_transform
+    world_first = apply_mat(np.array([0.0, 0.0, 0.0], dtype=np.float64), wt)[0]
+    world_second = apply_mat(np.array([2.0, 4.0, 0.0], dtype=np.float64), wt)[0]
+
+    tool.on_mouse_press(None, _snap_at(world_first))  # type: ignore[arg-type]
+    tool.on_mouse_move(None, _snap_at(world_second))  # type: ignore[arg-type]
+
+    width, height = tool._current_size()
+    assert round(width, 6) == 2.0
+    assert round(height, 6) == 4.0
+    assert tool.measurement_text == "2 m x 4 m"

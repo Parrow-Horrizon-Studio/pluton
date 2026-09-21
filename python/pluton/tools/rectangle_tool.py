@@ -179,8 +179,16 @@ class RectangleTool(Tool):
             or self._preview_corner is None
         ):
             return None
-        width = abs(float(self._preview_corner[0]) - float(self._first_corner[0]))
-        height = abs(float(self._preview_corner[1]) - float(self._first_corner[1]))
+        # LOCAL (active-context) magnitudes, the same frame apply_typed_value,
+        # _commit_rect and overlay all resolve in. Reading raw world x/y
+        # instead swapped the two numbers under a context rotated 90 degrees
+        # about Z, so the readout invited the user to type back a value that
+        # would have built a different rectangle than the one on screen.
+        wt = self._world_transform()
+        p0 = world_to_local_point(self._first_corner, wt)
+        p1 = world_to_local_point(self._preview_corner, wt)
+        width = abs(float(p1[0]) - float(p0[0]))
+        height = abs(float(p1[1]) - float(p0[1]))
         return width, height
 
     @property

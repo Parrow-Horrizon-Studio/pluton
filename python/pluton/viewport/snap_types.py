@@ -22,7 +22,14 @@ import numpy as np
 
 
 class SnapKind(IntEnum):
-    """Snap kinds, ordered by precedence (higher wins on a tie)."""
+    """The snap kinds the engine can report.
+
+    The member order and numeric values are an arbitrary, stable enumeration
+    and carry NO precedence meaning. Precedence is D12's table, held
+    separately in `snap_engine._PRECEDENCE`, which is deliberately decoupled
+    from these values so a new kind can be added here without renumbering
+    (and silently reordering) everything below it.
+    """
 
     NONE = 0
     GRID = 1
@@ -49,8 +56,15 @@ class SnapResult:
     vertex_id: int | None  # only ENDPOINT
     label: str
     edge_id: int | None = None  # MIDPOINT / ON_EDGE / INTERSECTION
-    face_id: int | None = None  # ON_FACE
+    # D3: populated by whichever kind wins, not only ON_FACE -- that is what
+    # makes D2 (ON_FACE dropping below the directional inferences) safe, since
+    # `resolve_drawing_plane` keys off this field no matter which kind won.
+    face_id: int | None = None
     edge_t: float | None = None  # parameter along edge_id (drives split_edge)
+    # Unit direction of the infinite inference LINE this result sits on, in
+    # world space: AXIS_LOCK, FROM_POINT, PARALLEL, PERPENDICULAR, ON_GUIDE.
+    # None for the point-like kinds, which imply no direction at all.
+    direction: np.ndarray | None = None
 
 
 @dataclass
@@ -67,6 +81,7 @@ class Candidate:
     face_id: int | None = None
     axis: int | None = None
     edge_t: float | None = None
+    direction: np.ndarray | None = None  # see SnapResult.direction
 
 
 class AcquiredKind(IntEnum):

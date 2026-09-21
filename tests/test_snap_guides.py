@@ -408,3 +408,93 @@ def test_gather_guides_direction_uses_the_vector_convention_under_nonuniform_sca
     assert len(lines) == 1
     _origin, direction = lines[0]
     np.testing.assert_allclose(direction, [-0.70710678, 1.41421356, 0.0], atol=1e-5)
+
+
+def _rotated_scaled_context(model):
+    """Enter a group rotated 90 degrees about Z and scaled non-uniformly.
+
+    Rotation alone cannot tell a direction convention from a normal
+    convention apart, because a rotation matrix is orthogonal and its
+    inverse transpose is itself. The non-uniform scale is what separates
+    them, and it is also what M7.4 #92 was about. The scale is applied
+    BEFORE the rotation (right-most factor) so it acts on the group's own
+    local axes.
+    """
+    from pluton.geometry.transforms import mat_rotate, mat_scale, mat_translate
+
+    wt = (
+        mat_translate([5.0, 0.0, 0.0])
+        @ mat_rotate([0, 0, 0], [0, 0, 1], math.radians(90))
+        @ mat_scale([0, 0, 0], [1.0, 4.0, 1.0])
+    )
+    grp_def = model.new_definition("Grp", is_group=True)
+    grp_inst = model.new_instance(grp_def, wt)
+    model.root.children.append(grp_inst)
+    model.enter(grp_inst)
+    return grp_def, wt
+
+
+def test_edge_direction_is_world_space_in_a_rotated_scaled_context(qtbot):
+    """`_edge_direction` feeds `Acquired.direction`, which is consumed in world
+    space beside a world anchor, but it reads the ACTIVE CONTEXT's local mesh.
+
+    An edge running along local +X in a context rotated 90 degrees about Z
+    runs along world +Y. Returning the local vector made Parallel,
+    Perpendicular and the Down-arrow edge lock all point the wrong way
+    inside any rotated context.
+    """
+    from pluton.model.model import Model
+    from pluton.viewport.snap_engine import SnapKind, SnapResult
+    from pluton.viewport.viewport_widget import ViewportWidget
+
+    model = Model()
+    grp_def, _wt = _rotated_scaled_context(model)
+    scene = grp_def.mesh
+    v0 = scene.add_vertex(np.array([0.0, 0.0, 0.0], dtype=np.float32))
+    v1 = scene.add_vertex(np.array([2.0, 0.0, 0.0], dtype=np.float32))
+    eid = scene.add_edge(v0, v1)
+
+    widget = ViewportWidget(model=model)
+    qtbot.addWidget(widget)
+
+    snap = SnapResult(
+        kind=SnapKind.ON_EDGE,
+        world_position=np.zeros(3, dtype=np.float32),
+        axis=None,
+        vertex_id=None,
+        label="On Edge",
+        edge_id=eid,
+    )
+    direction = widget._edge_direction(snap)
+    np.testing.assert_allclose(direction, [0.0, 1.0, 0.0], atol=1e-9)
+
+
+def test_the_gesture_plane_normal_uses_the_inverse_transpose(qtbot):
+    """A normal is not an ordinary vector (M7.4 #92).
+
+    In a context scaled by 4 along local Y and then rotated 90 degrees about
+    Z, a face whose local normal is (0, 1, 1) has world normal proportional
+    to (-1/4, 0, 1) -- the inverse transpose of the linear block. Pushing it
+    through the plain linear block would give (-4, 0, 1) instead, which is
+    not perpendicular to the face any more, and Perpendicular resolves
+    inside that plane.
+    """
+    from pluton.model.model import Model
+    from pluton.viewport.viewport_widget import ViewportWidget
+
+    model = Model()
+    _grp_def, _wt = _rotated_scaled_context(model)
+
+    widget = ViewportWidget(model=model)
+    qtbot.addWidget(widget)
+
+    got = widget._normal_to_world(np.array([0.0, 1.0, 1.0], dtype=np.float64))
+    expected = np.array([-0.25, 0.0, 1.0])
+    expected = expected / np.linalg.norm(expected)
+    np.testing.assert_allclose(got, expected, atol=1e-9)
+
+    # And the plain-linear-block answer, which a rotation alone could not
+    # have distinguished from it, is genuinely a different direction.
+    wrong = np.array([-4.0, 0.0, 1.0])
+    wrong = wrong / np.linalg.norm(wrong)
+    assert float(np.linalg.norm(got - wrong)) > 0.5

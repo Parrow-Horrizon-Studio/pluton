@@ -171,6 +171,7 @@ def axis_candidates(px, py, width, height, camera, anchor, ray_origin, ray_dir, 
                     depth=depth,
                     label=f"on {_AXIS_NAMES[axis_idx]} Axis",
                     axis=axis_idx,
+                    direction=np.asarray(axis_dir, dtype=np.float64),
                 )
             )
     return out
@@ -187,7 +188,7 @@ def intersection_candidates(px, py, width, height, camera, scene, anchor, pixel_
             if t < 0.0 or t > 1.0:
                 continue  # crossing lies outside the edge segment
             if float(np.linalg.norm(c_axis - c_edge)) > _INTERSECTION_EPS:
-                continue  # skew — no genuine 3D crossing
+                continue  # skew -- no genuine 3D crossing
             proj = camera.world_to_screen(c_edge, width, height)
             if proj is None:
                 continue
@@ -228,6 +229,12 @@ def _line_candidate(
 
     The same shape axis_candidates already uses: the point on the line nearest
     the cursor ray, projected and tested against the pixel tolerance.
+
+    The candidate carries the line's own unit direction. That is what lets
+    Shift-lock pin a Parallel / Perpendicular / On-Guide inference without
+    re-deriving a direction from the snapped point, which is impossible for
+    a guide (the line passes nowhere near the gesture anchor) and lossy for
+    the rest.
     """
     ray_origin, ray_dir = camera.ray_from_screen(px, py, width, height)
     _, _, _c_ray, c_line = _closest_points_two_lines(ray_origin, ray_dir, origin, direction)
@@ -238,6 +245,8 @@ def _line_candidate(
     d = math.hypot(sx - px, sy - py)
     if d > pixel_tolerance:
         return None
+    dir_arr = np.asarray(direction, dtype=np.float64).reshape(3)
+    dir_len = float(np.linalg.norm(dir_arr))
     return Candidate(
         kind=kind,
         world_position=np.asarray(c_line, dtype=np.float32),
@@ -245,6 +254,7 @@ def _line_candidate(
         depth=depth,
         label=label,
         axis=axis,
+        direction=dir_arr / dir_len if dir_len > 1e-12 else None,
     )
 
 

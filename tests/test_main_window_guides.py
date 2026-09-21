@@ -180,3 +180,40 @@ def test_hiding_guides_stops_them_painting_while_dimensions_still_paint(qtbot, m
 
     assert hidden_texts == shown_texts, "the dimension must keep painting"
     assert hidden_lines < shown_lines, "the guide's own lines must stop painting"
+
+
+def test_hiding_guides_deselects_them_so_delete_cannot_destroy_the_invisible(qtbot):
+    """Task 7 made a hidden guide unpickable and unsnappable, on the grounds
+    that a hidden thing the user can still act on is a trap. The selection
+    half of that path was left open: select a guide, turn guides off, press
+    Delete, and an annotation vanishes with nothing on screen to say which.
+    A dimension selected at the same time is untouched -- View > Guides
+    hides guides, not everything on the annotation rail.
+    """
+    w = MainWindow()
+    qtbot.addWidget(w)
+    dim, _label, guide, point = _seed_annotations(w)
+    w._selection.replace(annotations=[dim.id, guide.id, point.id])
+
+    w._actions["view_guides"].setChecked(False)
+    w._on_toggle_guides(False)
+
+    assert guide.id not in w._selection.annotations
+    assert point.id not in w._selection.annotations
+    assert dim.id in w._selection.annotations
+    # And nothing was deleted: hiding is not erasing.
+    assert {a.id for a in w._model.active_context.annotations} >= {guide.id, point.id}
+
+
+def test_showing_guides_again_does_not_reselect_them(qtbot):
+    """The deselect is not a stash-and-restore. Turning guides back on leaves
+    the selection where the user's last action left it."""
+    w = MainWindow()
+    qtbot.addWidget(w)
+    _dim, _label, guide, _point = _seed_annotations(w)
+    w._selection.replace(annotations=[guide.id])
+
+    w._on_toggle_guides(False)
+    w._on_toggle_guides(True)
+
+    assert guide.id not in w._selection.annotations
