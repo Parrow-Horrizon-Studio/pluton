@@ -89,6 +89,44 @@ def test_double_click_enters_instance(qtbot, monkeypatch):
     assert m.active_context is g, "double-click should enter the instance's definition"
 
 
+def test_double_click_prefers_entering_instance_over_geometry_under_it(qtbot, monkeypatch):
+    """M7.6c: the instance branch must win even when real geometry sits at
+    the same screen location as the enterable instance. Smart-select on raw
+    geometry is only reachable once you are inside a group, never as a way
+    to skip entering one (spec's Risks section calls this out by name).
+
+    `sel.faces` alone cannot prove this: entering a group runs
+    `_enter_or_exit_cleanup`, which unconditionally clears the selection, so
+    even a wrongly-ordered smart-select-then-enter leaves the selection
+    empty at the end, same as a correctly-ordered enter that never touched
+    it. The spy on `_apply_smart_selection` (the interface seam this task
+    and Task 7 both build on) observes whether the geometry branch ran at
+    all, which the final Selection state cannot distinguish.
+    """
+    m, inst, g = _make_model_with_instance()
+    scene = m.active_scene
+    a = scene.add_vertex(np.array([-1.0, -1.0, 0.0], dtype=np.float32))
+    b = scene.add_vertex(np.array([1.0, -1.0, 0.0], dtype=np.float32))
+    c = scene.add_vertex(np.array([1.0, 1.0, 0.0], dtype=np.float32))
+    d = scene.add_vertex(np.array([-1.0, 1.0, 0.0], dtype=np.float32))
+    scene.add_face_from_loop((a, b, c, d))
+    sel = Selection()
+    monkeypatch.setattr(m, "pick_instance", lambda o, d: inst)
+    tool, cam = _make_tool(m, sel)
+    smart_select_calls = []
+    monkeypatch.setattr(
+        tool,
+        "_apply_smart_selection",
+        lambda event, *, edges, faces: smart_select_calls.append((edges, faces)),
+    )
+    sx, sy, _ = cam.world_to_screen(np.array([0.0, 0.0, 0.0], dtype=np.float32), 800, 600)
+
+    tool.on_mouse_double_click(_dbl_click(sx, sy), None)
+
+    assert m.active_context is g, "double-click should still enter the instance"
+    assert smart_select_calls == [], "the geometry branch must not run when instance-enter fires"
+
+
 def test_double_click_clears_selection(qtbot, monkeypatch):
     m, inst, g = _make_model_with_instance()
     sel = Selection()
