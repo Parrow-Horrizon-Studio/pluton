@@ -131,3 +131,117 @@ def test_neighbour_queries_return_a_plain_set_of_ints(fn_name):
     got = getattr(ops, fn_name)(scene, seed)
     assert isinstance(got, set)
     assert all(type(x) is int for x in got)
+
+
+def _two_islands():
+    """Two quads that share no vertex, plus one loose edge touching neither.
+
+    Returns (scene, ids) with both face ids, a vertex of each, and the loose
+    edge's id.
+    """
+    from pluton.scene import Scene
+
+    scene = Scene()
+    a = scene.add_vertex(np.array([0.0, 0.0, 0.0], dtype=np.float32))
+    b = scene.add_vertex(np.array([1.0, 0.0, 0.0], dtype=np.float32))
+    c = scene.add_vertex(np.array([1.0, 1.0, 0.0], dtype=np.float32))
+    d = scene.add_vertex(np.array([0.0, 1.0, 0.0], dtype=np.float32))
+    one = scene.add_face_from_loop((a, b, c, d))
+
+    p = scene.add_vertex(np.array([5.0, 0.0, 0.0], dtype=np.float32))
+    q = scene.add_vertex(np.array([6.0, 0.0, 0.0], dtype=np.float32))
+    r = scene.add_vertex(np.array([6.0, 1.0, 0.0], dtype=np.float32))
+    s = scene.add_vertex(np.array([5.0, 1.0, 0.0], dtype=np.float32))
+    two = scene.add_face_from_loop((p, q, r, s))
+
+    m = scene.add_vertex(np.array([9.0, 0.0, 0.0], dtype=np.float32))
+    n = scene.add_vertex(np.array([9.0, 1.0, 0.0], dtype=np.float32))
+    loose = scene.add_edge(m, n)
+    return scene, {"a": a, "p": p, "one": one, "two": two, "loose": loose, "m": m}
+
+
+def test_flood_from_one_quad_reaches_its_own_face_and_edges_only():
+    from pluton.selection_ops import connected_component
+
+    scene, ids = _two_islands()
+    verts, edges, faces = connected_component(scene, {ids["a"]})
+    assert faces == {ids["one"]}
+    assert len(verts) == 4
+    assert len(edges) == 4
+    assert ids["loose"] not in edges
+
+
+def test_flood_does_not_jump_to_a_disjoint_island():
+    from pluton.selection_ops import connected_component
+
+    scene, ids = _two_islands()
+    _verts, _edges, faces = connected_component(scene, {ids["a"]})
+    assert ids["two"] not in faces
+
+
+def test_flood_crosses_a_shared_edge_between_two_quads():
+    from pluton.selection_ops import connected_component
+
+    scene, ids = _quad_pair()
+    _verts, _edges, faces = connected_component(scene, {ids["a"]})
+    assert faces == {ids["left"], ids["right"]}
+
+
+def test_flood_crosses_a_single_shared_corner():
+    """Connectivity is through shared VERTICES, not shared edges (spec 2.4).
+    Two quads meeting at one corner are one component."""
+    from pluton.scene import Scene
+    from pluton.selection_ops import connected_component
+
+    scene = Scene()
+    a = scene.add_vertex(np.array([0.0, 0.0, 0.0], dtype=np.float32))
+    b = scene.add_vertex(np.array([1.0, 0.0, 0.0], dtype=np.float32))
+    corner = scene.add_vertex(np.array([1.0, 1.0, 0.0], dtype=np.float32))
+    d = scene.add_vertex(np.array([0.0, 1.0, 0.0], dtype=np.float32))
+    lower = scene.add_face_from_loop((a, b, corner, d))
+
+    e = scene.add_vertex(np.array([2.0, 1.0, 0.0], dtype=np.float32))
+    f = scene.add_vertex(np.array([2.0, 2.0, 0.0], dtype=np.float32))
+    g = scene.add_vertex(np.array([1.0, 2.0, 0.0], dtype=np.float32))
+    upper = scene.add_face_from_loop((corner, e, f, g))
+
+    _verts, _edges, faces = connected_component(scene, {a})
+    assert faces == {lower, upper}
+
+
+def test_flood_includes_a_loose_edge_hanging_off_a_face():
+    from pluton.selection_ops import connected_component
+
+    scene, ids = _quad_pair()
+    tip = scene.add_vertex(np.array([0.0, -1.0, 0.0], dtype=np.float32))
+    spur = scene.add_edge(ids["a"], tip)
+    _verts, edges, _faces = connected_component(scene, {ids["a"]})
+    assert spur in edges
+
+
+def test_flood_result_does_not_depend_on_which_kind_seeded_it():
+    """Spec section 4 property 2: seeding from a face's vertex, from an
+    endpoint of one of its edges, and from a far corner all agree."""
+    from pluton.selection_ops import connected_component
+
+    scene, ids = _quad_pair()
+    from_a = connected_component(scene, {ids["a"]})
+    from_b = connected_component(scene, {ids["b"]})
+    from_f = connected_component(scene, {ids["f"]})
+    assert from_a == from_b == from_f
+
+
+def test_flood_from_no_seed_is_three_empty_sets():
+    from pluton.selection_ops import connected_component
+
+    scene, _ids = _quad_pair()
+    assert connected_component(scene, set()) == (set(), set(), set())
+
+
+def test_flood_skips_a_dead_seed_id():
+    from pluton.selection_ops import connected_component
+
+    scene, ids = _quad_pair()
+    verts, _edges, faces = connected_component(scene, {ids["a"], 9999})
+    assert 9999 not in verts
+    assert faces == {ids["left"], ids["right"]}

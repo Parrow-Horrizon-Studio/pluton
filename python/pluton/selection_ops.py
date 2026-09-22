@@ -21,6 +21,8 @@ the `prune_to_live` that follows it.
 
 from __future__ import annotations
 
+from collections import deque
+
 
 def bounding_edges(scene, face_ids) -> set[int]:
     """Every edge on the boundary loop of any face in `face_ids`.
@@ -71,3 +73,54 @@ def incident_edges(scene, vertex_ids) -> set[int]:
     return {
         int(e.id) for e in scene.edges_iter() if int(e.v1_id) in wanted or int(e.v2_id) in wanted
     }
+
+
+def connected_component(scene, seed_vertex_ids) -> tuple[set[int], set[int], set[int]]:
+    """Flood from `seed_vertex_ids` across shared vertices.
+
+    Returns `(vertices, edges, faces)`. An edge is included when BOTH its
+    endpoints are reached; a face when its WHOLE loop is reached. Both follow
+    from the walk rather than being separate rules: an edge with one endpoint
+    reached would mean the other endpoint was reachable too, so the stricter
+    test is the honest one and it keeps the result symmetric.
+
+    Connectivity is through shared vertices, not shared edges (spec 2.4).
+    Two faces meeting at a single corner are one component. That is what makes
+    the result independent of which entity kind seeded the walk, which is in
+    turn what lets double-click and triple-click compose.
+
+    This is the walk `follow_me_tool._order_path` performs over a selected
+    edge set, lifted so there is one copy. That caller keeps its own version
+    for now: it needs fork detection and an ORDERED chain, which this does not
+    produce.
+    """
+    adjacency: dict[int, set[int]] = {}
+    edges_by_pair: dict[tuple[int, int], int] = {}
+    for e in scene.edges_iter():
+        v1, v2 = int(e.v1_id), int(e.v2_id)
+        adjacency.setdefault(v1, set()).add(v2)
+        adjacency.setdefault(v2, set()).add(v1)
+        edges_by_pair[(min(v1, v2), max(v1, v2))] = int(e.id)
+
+    seeds = {int(v) for v in seed_vertex_ids if int(v) in adjacency}
+    if not seeds:
+        return set(), set(), set()
+
+    reached: set[int] = set(seeds)
+    queue = deque(seeds)
+    while queue:
+        v = queue.popleft()
+        for n in adjacency[v]:
+            if n not in reached:
+                reached.add(n)
+                queue.append(n)
+
+    edges = {e_id for (v1, v2), e_id in edges_by_pair.items() if v1 in reached and v2 in reached}
+
+    faces: set[int] = set()
+    for f in scene.faces_iter():
+        loop = scene.face_loop(f.id)
+        if loop and all(int(v) in reached for v in loop):
+            faces.add(int(f.id))
+
+    return reached, edges, faces
