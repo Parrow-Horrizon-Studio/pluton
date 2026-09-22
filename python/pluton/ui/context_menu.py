@@ -128,6 +128,30 @@ def _add_assign_tag_submenu(window, menu, entity_id) -> None:
         entry.triggered.connect(lambda _checked=False, tag_id=tag.id: window._assign_tag(tag_id))
 
 
+def _add_select_submenu(window, menu) -> None:
+    """M7.6c: the operations that derive a selection from the current one.
+
+    A submenu rather than five top-level entries, because the context menu is
+    already long and these four share one idea. Entries grey out rather than
+    hide (the same rule the rest of this module follows): a menu whose shape
+    changes under the cursor is harder to learn than one whose entries are
+    sometimes unavailable.
+    """
+    submenu = menu.addMenu("Select")
+    has_faces = bool(window._selection.faces)
+    has_instances = bool(window._selection.instances)
+    has_any = not window._selection.is_empty()
+    for action_id, enabled in (
+        ("select_grow", has_any),
+        ("select_shrink", has_any),
+        ("select_same_material", has_faces),
+        ("select_same_tag", has_instances),
+    ):
+        action = window._actions[action_id]
+        action.setEnabled(enabled)
+        submenu.addAction(action)
+
+
 def build_context_menu(window, target: ContextTarget, entity_id):
     """A QMenu for `target`, reusing the window's existing QActions.
 
@@ -175,6 +199,8 @@ def build_context_menu(window, target: ContextTarget, entity_id):
             )
         )
         menu.addAction(action)
+
+    _add_select_submenu(window, menu)
 
     if target is ContextTarget.INSTANCE:
         _add_assign_tag_submenu(window, menu, entity_id)

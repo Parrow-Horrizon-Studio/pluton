@@ -121,3 +121,38 @@ def test_ordinary_entries_are_always_enabled():
         is_component=False,
         has_selection=True,
     )
+
+
+def test_select_same_material_is_disabled_with_nothing_selected(qtbot):
+    """Mutant 3 (Step 8): enable select_same_material unconditionally in
+    _add_select_submenu and this is the test that catches it. Same
+    material needs a seed face; with no selection at all there is nothing
+    to seed from."""
+    from pluton.ui.context_menu import build_context_menu
+    from pluton.ui.main_window import MainWindow
+
+    w = MainWindow()
+    qtbot.addWidget(w)
+    w._selection.clear()
+    menu = build_context_menu(w, ContextTarget.EMPTY, None)
+    submenu = None
+    for action in menu.actions():
+        candidate = action.menu()
+        if candidate is not None and candidate.title() == "Select":
+            submenu = candidate
+            break
+    assert submenu is not None
+    same_material = next(a for a in submenu.actions() if a.text() == "All with Same Material")
+    assert not same_material.isEnabled()
+
+
+def test_the_select_submenu_appears_on_every_target(qtbot):
+    from pluton.ui.context_menu import build_context_menu
+    from pluton.ui.main_window import MainWindow
+
+    w = MainWindow()
+    qtbot.addWidget(w)
+    for target in ContextTarget:
+        menu = build_context_menu(w, target, None)
+        titles = [a.menu().title() for a in menu.actions() if a.menu() is not None]
+        assert "Select" in titles, target

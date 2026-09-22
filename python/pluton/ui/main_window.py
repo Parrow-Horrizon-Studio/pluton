@@ -1068,6 +1068,88 @@ class MainWindow(QMainWindow):
         self._refresh_selection_status()
         self._viewport.update()
 
+    def _on_invert_selection(self) -> None:
+        from pluton.selection_ops import invert
+
+        edges, faces, instances, vertices = invert(
+            self._model, self._selection, select_vertices=self._viewport.select_vertices
+        )
+        self._selection.replace(edges=edges, faces=faces, instances=instances, vertices=vertices)
+        self._refresh_selection_status()
+        self._viewport.update()
+
+    def _on_grow_selection(self) -> None:
+        from pluton.selection_ops import grow
+
+        edges, faces, vertices = grow(
+            self._model.active_scene,
+            edges=self._selection.edges,
+            faces=self._selection.faces,
+            vertices=self._selection.vertices,
+        )
+        self._selection.replace(
+            edges=edges,
+            faces=faces,
+            vertices=vertices,
+            instances=set(self._selection.instances),
+            annotations=set(self._selection.annotations),
+        )
+        self._refresh_selection_status()
+        self._viewport.update()
+
+    def _on_shrink_selection(self) -> None:
+        from pluton.selection_ops import shrink
+
+        edges, faces, vertices = shrink(
+            self._model.active_scene,
+            edges=self._selection.edges,
+            faces=self._selection.faces,
+            vertices=self._selection.vertices,
+        )
+        self._selection.replace(
+            edges=edges,
+            faces=faces,
+            vertices=vertices,
+            instances=set(self._selection.instances),
+            annotations=set(self._selection.annotations),
+        )
+        self._refresh_selection_status()
+        self._viewport.update()
+
+    def _on_select_same_material(self) -> None:
+        from pluton.selection_ops import same_material
+
+        faces = same_material(self._model.active_scene, self._selection.faces)
+        if not faces:
+            return
+        self._selection.replace(faces=faces)
+        self._refresh_selection_status()
+        self._viewport.update()
+
+    def _on_select_same_tag(self) -> None:
+        from pluton.selection_ops import same_tag
+
+        instances = same_tag(self._model, self._selection.instances)
+        if not instances:
+            return
+        self._selection.replace(instances=instances)
+        self._refresh_selection_status()
+        self._viewport.update()
+
+    def _on_toggle_select_vertices(self, checked: bool) -> None:
+        """M7.6c: View > Select Vertices.
+
+        Turning the mode off also drops any selected vertex. Same reasoning as
+        _on_toggle_guides: a selection the user can no longer see, but which
+        Move would still drag, is the trap that method's docstring describes
+        on the other half of the path.
+        """
+        self._viewport.select_vertices = bool(checked)
+        if not checked and self._selection.vertices:
+            self._selection.remove(vertices=set(self._selection.vertices))
+            self._refresh_selection_status()
+        self._viewport.update()
+
     def _on_zoom_extents(self) -> None:
         """Frame everything visible without changing the view direction."""
         from pluton.model.model_queries import model_bounds

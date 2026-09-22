@@ -136,6 +136,15 @@ ACTIONS: tuple[ActionSpec, ...] = (
     ),
     ActionSpec("edit_select_all", "Select All", "_on_select_all", shortcut="Ctrl+A"),
     ActionSpec("edit_select_none", "Select None", "_on_select_none"),
+    # M7.6c. Invert lives on Edit because it needs no entity under the
+    # cursor; the other four are relative to a click and live on the
+    # right-click Select submenu, which is where a SketchUp user reaches
+    # for them.
+    ActionSpec("edit_invert_selection", "Invert Selection", "_on_invert_selection"),
+    ActionSpec("select_grow", "Grow", "_on_grow_selection"),
+    ActionSpec("select_shrink", "Shrink", "_on_shrink_selection"),
+    ActionSpec("select_same_material", "All with Same Material", "_on_select_same_material"),
+    ActionSpec("select_same_tag", "All with Same Tag", "_on_select_same_tag"),
     ActionSpec(
         "edit_erase",
         "Erase",
@@ -273,6 +282,12 @@ ACTIONS: tuple[ActionSpec, ...] = (
     # guides are visible by default, matching SketchUp.
     ActionSpec("view_guides", "Guides", "_on_toggle_guides", checkable=True),
     ActionSpec(
+        "view_select_vertices",
+        "Select Vertices",
+        "_on_toggle_select_vertices",
+        checkable=True,
+    ),
+    ActionSpec(
         "view_zoom_extents",
         "Zoom Extents",
         "_on_zoom_extents",
@@ -389,6 +404,7 @@ MENUS: tuple[MenuSpec, ...] = (
             None,
             "edit_select_all",
             "edit_select_none",
+            "edit_invert_selection",
             None,
             "edit_make_group",
             "edit_make_component",
@@ -453,6 +469,7 @@ MENUS: tuple[MenuSpec, ...] = (
             "view_xray",
             "view_color_by_tag",
             "view_guides",
+            "view_select_vertices",
             None,
             "view_zoom_extents",
             None,
