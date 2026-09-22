@@ -846,15 +846,41 @@ class MainWindow(QMainWindow):
 
     # --- Edit-menu handlers -----------------------------------------------
 
+    def _grouped_vertex_ids(self, sel) -> list[int]:
+        """The vertices Make Group / Make Component move into the new
+        definition: every vertex of a selected edge or face, and nothing else.
+
+        Final review I5: both handlers used to call `selection_vertices(scene,
+        sel)` directly, which also returns bare selected vertices -- ones
+        belonging to no selected edge or face. Both handlers gate on
+        `sel.edges or sel.faces`, so a face plus an unrelated bare vertex
+        passed the gate and handed that vertex to the command, which copied it
+        into the group and then failed to remove it from the parent
+        (`remove_vertex` raises on a vertex still used by an edge, and
+        group_commands swallows that), leaving a duplicated, orphaned vertex.
+        A window box-select reaches this in one gesture: it takes every vertex
+        whose point falls in the rect while taking only fully-enclosed faces.
+
+        `selection_vertices` itself is deliberately left alone -- Move, Rotate
+        and Scale genuinely want to drag a bare vertex. What differs is what
+        "group this" means: the geometry the user selected, and a vertex that
+        belongs to no selected edge or face is not geometry to group.
+        """
+        from types import SimpleNamespace
+
+        from pluton.tools.transform_support import selection_vertices
+
+        geometry_only = SimpleNamespace(edges=sel.edges, faces=sel.faces, vertices=())
+        return selection_vertices(self._model.active_scene, geometry_only)
+
     def _on_make_group(self) -> None:
         from pluton.commands.group_commands import MakeGroupCommand
-        from pluton.tools.transform_support import selection_vertices
 
         sel = self._selection
         if not (sel.edges or sel.faces):
             self._status_bar.set_message("Select edges or faces to group.")
             return
-        vertex_ids = selection_vertices(self._model.active_scene, sel)
+        vertex_ids = self._grouped_vertex_ids(sel)
         edge_ids = list(sel.edges)
         face_ids = list(sel.faces)
         cmd = MakeGroupCommand(
@@ -875,7 +901,6 @@ class MainWindow(QMainWindow):
 
     def _on_make_component(self) -> None:
         from pluton.commands.group_commands import MakeComponentCommand
-        from pluton.tools.transform_support import selection_vertices
 
         sel = self._selection
         if not (sel.edges or sel.faces):
@@ -885,7 +910,7 @@ class MainWindow(QMainWindow):
         name = self._prompt_component_name(default)
         if name is None:
             return
-        vertex_ids = selection_vertices(self._model.active_scene, sel)
+        vertex_ids = self._grouped_vertex_ids(sel)
         edge_ids = list(sel.edges)
         face_ids = list(sel.faces)
         cmd = MakeComponentCommand(
