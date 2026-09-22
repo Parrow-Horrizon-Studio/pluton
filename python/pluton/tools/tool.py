@@ -75,6 +75,10 @@ class ToolOverlay:
     box_rect: tuple[float, float, float, float] | None = None
     box_rect_color: tuple[float, float, float] = (0.30, 0.55, 0.95)
 
+    # M7.6c (#39): crossing mode draws dashed, matching SketchUp. Colour
+    # still distinguishes the two modes; the dash is additive.
+    box_rect_dashed: bool = False
+
     # M4c: generic gizmo primitives (transform tools).
     # world_polylines: list of (segments (2*N, 3) float32, rgb, width) drawn in
     # world space via the line shader. screen_markers: list of (world_pos (3,),

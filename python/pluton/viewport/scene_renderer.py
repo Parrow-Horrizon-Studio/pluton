@@ -9,6 +9,7 @@ Lifecycle is driven by QOpenGLWidget:
 from __future__ import annotations
 
 import ctypes
+import math
 from collections.abc import Sequence
 from dataclasses import dataclass, field, replace
 from importlib.resources import files
@@ -1137,9 +1138,19 @@ def _selection_edge_segments(scene, selection) -> np.ndarray:
     return np.array(out, dtype=np.float32)
 
 
-def _box_rect_ndc_segments(box_rect, viewport_w, viewport_h) -> np.ndarray:
-    """Convert a pixel-space rect (x0,y0,x1,y1) to (8,3) NDC GL_LINES segments
-    (z=0) tracing its outline. y is flipped (screen y-down -> NDC y-up)."""
+_BOX_DASH_PX = 6.0  # on and off length, screen pixels
+
+
+def _box_rect_ndc_segments(box_rect, viewport_w, viewport_h, *, dashed=False) -> np.ndarray:
+    """Convert a pixel-space rect (x0,y0,x1,y1) to NDC GL_LINES segments
+    (z=0) tracing its outline. y is flipped (screen y-down -> NDC y-up).
+
+    `dashed` subdivides each side into _BOX_DASH_PX on/off runs, which is
+    SketchUp's crossing-mode style (#39). The period is measured in PIXELS
+    before the NDC conversion, so the dashes look the same at every rectangle
+    size; defined as a fraction of the side, they would grow with the drag
+    and read as a different line style at each size.
+    """
     x0, y0, x1, y1 = box_rect
     w = max(int(viewport_w), 1)
     h = max(int(viewport_h), 1)
@@ -1147,13 +1158,32 @@ def _box_rect_ndc_segments(box_rect, viewport_w, viewport_h) -> np.ndarray:
     def ndc(px, py):
         return ((2.0 * px / w) - 1.0, 1.0 - (2.0 * py / h))
 
-    corners = [ndc(x0, y0), ndc(x1, y0), ndc(x1, y1), ndc(x0, y1)]
+    corners_px = [(x0, y0), (x1, y0), (x1, y1), (x0, y1)]
     out: list[list[float]] = []
     for i in range(4):
-        ax, ay = corners[i]
-        bx, by = corners[(i + 1) % 4]
-        out.append([ax, ay, 0.0])
-        out.append([bx, by, 0.0])
+        ax, ay = corners_px[i]
+        bx, by = corners_px[(i + 1) % 4]
+        if not dashed:
+            nax, nay = ndc(ax, ay)
+            nbx, nby = ndc(bx, by)
+            out.append([nax, nay, 0.0])
+            out.append([nbx, nby, 0.0])
+            continue
+        length = math.hypot(bx - ax, by - ay)
+        if length <= 1e-6:
+            continue
+        step = _BOX_DASH_PX * 2.0
+        travelled = 0.0
+        while travelled < length:
+            t0 = travelled / length
+            t1 = min(travelled + _BOX_DASH_PX, length) / length
+            sax, say = ndc(ax + (bx - ax) * t0, ay + (by - ay) * t0)
+            sbx, sby = ndc(ax + (bx - ax) * t1, ay + (by - ay) * t1)
+            out.append([sax, say, 0.0])
+            out.append([sbx, sby, 0.0])
+            travelled += step
+    if not out:
+        return np.zeros((0, 3), dtype=np.float32)
     return np.array(out, dtype=np.float32)
 
 
@@ -1491,7 +1521,9 @@ class SceneRenderer:
 
         # 7. Box-select rectangle (M4b) — screen space, on top.
         if tool_overlay is not None and tool_overlay.box_rect is not None:
-            self._draw_box_rect(tool_overlay.box_rect, tool_overlay.box_rect_color)
+            self._draw_box_rect(
+                tool_overlay.box_rect, tool_overlay.box_rect_color, tool_overlay.box_rect_dashed
+            )
 
         # 8. Generic gizmo primitives (M4c) — world polylines + screen markers.
         if tool_overlay is not None:
@@ -2163,10 +2195,10 @@ class SceneRenderer:
             GL.glEnable(GL.GL_DEPTH_TEST)
         GL.glUseProgram(0)
 
-    def _draw_box_rect(self, box_rect, color) -> None:
+    def _draw_box_rect(self, box_rect, color, dashed=False) -> None:
         """Draw the screen-space box-select outline using identity view/projection
         (NDC positions render directly); depth test off."""
-        segs = _box_rect_ndc_segments(box_rect, self._viewport_w, self._viewport_h)
+        segs = _box_rect_ndc_segments(box_rect, self._viewport_w, self._viewport_h, dashed=dashed)
         self._draw_screen_space_lines(segs, color, 1.5)
 
     def _draw_world_polylines(self, polylines, view, projection) -> None:
