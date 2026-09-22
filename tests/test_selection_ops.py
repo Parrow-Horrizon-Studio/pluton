@@ -245,3 +245,256 @@ def test_flood_skips_a_dead_seed_id():
     verts, _edges, faces = connected_component(scene, {ids["a"], 9999})
     assert 9999 not in verts
     assert faces == {ids["left"], ids["right"]}
+
+
+def test_grow_adds_the_face_across_a_shared_edge():
+    from pluton.selection_ops import grow
+
+    scene, ids = _quad_pair()
+    _edges, faces, _verts = grow(scene, edges=set(), faces={ids["left"]}, vertices=set())
+    assert faces == {ids["left"], ids["right"]}
+
+
+def test_grow_does_not_turn_a_face_selection_into_edges():
+    """Spec D10: kinds do not bleed. Growing faces yields faces."""
+    from pluton.selection_ops import grow
+
+    scene, ids = _quad_pair()
+    edges, _faces, verts = grow(scene, edges=set(), faces={ids["left"]}, vertices=set())
+    assert edges == set()
+    assert verts == set()
+
+
+def test_grow_adds_edges_sharing_a_vertex():
+    from pluton.selection_ops import grow
+
+    scene, ids = _quad_pair()
+    ab = scene.edge_between(ids["a"], ids["b"])
+    edges, _faces, _verts = grow(scene, edges={ab}, faces=set(), vertices=set())
+    assert ab in edges
+    assert len(edges) > 1
+
+
+def test_shrink_inverts_grow_on_an_interior_region():
+    """Spec section 4 property 1."""
+    from pluton.selection_ops import grow, shrink
+
+    scene, ids = _quad_pair()
+    start = {ids["left"], ids["right"]}
+    grown_e, grown_f, grown_v = grow(scene, edges=set(), faces=start, vertices=set())
+    _e, back_f, _v = shrink(scene, edges=grown_e, faces=grown_f, vertices=grown_v)
+    assert back_f == start
+
+
+def test_shrink_removes_a_face_whose_neighbour_is_not_selected():
+    from pluton.selection_ops import shrink
+
+    scene, ids = _quad_pair()
+    _e, faces, _v = shrink(scene, edges=set(), faces={ids["left"]}, vertices=set())
+    assert faces == set()
+
+
+def test_shrink_keeps_a_face_whose_every_neighbour_is_selected():
+    from pluton.selection_ops import shrink
+
+    scene, ids = _quad_pair()
+    _e, faces, _v = shrink(scene, edges=set(), faces={ids["left"], ids["right"]}, vertices=set())
+    assert faces == {ids["left"], ids["right"]}
+
+
+def test_same_material_matches_on_either_side():
+    """Spec D8: a user cannot see which side dictionary the paint came from."""
+    from pluton.scene.scene import Side
+    from pluton.selection_ops import same_material
+
+    scene, ids = _quad_pair()
+    scene.set_face_material(ids["left"], 7, Side.FRONT)
+    scene.set_face_material(ids["right"], 7, Side.BACK)
+    assert same_material(scene, {ids["left"]}) == {ids["left"], ids["right"]}
+
+
+def test_same_material_of_an_unpainted_face_finds_the_other_unpainted_faces():
+    """Material 0 is Default, which is a real answer rather than a null: two
+    unpainted faces do share a material."""
+    from pluton.selection_ops import same_material
+
+    scene, ids = _quad_pair()
+    assert same_material(scene, {ids["left"]}) == {ids["left"], ids["right"]}
+
+
+def test_same_material_of_no_seed_is_empty():
+    from pluton.selection_ops import same_material
+
+    scene, _ids = _quad_pair()
+    assert same_material(scene, set()) == set()
+
+
+def test_same_material_does_not_pull_in_an_unpainted_face():
+    """Controller ruling: Default only seeds when the seed carries no real
+    material on either side. A face painted on one side only must not match
+    every unpainted face in the model -- that would make "All with Same
+    Material" select the whole document off one wall."""
+    from pluton.scene.scene import Side
+    from pluton.selection_ops import same_material
+
+    scene, ids = _quad_pair()
+    scene.set_face_material(ids["left"], 7, Side.FRONT)
+    assert same_material(scene, {ids["left"]}) == {ids["left"]}
+
+
+def test_invert_returns_everything_not_selected():
+    from pluton.model.model import Model
+    from pluton.selection import Selection
+    from pluton.selection_ops import invert
+
+    model = Model()
+    scene = model.active_scene
+    a = scene.add_vertex(np.array([0.0, 0.0, 0.0], dtype=np.float32))
+    b = scene.add_vertex(np.array([1.0, 0.0, 0.0], dtype=np.float32))
+    c = scene.add_vertex(np.array([1.0, 1.0, 0.0], dtype=np.float32))
+    one = scene.add_edge(a, b)
+    two = scene.add_edge(b, c)
+    sel = Selection()
+    sel.replace(edges={one})
+    edges, _faces, _instances, _verts = invert(model, sel, select_vertices=False)
+    assert edges == {two}
+
+
+def test_invert_leaves_vertices_alone_when_the_mode_is_off():
+    from pluton.model.model import Model
+    from pluton.selection import Selection
+    from pluton.selection_ops import invert
+
+    model = Model()
+    scene = model.active_scene
+    scene.add_vertex(np.array([0.0, 0.0, 0.0], dtype=np.float32))
+    _e, _f, _i, verts = invert(model, Selection(), select_vertices=False)
+    assert verts == set()
+
+
+def test_invert_includes_vertices_when_the_mode_is_on():
+    from pluton.model.model import Model
+    from pluton.selection import Selection
+    from pluton.selection_ops import invert
+
+    model = Model()
+    scene = model.active_scene
+    a = scene.add_vertex(np.array([0.0, 0.0, 0.0], dtype=np.float32))
+    b = scene.add_vertex(np.array([1.0, 0.0, 0.0], dtype=np.float32))
+    sel = Selection()
+    sel.replace(vertices={a})
+    _e, _f, _i, verts = invert(model, sel, select_vertices=True)
+    assert verts == {b}
+
+
+def test_invert_twice_returns_the_original_selection():
+    from pluton.model.model import Model
+    from pluton.selection import Selection
+    from pluton.selection_ops import invert
+
+    model = Model()
+    scene = model.active_scene
+    a = scene.add_vertex(np.array([0.0, 0.0, 0.0], dtype=np.float32))
+    b = scene.add_vertex(np.array([1.0, 0.0, 0.0], dtype=np.float32))
+    c = scene.add_vertex(np.array([1.0, 1.0, 0.0], dtype=np.float32))
+    one = scene.add_edge(a, b)
+    scene.add_edge(b, c)
+    sel = Selection()
+    sel.replace(edges={one})
+    e1, f1, i1, v1 = invert(model, sel, select_vertices=False)
+    sel.replace(edges=e1, faces=f1, instances=i1, vertices=v1)
+    e2, _f2, _i2, _v2 = invert(model, sel, select_vertices=False)
+    assert e2 == {one}
+
+
+def test_invert_excludes_a_tag_hidden_instance_from_the_universe(model_factory, group_factory):
+    """Spec D7: invert's universe is select_all_ids, which already excludes
+    instances hidden by tag visibility (see test_model_queries.py's
+    test_select_all_excludes_hidden_tag_instances, whose fixture this
+    mirrors). A hidden instance must never appear on either side of invert:
+    not selected, and not "everything else" either."""
+    from pluton.selection import Selection
+    from pluton.selection_ops import invert
+
+    model = model_factory()
+    scene = model.active_context.mesh
+    a = scene.add_vertex(np.array([0.0, 0.0, 0.0], dtype=np.float32))
+    b = scene.add_vertex(np.array([1.0, 0.0, 0.0], dtype=np.float32))
+    c = scene.add_vertex(np.array([1.0, 1.0, 0.0], dtype=np.float32))
+    d = scene.add_vertex(np.array([0.0, 1.0, 0.0], dtype=np.float32))
+    scene.add_face_from_loop((a, b, c, d))
+    instance = group_factory(model)
+    hidden_tag = model.tags.add("Hidden")
+    instance.tag_id = hidden_tag.id
+    model.tags.set_visible(hidden_tag.id, False)
+
+    _e, _f, instances, _v = invert(model, Selection(), select_vertices=False)
+
+    assert instance.id not in instances
+
+
+def test_same_tag_matches_instances_sharing_a_tag(model_factory, group_factory):
+    """Written per the brief's instruction to establish the instance-building
+    idiom from tests/test_selection_instances.py -- that file turned out to
+    hold no such idiom (it never builds a Model), so this instead follows
+    test_model_queries.py's model_factory/group_factory fixtures, which are
+    the established way elsewhere in this suite to get a real Instance."""
+    from pluton.selection_ops import same_tag
+
+    model = model_factory()
+    scene = model.active_context.mesh
+    a = scene.add_vertex(np.array([0.0, 0.0, 0.0], dtype=np.float32))
+    b = scene.add_vertex(np.array([1.0, 0.0, 0.0], dtype=np.float32))
+    c = scene.add_vertex(np.array([1.0, 1.0, 0.0], dtype=np.float32))
+    d = scene.add_vertex(np.array([0.0, 1.0, 0.0], dtype=np.float32))
+    scene.add_face_from_loop((a, b, c, d))
+    one = group_factory(model)
+
+    other_definition = model.new_definition("Other", is_group=True)
+    two = model.new_instance(other_definition)
+    model.root.children.append(two)
+
+    tag = model.tags.add("Walls")
+    one.tag_id = tag.id
+    two.tag_id = tag.id
+
+    assert same_tag(model, {one.id}) == {one.id, two.id}
+
+
+def test_same_tag_does_not_match_a_differently_tagged_instance(model_factory, group_factory):
+    from pluton.selection_ops import same_tag
+
+    model = model_factory()
+    scene = model.active_context.mesh
+    a = scene.add_vertex(np.array([0.0, 0.0, 0.0], dtype=np.float32))
+    b = scene.add_vertex(np.array([1.0, 0.0, 0.0], dtype=np.float32))
+    c = scene.add_vertex(np.array([1.0, 1.0, 0.0], dtype=np.float32))
+    d = scene.add_vertex(np.array([0.0, 1.0, 0.0], dtype=np.float32))
+    scene.add_face_from_loop((a, b, c, d))
+    one = group_factory(model)
+
+    other_definition = model.new_definition("Other", is_group=True)
+    two = model.new_instance(other_definition)
+    model.root.children.append(two)
+
+    walls = model.tags.add("Walls")
+    doors = model.tags.add("Doors")
+    one.tag_id = walls.id
+    two.tag_id = doors.id
+
+    assert same_tag(model, {one.id}) == {one.id}
+
+
+def test_same_tag_of_no_seed_is_empty(model_factory, group_factory):
+    from pluton.selection_ops import same_tag
+
+    model = model_factory()
+    scene = model.active_context.mesh
+    a = scene.add_vertex(np.array([0.0, 0.0, 0.0], dtype=np.float32))
+    b = scene.add_vertex(np.array([1.0, 0.0, 0.0], dtype=np.float32))
+    c = scene.add_vertex(np.array([1.0, 1.0, 0.0], dtype=np.float32))
+    d = scene.add_vertex(np.array([0.0, 1.0, 0.0], dtype=np.float32))
+    scene.add_face_from_loop((a, b, c, d))
+    group_factory(model)
+
+    assert same_tag(model, set()) == set()

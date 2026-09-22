@@ -124,3 +124,170 @@ def connected_component(scene, seed_vertex_ids) -> tuple[set[int], set[int], set
             faces.add(int(f.id))
 
     return reached, edges, faces
+
+
+def grow(scene, *, edges, faces, vertices) -> tuple[set[int], set[int], set[int]]:
+    """Expand each kind by one step of its own adjacency.
+
+    Faces gain faces sharing an edge; edges gain edges sharing a vertex;
+    vertices gain vertices sharing an edge. Kinds do NOT bleed into one
+    another (spec D10): growing a face selection yields faces, never the
+    loose edges around them. Cross-kind expansion is what double-click
+    already does, deliberately and one step at a time.
+    """
+    edges = {int(e) for e in edges}
+    faces = {int(f) for f in faces}
+    vertices = {int(v) for v in vertices}
+
+    grown_faces = set(faces)
+    for f_id in faces:
+        grown_faces |= adjacent_faces(scene, bounding_edges(scene, {f_id}))
+
+    grown_edges = set(edges)
+    if edges:
+        endpoints: set[int] = set()
+        for e_id in edges:
+            try:
+                e = scene.edge(e_id)
+            except KeyError:
+                continue
+            endpoints.add(int(e.v1_id))
+            endpoints.add(int(e.v2_id))
+        grown_edges |= incident_edges(scene, endpoints)
+
+    grown_vertices = set(vertices)
+    if vertices:
+        for e in scene.edges_iter():
+            v1, v2 = int(e.v1_id), int(e.v2_id)
+            if v1 in vertices:
+                grown_vertices.add(v2)
+            if v2 in vertices:
+                grown_vertices.add(v1)
+
+    return grown_edges, grown_faces, grown_vertices
+
+
+def shrink(scene, *, edges, faces, vertices) -> tuple[set[int], set[int], set[int]]:
+    """Erode each kind by one step: drop anything on the selection's boundary.
+
+    An entity is on the boundary when at least one of its neighbours, by the
+    same per-kind adjacency `grow` uses, is not itself selected. On an
+    interior region this is exactly `grow`'s inverse, which is the property
+    the tests pin, since neither operation has a SketchUp equivalent to check
+    against.
+    """
+    edges = {int(e) for e in edges}
+    faces = {int(f) for f in faces}
+    vertices = {int(v) for v in vertices}
+
+    kept_faces = {
+        f_id
+        for f_id in faces
+        if adjacent_faces(scene, bounding_edges(scene, {f_id})) - {f_id} <= faces
+    }
+
+    kept_edges = set()
+    for e_id in edges:
+        try:
+            e = scene.edge(e_id)
+        except KeyError:
+            continue
+        neighbours = incident_edges(scene, {int(e.v1_id), int(e.v2_id)}) - {e_id}
+        if neighbours <= edges:
+            kept_edges.add(e_id)
+
+    kept_vertices = set()
+    if vertices:
+        neighbours_of: dict[int, set[int]] = {}
+        for e in scene.edges_iter():
+            v1, v2 = int(e.v1_id), int(e.v2_id)
+            neighbours_of.setdefault(v1, set()).add(v2)
+            neighbours_of.setdefault(v2, set()).add(v1)
+        kept_vertices = {v_id for v_id in vertices if neighbours_of.get(v_id, set()) <= vertices}
+
+    return kept_edges, kept_faces, kept_vertices
+
+
+_DEFAULT_MATERIAL_ID = 0  # Matches Scene's own Default material id (scene.py).
+
+
+def same_material(scene, face_ids) -> set[int]:
+    """Every live face carrying a material any seed face carries.
+
+    Front and back are separate dictionaries on Scene, and a match on EITHER
+    side counts (spec D8): a user asking for "same material" means the paint
+    they can see, and they cannot see which side dictionary it came from.
+
+    Material 0 (Default) participates as a seed only when NO seed face
+    carries a real material on either side. Without that guard, a face
+    painted on one side only would still seed Default from its unpainted
+    side, and "All with Same Material" on one painted wall would select
+    every blank face in the document -- not what a user means by the
+    command. When every seed face is genuinely unpainted on both sides,
+    Default is the honest answer and "select all unpainted faces" keeps
+    working.
+    """
+    from pluton.scene.scene import Side
+
+    seed_materials: set[int] = set()
+    for f_id in face_ids:
+        try:
+            front = int(scene.face_material(f_id, Side.FRONT))
+            back = int(scene.face_material(f_id, Side.BACK))
+        except KeyError:
+            continue
+        seed_materials.add(front)
+        seed_materials.add(back)
+    if not seed_materials:
+        return set()
+
+    real_materials = seed_materials - {_DEFAULT_MATERIAL_ID}
+    if real_materials:
+        seed_materials = real_materials
+
+    out: set[int] = set()
+    for f in scene.faces_iter():
+        front = int(scene.face_material(f.id, Side.FRONT))
+        back = int(scene.face_material(f.id, Side.BACK))
+        if front in seed_materials or back in seed_materials:
+            out.add(int(f.id))
+    return out
+
+
+def same_tag(model, instance_ids) -> set[int]:
+    """Every instance in the active context sharing a tag with a seed.
+
+    Tags live on Instance.tag_id and nowhere else (spec D9), so this takes a
+    Model rather than a Scene and returns instances rather than geometry.
+    """
+    children = list(model.active_context.children)
+    seeds = {int(i) for i in instance_ids}
+    seed_tags = {int(c.tag_id) for c in children if int(c.id) in seeds}
+    if not seed_tags:
+        return set()
+    return {int(c.id) for c in children if int(c.tag_id) in seed_tags}
+
+
+def invert(model, selection, *, select_vertices) -> tuple[set[int], set[int], set[int], set[int]]:
+    """Everything selectable in the active context that is NOT selected.
+
+    The universe is `select_all_ids`, the same one Select All uses (spec D7).
+    Inventing a second one would guarantee eventual divergence between the
+    two. The visible consequence is that annotations are excluded from both,
+    which is today's Select All behaviour rather than a new asymmetry.
+
+    Reads `selection`; never mutates it.
+    """
+    from pluton.model.model_queries import select_all_ids
+
+    all_edges, all_faces, all_instances = select_all_ids(model)
+    verts: set[int] = set()
+    if select_vertices:
+        all_vertices = {int(v.id) for v in model.active_context.mesh.vertices_iter()}
+        verts = all_vertices - {int(v) for v in selection.vertices}
+    return (
+        all_edges - {int(e) for e in selection.edges},
+        all_faces - {int(f) for f in selection.faces},
+        all_instances - {int(i) for i in selection.instances},
+        verts,
+    )
