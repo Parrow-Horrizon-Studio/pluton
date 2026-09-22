@@ -174,3 +174,40 @@ def test_with_the_mode_off_a_corner_double_click_still_smart_selects_the_edge():
     tool.on_mouse_double_click(_event_at(cam, (0.0, 0.0, 0.0)), None)
     assert sel.vertices == set()
     assert len(sel.edges) == 1
+
+
+# --- Final review M9: an empty flood must not wipe the selection -----------
+
+
+def _quad_pair_with_a_loose_vertex():
+    """The quad pair plus one live vertex with no incident edge.
+
+    Task 6 confirmed a bare vertex legitimately outlives its removed edge in
+    this mesh, so this is a reachable state rather than a contrived one.
+    """
+    scene, ids = _quad_pair_scene()
+    ids["loose"] = scene.add_vertex(np.array([0.5, 3.0, 0.0], dtype=np.float32))
+    return scene, ids
+
+
+def test_triple_click_an_isolated_vertex_leaves_the_selection_alone():
+    """`connected_component` returns three empty sets for a live vertex with
+    no incident edge -- the seed is not in the adjacency map at all. Applying
+    that wiped whatever was selected. A flood that found nothing leaves the
+    selection alone, exactly as a double-click that missed does."""
+    scene, ids = _quad_pair_with_a_loose_vertex()
+    tool, sel, cam = _tool_with_vertices(scene)
+    sel.replace(faces={ids["left"]})
+    tool.on_mouse_triple_click(_event_at(cam, (0.5, 3.0, 0.0)), None)
+    assert sel.faces == {ids["left"]}
+    assert sel.vertices == set()
+
+
+def test_triple_click_an_isolated_vertex_still_floods_a_real_component():
+    """Guards the early return against being too eager: the loose vertex in
+    the scene must not stop an ordinary triple-click from working."""
+    scene, ids = _quad_pair_with_a_loose_vertex()
+    tool, sel, cam = _tool_with_vertices(scene)
+    tool.on_mouse_triple_click(_event_at(cam, (0.5, 0.5, 0.0)), None)
+    assert sel.faces == {ids["left"], ids["right"]}
+    assert ids["loose"] not in sel.vertices

@@ -143,12 +143,16 @@ class SelectTool(Tool):
                 self._box_rect = (px, py, cx, cy)
                 self._box_window = (cx - px) >= 0.0
             return
+        # Final review I2: hover honours View > Select Vertices for the same
+        # reason the click pick does -- pre-highlight is the promise the
+        # click then keeps, so the two must pick the same entity.
         self._hovered = pick_selectable(
             self._cursor(event),
             self._viewport_size(),
             self._camera,
             self._scene,
             world_transform=self._world_transform(),
+            select_vertices=self._select_vertices(),
         )
         # M7d: also track the hovered annotation (drawn on top, so hover-picked first)
         cx, cy = self._cursor(event)
@@ -220,12 +224,18 @@ class SelectTool(Tool):
                     self._reset_press()
                     return
             # Fall through to entity pick
+            # Final review I2: the single-click pick has to honour View >
+            # Select Vertices too. Without the flag a plain click on a corner
+            # selected the edge while a double-click at the same pixel
+            # selected the vertex, so the mode was reachable by drag and by
+            # double-click but not by the most obvious gesture of all.
             hit = pick_selectable(
                 self._cursor(event),
                 self._viewport_size(),
                 self._camera,
                 self._scene,
                 world_transform=self._world_transform(),
+                select_vertices=self._select_vertices(),
             )
             if hit is None:
                 if not shift:
@@ -234,6 +244,16 @@ class SelectTool(Tool):
                         self._exit_one()
                     else:
                         self._selection.clear()
+            elif hit[0] == "vertex":
+                # Final review I2: an explicit branch, not a fall-through.
+                # The `else` below used to be the face branch, so a
+                # ("vertex", id) hit would have put a vertex id into
+                # `selection.faces` -- ids are per-kind here, so that id
+                # names a real and unrelated face often enough to matter.
+                if shift:
+                    self._selection.toggle_vertex(hit[1])
+                else:
+                    self._selection.replace(vertices=[hit[1]])
             elif hit[0] == "edge":
                 if shift:
                     self._selection.toggle_edge(hit[1])
@@ -304,6 +324,7 @@ class SelectTool(Tool):
         if hit is None:
             return
         kind, ent_id = hit
+        vertices: set[int] = set()
         if kind == "face":
             faces = {int(ent_id)}
             edges = bounding_edges(self._scene, faces)
@@ -311,13 +332,17 @@ class SelectTool(Tool):
             edges = {int(ent_id)}
             faces = adjacent_faces(self._scene, edges)
         elif kind == "vertex":
+            # Final review C1: every branch now computes and falls through to
+            # the one shared call, rather than the vertex branch applying and
+            # returning on its own. That uniformity is what lets the trailing
+            # release be suppressed by a single assignment inside
+            # `_apply_smart_selection`.
             vertices = {int(ent_id)}
             edges = incident_edges(self._scene, vertices)
-            self._apply_smart_selection(event, edges=edges, faces=set(), vertices=vertices)
-            return
+            faces = set()
         else:
             return
-        self._apply_smart_selection(event, edges=edges, faces=faces)
+        self._apply_smart_selection(event, edges=edges, faces=faces, vertices=vertices)
 
     def on_mouse_triple_click(self, event: QMouseEvent, snap) -> None:
         """M7.6c: select everything connected to the entity under the cursor.
@@ -338,6 +363,13 @@ class SelectTool(Tool):
         verts, edges, faces = connected_component(self._scene, self._seed_vertices(hit))
         if not self._select_vertices():
             verts = set()
+        if not (verts or edges or faces):
+            # Final review M9: an isolated vertex (live, but with no incident
+            # edge -- a state a bare vertex reaches when its edge is removed)
+            # floods to three empty sets, and applying that would wipe the
+            # selection. A triple-click that found nothing to flood leaves the
+            # selection alone, matching what a double-click that missed does.
+            return
         self._apply_smart_selection(event, edges=edges, faces=faces, vertices=verts)
 
     def _pick_geometry(self, cx: float, cy: float, w: int, h: int):
@@ -372,9 +404,25 @@ class SelectTool(Tool):
         self, event: QMouseEvent, *, edges, faces, vertices=frozenset()
     ) -> None:
         """Replace, or add when Shift is held, matching single-click and
-        box-select."""
+        box-select.
+
+        Final review C1: this also eats the gesture's trailing release, the
+        way the instance-enter branch of `on_mouse_double_click` already
+        does. Qt's real double-click sequence is Press, Release, DblClick,
+        Release and `ViewportWidget.mouseReleaseEvent` dispatches
+        `on_mouse_release` on every one of those, so without this the release
+        after a smart-select ran the ordinary single-click pick and replaced
+        the selection smart-select had just built, making the whole feature
+        invisible. The triple-click's own trailing release is the same story.
+
+        Setting it here rather than at each call site is deliberate: this is
+        the single point every smart-select path funnels through, and it
+        fires only when a selection was actually applied, so a double-click
+        that missed still leaves the trailing release to behave normally.
+        """
         if self._selection is None:
             return
+        self._suppress_next_release = True
         if bool(event.modifiers() & Qt.KeyboardModifier.ShiftModifier):
             self._selection.add(edges=edges, faces=faces, vertices=vertices)
         else:
@@ -439,6 +487,13 @@ class SelectTool(Tool):
         fills: list[np.ndarray] = []
         if not self._is_box and self._hovered is not None and self._scene is not None:
             kind, ent_id = self._hovered
+            # Final review I2: hover can now report a vertex, and the face
+            # arm below used to be a bare `else`, so a vertex id would have
+            # been handed to `face_loop`. Ids are allocated per kind, so that
+            # id usually names a real face and the hover highlight would have
+            # lit an unrelated polygon. Naming the face arm explicitly means
+            # a vertex (and any future kind) simply draws no preview here --
+            # the selected-vertex glyph pass is the only vertex chrome.
             if kind == "edge":
                 try:
                     e = self._scene.edge(ent_id)
@@ -447,7 +502,7 @@ class SelectTool(Tool):
                     segs = np.array([p1, p2], dtype=np.float32)
                 except KeyError:
                     pass
-            else:  # face
+            elif kind == "face":
                 try:
                     from pluton.geometry.transforms import apply_mat, is_identity_transform
 

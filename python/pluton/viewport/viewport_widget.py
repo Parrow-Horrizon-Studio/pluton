@@ -436,14 +436,28 @@ class ViewportWidget(QOpenGLWidget):
         self._gesture_was_active = live
 
     def on_active_context_changed(self) -> None:
-        """Drop the acquired reference when the user enters or leaves a group.
+        """Drop per-context transient state when the user enters or leaves a
+        group.
 
         `Acquired` holds a world position and a per-context entity id. Both
         are meaningless once the context changes: the position is stale, and
         the id names whatever entity happens to carry it in the new context,
         which may be a different edge or none at all.
+
+        Final review I3: the multi-click run is dropped here for the same
+        reason. `ClickRuns` measures each press against the PREVIOUS press
+        only, so a click a third of a second after a double-click continues
+        the run to three -- and in pluton a double-click ENTERS a group, so
+        that follow-on click flood-selected the context the user had only
+        just stepped into. A multi-click run is a single gesture against a
+        single context; a change of context ends it. This is the seam
+        MainWindow already drives on every enter/exit (via
+        `ToolContext.request_context_rebuild`), which keeps SelectTool from
+        having to know the viewport owns a click counter.
         """
         self.inference.clear_acquisition()
+        self._click_runs.reset()
+        self._last_click_feed = None
 
     def _gather_guides(self):
         """World-space (lines, points) from the active context's guides.

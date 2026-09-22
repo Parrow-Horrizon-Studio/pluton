@@ -177,3 +177,149 @@ def test_shift_box_adds_to_existing_selection(qtbot):
     _box_drag(tool, cam, [-3.0, 0.0, 0.0], [4.0, -2.0, 0.0],
               mods=Qt.KeyboardModifier.ShiftModifier)
     assert fid in sel.faces
+
+
+# ---------------------------------------------------------------------------
+# Final review I2: View > Select Vertices must reach the click and hover picks
+# ---------------------------------------------------------------------------
+
+
+def _make_vertex_tool(scene, sel, w=800, h=600):
+    """A SelectTool with View > Select Vertices on."""
+    from pluton.tools import ToolContext
+    from pluton.tools.select_tool import SelectTool
+
+    cam = _cam(w, h)
+    tool = SelectTool()
+    tool.activate(
+        ToolContext(
+            scene=scene,
+            camera=cam,
+            widget_size_provider=lambda: (w, h),
+            selection=sel,
+            select_vertices_provider=lambda: True,
+        )
+    )
+    return tool, cam
+
+
+def _hover(tool, cam, world, w=800, h=600):
+    sx, sy, _ = cam.world_to_screen(np.asarray(world, dtype=np.float32), w, h)
+    ev = QMouseEvent(
+        QEvent.Type.MouseMove,
+        QPointF(sx, sy),
+        Qt.MouseButton.NoButton,
+        Qt.MouseButton.NoButton,
+        Qt.KeyboardModifier.NoModifier,
+    )
+    tool.on_mouse_move(ev, None)
+
+
+def test_click_on_a_corner_selects_the_vertex_when_the_mode_is_on(qtbot):
+    """The mode was reachable by drag (box-select) and by double-click, but
+    not by the most obvious gesture of all: a plain click still selected the
+    edge because the release-path pick_selectable call omitted the flag."""
+    from pluton.selection import Selection
+
+    scene, _fid, _e_ab = _scene_with_quad()
+    sel = Selection()
+    tool, cam = _make_vertex_tool(scene, sel)
+    _click(tool, cam, [-1.0, -1.0, 0.0])
+    assert len(sel.vertices) == 1
+    assert sel.edges == set()
+    assert sel.faces == set()
+
+
+def test_a_vertex_hit_never_lands_in_the_face_set(qtbot):
+    """The latent trap behind I2: the release path read
+    `elif hit[0] == "edge": ... else: replace(faces=[hit[1]])`, so a
+    ("vertex", id) hit fell into the face branch. Ids are allocated per kind
+    here, so that id names a real and unrelated face often enough to matter."""
+    from pluton.selection import Selection
+
+    scene, fid, _e_ab = _scene_with_quad()
+    sel = Selection()
+    tool, cam = _make_vertex_tool(scene, sel)
+    _click(tool, cam, [-1.0, -1.0, 0.0])
+    assert fid not in sel.faces
+    assert sel.faces == set()
+
+
+def test_click_on_a_corner_still_selects_the_edge_when_the_mode_is_off(qtbot):
+    """Regression guard on the default. Vertex picking is opt-in, so an
+    untouched pluton must click exactly as it did before M7.6c."""
+    from pluton.selection import Selection
+
+    scene, _fid, _e_ab = _scene_with_quad()
+    sel = Selection()
+    tool, cam = _make_tool(scene, sel)
+    _click(tool, cam, [-1.0, -1.0, 0.0])
+    assert sel.vertices == set()
+    # Two edges meet at this corner; which one wins is a tie the picker
+    # settles, and the point of the test is that an EDGE still wins at all.
+    assert len(sel.edges) == 1
+    assert sel.faces == set()
+
+
+def test_shift_click_toggles_a_vertex(qtbot):
+    """Shift composes for vertices the way it already does for edges and
+    faces: on, then off."""
+    from pluton.selection import Selection
+
+    scene, _fid, _e_ab = _scene_with_quad()
+    sel = Selection()
+    tool, cam = _make_vertex_tool(scene, sel)
+    _click(tool, cam, [-1.0, -1.0, 0.0], mods=Qt.KeyboardModifier.ShiftModifier)
+    assert len(sel.vertices) == 1
+    v_id = next(iter(sel.vertices))
+    _click(tool, cam, [-1.0, -1.0, 0.0], mods=Qt.KeyboardModifier.ShiftModifier)
+    assert v_id not in sel.vertices
+
+
+def test_shift_click_a_vertex_keeps_an_existing_edge_selection(qtbot):
+    from pluton.selection import Selection
+
+    scene, _fid, e_ab = _scene_with_quad()
+    sel = Selection()
+    sel.replace(edges=[e_ab])
+    tool, cam = _make_vertex_tool(scene, sel)
+    _click(tool, cam, [-1.0, 1.0, 0.0], mods=Qt.KeyboardModifier.ShiftModifier)
+    assert sel.edges == {e_ab}
+    assert len(sel.vertices) == 1
+
+
+def test_hover_reports_a_vertex_when_the_mode_is_on(qtbot):
+    """Pre-highlight is the promise the click then keeps, so hover has to
+    pick the same entity the click will."""
+    from pluton.selection import Selection
+
+    scene, _fid, _e_ab = _scene_with_quad()
+    tool, cam = _make_vertex_tool(scene, Selection())
+    _hover(tool, cam, [-1.0, -1.0, 0.0])
+    assert tool._hovered is not None
+    assert tool._hovered[0] == "vertex"
+
+
+def test_hover_on_a_corner_still_reports_the_edge_when_the_mode_is_off(qtbot):
+    from pluton.selection import Selection
+
+    scene, _fid, _e_ab = _scene_with_quad()
+    tool, cam = _make_tool(scene, Selection())
+    _hover(tool, cam, [-1.0, -1.0, 0.0])
+    assert tool._hovered is not None
+    assert tool._hovered[0] == "edge"
+
+
+def test_a_hovered_vertex_draws_no_rubber_band_and_no_face_fill(qtbot):
+    """The overlay's `else` was the face branch, so a hovered vertex id would
+    have been handed to `face_loop`. Ids are per kind, so on this scene the
+    vertex id 0 and the face id 0 both exist and the hover highlight would
+    have lit an unrelated polygon."""
+    from pluton.selection import Selection
+
+    scene, _fid, _e_ab = _scene_with_quad()
+    tool, cam = _make_vertex_tool(scene, Selection())
+    _hover(tool, cam, [-1.0, -1.0, 0.0])
+    overlay = tool.overlay()
+    assert overlay.face_fill_polygons == []
+    assert overlay.rubber_band_segments.shape[0] == 0
