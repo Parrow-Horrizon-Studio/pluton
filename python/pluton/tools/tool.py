@@ -151,6 +151,16 @@ class Tool(ABC):
         """Default: do nothing. SelectTool overrides to enter groups/components."""
         return None
 
+    def on_mouse_triple_click(self, event: QMouseEvent, snap) -> None:
+        """Default: do nothing. SelectTool overrides to select everything
+        connected to the entity under the cursor.
+
+        Qt sends no triple-click event. ViewportWidget synthesizes this one
+        from a ClickRuns counter, so the third press arrives BOTH here and at
+        on_mouse_press; this hook is additive, not a replacement.
+        """
+        return None
+
     def on_key_press(self, event: QKeyEvent) -> None:
         """Default: do nothing."""
         return None

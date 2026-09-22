@@ -19,7 +19,7 @@ from pluton.geometry.transforms import apply_mat, is_identity_transform, mat_inv
 from pluton.tools.select_tool import _HOVER_EDGE_COLOR, SelectTool
 from pluton.units import Units, format_coordinates
 from pluton.viewport.camera import Camera
-from pluton.viewport.inference import InferenceState
+from pluton.viewport.inference import InferenceState, _default_now_ms
 from pluton.viewport.scene_renderer import SceneRenderer
 from pluton.viewport.snap_engine import SnapEngine, SnapKind
 
@@ -64,6 +64,23 @@ class ViewportWidget(QOpenGLWidget):
         # renumber anyone's ids. Guides are visible by default (SketchUp).
         self.show_guides = True
 
+        # M7.6c: Qt has no triple-click event, so the third press is counted
+        # here and dispatched as Tool.on_mouse_triple_click. The interval is
+        # read from Qt once, at construction, so the gesture honours the
+        # user's system setting while staying a plain number underneath.
+        from PySide6.QtWidgets import QApplication
+
+        from pluton.viewport.click_runs import ClickRuns
+
+        app = QApplication.instance()
+        self._click_runs = ClickRuns(
+            interval_ms=float(app.doubleClickInterval()) if app is not None else 400.0
+        )
+        # Reuses inference's clock rather than adding a second wall-clock call
+        # site. M7.6b deliberately left exactly one in the codebase and that
+        # is worth keeping true.
+        self._now_ms_provider = _default_now_ms
+
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         self.setMouseTracking(True)
 
@@ -106,6 +123,12 @@ class ViewportWidget(QOpenGLWidget):
         down rather than show a second, stale number beside the cursor."""
         self._vcb_active_provider = fn
 
+    def set_now_ms_provider(self, fn) -> None:
+        """M7.6c: install a callable () -> float returning milliseconds, for
+        the multi-click run counter. Tests inject a value here so no test of
+        the triple-click gesture has to sleep."""
+        self._now_ms_provider = fn
+
     def set_camera_input_callback(self, fn) -> None:
         """M7e: install a zero-arg callable invoked when the user manipulates the
         camera (MMB orbit/pan, wheel zoom). MainWindow wires this to the view
@@ -145,6 +168,14 @@ class ViewportWidget(QOpenGLWidget):
             if active is not None:
                 snap = self._snap_for_event(event)
                 active.on_mouse_press(event, snap)
+                pos = event.position()
+                run = self._click_runs.press(
+                    float(pos.x()), float(pos.y()), self._now_ms_provider()
+                )
+                if run == 3:
+                    triple = getattr(active, "on_mouse_triple_click", None)
+                    if triple is not None:
+                        triple(event, snap)
                 if self._status_bar is not None:
                     self._status_bar.set_snap(snap.label if snap.kind != SnapKind.NONE else "")
                 if self._on_event_finished is not None:
