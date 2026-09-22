@@ -28,6 +28,7 @@ def test_replace_without_vertices_clears_them():
 
     sel = Selection()
     sel.replace(vertices={1, 2})
+    assert sel.vertices == {1, 2}, "the first replace must actually set vertices"
     sel.replace(edges={7})
     assert sel.vertices == set()
 
@@ -186,3 +187,25 @@ def test_prune_to_live_keeps_a_vertex_whose_edge_died(model_factory):
 
     assert not scene.edge_is_live(e)
     assert sel.vertices == {a}, "a bare vertex outlives its removed edge in this mesh"
+
+
+def test_prune_to_live_drops_a_dangling_vertex_id(model_factory):
+    """The other half of prune_to_live's vertices term: a synthetic id that
+    was never live (the #46 shape -- an undo/redo can leave a dangling id
+    behind) must be dropped, while a real, still-live vertex survives.
+    Mirrors test_selection_vertices_skips_a_dead_vertex_id's synthetic-id
+    pattern rather than relying on cascading deletion, since nothing in this
+    mesh cascades a vertex's death from its edge."""
+    from pluton.selection import Selection
+    from pluton.ui.selection_controller import prune_to_live
+
+    model = model_factory()
+    scene = model.active_context.mesh
+    a = scene.add_vertex(np.array([0.0, 0.0, 0.0], dtype=np.float32))
+
+    sel = Selection()
+    sel.replace(vertices={a, 9999})
+
+    prune_to_live(model, sel)
+
+    assert sel.vertices == {a}
