@@ -578,3 +578,115 @@ def test_same_tag_of_no_seed_is_empty(model_factory, group_factory):
     group_factory(model)
 
     assert same_tag(model, set()) == set()
+
+
+# --- Final review I6: every set operation skips a dead id -------------------
+#
+# The three neighbour queries above each had a "skips a dead id" test; none of
+# the five set operations did. That gap is what let `same_material`'s dead
+# `except KeyError: continue` survive review: `Scene.face_material` is a dict
+# `.get` with a Default fallback and never raises, so a stale seed id
+# contributed Default and the match loop returned every unpainted face in the
+# document. The module docstring promises "a dead id is skipped rather than
+# raised on" for all of them, so all of them are now pinned.
+
+
+def test_same_material_skips_a_dead_face_id():
+    """The regression this group exists for: a dead seed must contribute
+    nothing, not Default. Before the fix this returned both faces."""
+    from pluton.selection_ops import same_material
+
+    scene, _ids = _quad_pair()
+    assert same_material(scene, {9999}) == set()
+
+
+def test_same_material_skips_a_dead_id_beside_a_live_one():
+    """A dead id riding along with a live seed must not widen the result
+    either: the live seed is painted, so the answer is its own family."""
+    from pluton.scene.scene import Side
+    from pluton.selection_ops import same_material
+
+    scene, ids = _quad_pair()
+    scene.set_face_material(ids["left"], 7, Side.FRONT)
+    assert same_material(scene, {ids["left"], 9999}) == {ids["left"]}
+
+
+def test_grow_skips_dead_ids_of_every_kind():
+    from pluton.selection_ops import grow
+
+    scene, ids = _quad_pair()
+    ab = scene.edge_between(ids["a"], ids["b"])
+    edges, faces, verts = grow(
+        scene, edges={ab, 9999}, faces={ids["left"], 8888}, vertices={ids["a"], 7777}
+    )
+    assert 9999 not in edges
+    assert 8888 not in faces
+    assert 7777 not in verts
+    # The live ids still grow exactly as they do without the dead company.
+    live_edges, live_faces, live_verts = grow(
+        scene, edges={ab}, faces={ids["left"]}, vertices={ids["a"]}
+    )
+    assert (edges, faces, verts) == (live_edges, live_faces, live_verts)
+
+
+def test_shrink_skips_dead_ids_of_every_kind():
+    from pluton.selection_ops import shrink
+
+    scene, ids = _quad_pair()
+    ab = scene.edge_between(ids["a"], ids["b"])
+    edges, faces, verts = shrink(
+        scene, edges={ab, 9999}, faces={ids["left"], 8888}, vertices={ids["a"], 7777}
+    )
+    assert 9999 not in edges
+    assert 8888 not in faces
+    assert 7777 not in verts
+
+
+def test_shrink_does_not_keep_an_edge_only_because_a_dead_neighbour_is_absent():
+    """A dead id in the selection must not make a boundary edge look
+    interior. Every edge of this quad pair has a live neighbour outside the
+    seed, so nothing survives the erosion."""
+    from pluton.selection_ops import shrink
+
+    scene, ids = _quad_pair()
+    ab = scene.edge_between(ids["a"], ids["b"])
+    edges, _faces, _verts = shrink(scene, edges={ab, 9999}, faces=set(), vertices=set())
+    assert edges == set()
+
+
+def test_same_tag_skips_a_dead_instance_id(model_factory, group_factory):
+    from pluton.selection_ops import same_tag
+
+    model = model_factory()
+    scene = model.active_context.mesh
+    a = scene.add_vertex(np.array([0.0, 0.0, 0.0], dtype=np.float32))
+    b = scene.add_vertex(np.array([1.0, 0.0, 0.0], dtype=np.float32))
+    c = scene.add_vertex(np.array([1.0, 1.0, 0.0], dtype=np.float32))
+    d = scene.add_vertex(np.array([0.0, 1.0, 0.0], dtype=np.float32))
+    scene.add_face_from_loop((a, b, c, d))
+    group_factory(model)
+
+    assert same_tag(model, {9999}) == set()
+
+
+def test_invert_skips_a_dead_id_in_the_selection():
+    from pluton.model.model import Model
+    from pluton.selection import Selection
+    from pluton.selection_ops import invert
+
+    model = Model()
+    scene = model.active_context.mesh
+    a = scene.add_vertex(np.array([0.0, 0.0, 0.0], dtype=np.float32))
+    b = scene.add_vertex(np.array([1.0, 0.0, 0.0], dtype=np.float32))
+    c = scene.add_vertex(np.array([1.0, 1.0, 0.0], dtype=np.float32))
+    d = scene.add_vertex(np.array([0.0, 1.0, 0.0], dtype=np.float32))
+    face = scene.add_face_from_loop((a, b, c, d))
+
+    sel = Selection()
+    sel.replace(faces={face, 8888}, edges={9999})
+    edges, faces, _instances, _verts = invert(model, sel, select_vertices=False)
+
+    assert 8888 not in faces
+    assert 9999 not in edges
+    assert faces == set()
+    assert edges == {e.id for e in scene.edges_iter()}

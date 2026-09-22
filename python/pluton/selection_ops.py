@@ -24,6 +24,46 @@ from __future__ import annotations
 from collections import deque
 
 
+def _live_edges(scene, edge_ids) -> set[int]:
+    """The subset of `edge_ids` naming a live edge.
+
+    Final review I6: the module docstring promises "a dead id is skipped
+    rather than raised on", and the three neighbour queries kept that promise
+    while `grow` and `shrink` merely passed a dead id straight through into
+    their own result -- which is not skipping it, and left Grow/Shrink
+    re-seating a stale id the next `prune_to_live` would have dropped.
+    """
+    return {int(e) for e in edge_ids if scene.edge_is_live(int(e))}
+
+
+def _live_faces(scene, face_ids) -> set[int]:
+    """The subset of `face_ids` naming a live face. See `_live_edges`.
+
+    `face_loop` is the liveness probe rather than `face`, which also builds a
+    triangulation array the caller throws away.
+    """
+    out: set[int] = set()
+    for f_id in face_ids:
+        try:
+            scene.face_loop(f_id)
+        except KeyError:
+            continue
+        out.add(int(f_id))
+    return out
+
+
+def _live_vertices(scene, vertex_ids) -> set[int]:
+    """The subset of `vertex_ids` naming a live vertex. See `_live_edges`."""
+    out: set[int] = set()
+    for v_id in vertex_ids:
+        try:
+            scene.vertex(v_id)
+        except KeyError:
+            continue
+        out.add(int(v_id))
+    return out
+
+
 def bounding_edges(scene, face_ids) -> set[int]:
     """Every edge on the boundary loop of any face in `face_ids`.
 
@@ -135,9 +175,9 @@ def grow(scene, *, edges, faces, vertices) -> tuple[set[int], set[int], set[int]
     loose edges around them. Cross-kind expansion is what double-click
     already does, deliberately and one step at a time.
     """
-    edges = {int(e) for e in edges}
-    faces = {int(f) for f in faces}
-    vertices = {int(v) for v in vertices}
+    edges = _live_edges(scene, edges)
+    faces = _live_faces(scene, faces)
+    vertices = _live_vertices(scene, vertices)
 
     grown_faces = set(faces)
     for f_id in faces:
@@ -176,9 +216,9 @@ def shrink(scene, *, edges, faces, vertices) -> tuple[set[int], set[int], set[in
     the tests pin, since neither operation has a SketchUp equivalent to check
     against.
     """
-    edges = {int(e) for e in edges}
-    faces = {int(f) for f in faces}
-    vertices = {int(v) for v in vertices}
+    edges = _live_edges(scene, edges)
+    faces = _live_faces(scene, faces)
+    vertices = _live_vertices(scene, vertices)
 
     kept_faces = {
         f_id
@@ -187,14 +227,29 @@ def shrink(scene, *, edges, faces, vertices) -> tuple[set[int], set[int], set[in
     }
 
     kept_edges = set()
-    for e_id in edges:
-        try:
-            e = scene.edge(e_id)
-        except KeyError:
-            continue
-        neighbours = incident_edges(scene, {int(e.v1_id), int(e.v2_id)}) - {e_id}
-        if neighbours <= edges:
-            kept_edges.add(e_id)
+    if edges:
+        # Final review I4: `incident_edges` re-scans every edge in the scene,
+        # so calling it once per selected edge made this O(E^2) -- Ctrl+A then
+        # Shrink on a 40x40 quad grid (3280 edges) froze the GUI thread for
+        # ~10s. One pass builds the same vertex -> incident-edge index the
+        # vertex branch below already builds, and the loop becomes two dict
+        # lookups per edge.
+        edges_at_vertex: dict[int, set[int]] = {}
+        endpoints_of: dict[int, tuple[int, int]] = {}
+        for e in scene.edges_iter():
+            e_id, v1, v2 = int(e.id), int(e.v1_id), int(e.v2_id)
+            endpoints_of[e_id] = (v1, v2)
+            edges_at_vertex.setdefault(v1, set()).add(e_id)
+            edges_at_vertex.setdefault(v2, set()).add(e_id)
+        empty: set[int] = set()
+        for e_id in edges:
+            ends = endpoints_of.get(e_id)
+            if ends is None:  # dead id, same skip `scene.edge` used to give
+                continue
+            v1, v2 = ends
+            neighbours = (edges_at_vertex.get(v1, empty) | edges_at_vertex.get(v2, empty)) - {e_id}
+            if neighbours <= edges:
+                kept_edges.add(e_id)
 
     kept_vertices = set()
     if vertices:
@@ -233,13 +288,17 @@ def same_material(scene, face_ids) -> set[int]:
     """
     from pluton.scene.scene import Side
 
+    # Final review I6: `face_material` is a dict `.get` with a Default
+    # fallback and never raises, so the `except KeyError: continue` that used
+    # to wrap the two reads below skipped nothing. A dead seed id therefore
+    # contributed Default, `real` came out empty, the seed set became {0} and
+    # the match loop returned every unpainted face in the document. Liveness
+    # is now asked of the mesh up front, so the module's "a dead id is
+    # skipped rather than raised on" promise is actually kept here.
     seed_materials: set[int] = set()
-    for f_id in face_ids:
-        try:
-            front = int(scene.face_material(f_id, Side.FRONT))
-            back = int(scene.face_material(f_id, Side.BACK))
-        except KeyError:
-            continue
+    for f_id in _live_faces(scene, face_ids):
+        front = int(scene.face_material(f_id, Side.FRONT))
+        back = int(scene.face_material(f_id, Side.BACK))
         face_materials = {front, back}
         real = face_materials - {_DEFAULT_MATERIAL_ID}
         seed_materials |= real if real else face_materials
