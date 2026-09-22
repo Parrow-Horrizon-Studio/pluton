@@ -55,13 +55,22 @@ def world_to_local_point(point, world_transform):
     return local.astype(np.float32)
 
 
-def pick_selectable(cursor_screen, viewport_size, camera, scene, world_transform=None):
-    """Return ("edge", id) for the nearest edge within PICK_PIXEL_TOLERANCE of
-    the cursor (screen-space); else ("face", id) under the cursor ray; else None.
-    Edge-priority: thin targets are harder to hit, so they win over the face.
+def pick_selectable(
+    cursor_screen, viewport_size, camera, scene, world_transform=None, *, select_vertices=False
+):
+    """Return ("vertex", id) when `select_vertices` and a vertex is within
+    PICK_PIXEL_TOLERANCE; else ("edge", id) for the nearest edge within that
+    tolerance; else ("face", id) under the cursor ray; else None.
+
+    Thin targets win because they are harder to hit, which is why the order
+    runs vertex, edge, face. Vertex picking is OPT-IN and off by default
+    (M7.6c D4): extending that rule to vertices unconditionally would change
+    what every click near a corner selects, across every tool that picks, on
+    geometry that is mostly corners. With `select_vertices` False this
+    function executes exactly the code it executed before M7.6c.
 
     world_transform: optional (4,4) matrix mapping local (scene) coords to world.
-    None or identity → behaviour is identical to the no-arg call (regression-safe).
+    None or identity gives behaviour identical to the no-arg call (regression-safe).
     """
     px, py = float(cursor_screen[0]), float(cursor_screen[1])
     w, h = int(viewport_size[0]), int(viewport_size[1])
@@ -73,6 +82,20 @@ def pick_selectable(cursor_screen, viewport_size, camera, scene, world_transform
         if not use_wt:
             return local_pos
         return apply_mat(local_pos, wt)[0]
+
+    if select_vertices:
+        best_vertex: int | None = None
+        best_vd = PICK_PIXEL_TOLERANCE
+        for v in scene.vertices_iter():
+            s = camera.world_to_screen(_to_world(v.position), w, h)
+            if s is None:
+                continue
+            d = math.hypot(px - s[0], py - s[1])
+            if d <= best_vd:
+                best_vd = d
+                best_vertex = v.id
+        if best_vertex is not None:
+            return ("vertex", int(best_vertex))
 
     best_edge: int | None = None
     best_d = PICK_PIXEL_TOLERANCE
@@ -156,8 +179,10 @@ def _normalize_rect(rect):
     return (min(x0, x1), min(y0, y1), max(x0, x1), max(y0, y1))
 
 
-def entities_in_box(rect_px, mode, viewport_size, camera, scene, world_transform=None):
-    """Return (edge_ids: set, face_ids: set) inside rect_px under the given mode.
+def entities_in_box(
+    rect_px, mode, viewport_size, camera, scene, world_transform=None, *, select_vertices=False
+):
+    """Return (edge_ids, face_ids, vertex_ids) inside rect_px under the given mode.
     mode="window": only fully-enclosed; mode="crossing": anything touched.
 
     world_transform: optional (4,4) matrix mapping local (scene) coords to world.
@@ -167,6 +192,7 @@ def entities_in_box(rect_px, mode, viewport_size, camera, scene, world_transform
     w, h = int(viewport_size[0]), int(viewport_size[1])
     edges: set[int] = set()
     faces: set[int] = set()
+    vertices: set[int] = set()
 
     use_wt = not is_identity_transform(world_transform)
     wt = np.asarray(world_transform, dtype=np.float64) if use_wt else None
@@ -225,4 +251,10 @@ def entities_in_box(rect_px, mode, viewport_size, camera, scene, world_transform
             if touched:
                 faces.add(f.id)
 
-    return edges, faces
+    if select_vertices:
+        for v in scene.vertices_iter():
+            s = proj(v.position)
+            if s is not None and _point_in_rect(s[0], s[1], rect):
+                vertices.add(int(v.id))
+
+    return edges, faces, vertices

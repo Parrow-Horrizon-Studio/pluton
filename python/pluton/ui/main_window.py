@@ -560,6 +560,9 @@ class MainWindow(QMainWindow):
             # (Select/Erase), not just unpainted -- this is how that reaches
             # them without handing a picking tool the whole viewport.
             show_guides_provider=lambda: self._viewport.show_guides,
+            # M7.6c Task 7: vertex picking is opt-in (View > Select Vertices),
+            # off by default -- mirrors show_guides_provider above.
+            select_vertices_provider=lambda: self._viewport.select_vertices,
         )
 
     def _rebuild_tool_context(self) -> None:

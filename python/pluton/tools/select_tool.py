@@ -48,6 +48,7 @@ class SelectTool(Tool):
         self._units_provider = None  # M7d — callable () -> pluton.units.Units (or None)
         self._request_rebuild = None  # M4e — callable () -> None
         self._show_guides_provider = None  # M7.6b Task 7 fix round 1 -- callable () -> bool
+        self._select_vertices_provider = None  # M7.6c Task 7 -- callable () -> bool
         self._hovered: tuple[str, int] | None = None
         self._hovered_instance = None  # M4e — Instance | None (for Task 15 silhouette)
         self._hovered_annotation: int | None = None  # M7d — annotation id under the cursor
@@ -68,6 +69,7 @@ class SelectTool(Tool):
         self._units_provider = ctx.units_provider
         self._request_rebuild = ctx.request_context_rebuild
         self._show_guides_provider = ctx.show_guides_provider
+        self._select_vertices_provider = ctx.select_vertices_provider
         self._hovered = None
         self._hovered_instance = None
         self._hovered_annotation = None
@@ -78,6 +80,12 @@ class SelectTool(Tool):
 
     def _world_transform(self):
         return self._model.active_world_transform if self._model is not None else None
+
+    def _select_vertices(self) -> bool:
+        """M7.6c: None reads as False, the viewport's own default, so a bare
+        test ToolContext keeps pre-M7.6c picking."""
+        provider = self._select_vertices_provider
+        return bool(provider()) if provider is not None else False
 
     def _units(self) -> Units:
         # M7d: every other units provider in this codebase (wall/opening/roof
@@ -174,18 +182,19 @@ class SelectTool(Tool):
             from pluton.viewport.picking import entities_in_box
 
             mode = "window" if self._box_window else "crossing"
-            edges, faces = entities_in_box(
+            edges, faces, vertices = entities_in_box(
                 self._box_rect,
                 mode,
                 self._viewport_size(),
                 self._camera,
                 self._scene,
                 world_transform=self._world_transform(),
+                select_vertices=self._select_vertices(),
             )
             if shift:
-                self._selection.add(edges=edges, faces=faces)
+                self._selection.add(edges=edges, faces=faces, vertices=vertices)
             else:
-                self._selection.replace(edges=edges, faces=faces)
+                self._selection.replace(edges=edges, faces=faces, vertices=vertices)
         else:
             cx, cy = self._cursor(event)
             w, h = self._viewport_size()
@@ -289,7 +298,7 @@ class SelectTool(Tool):
         alone rather than clearing it, because a double-click that missed is
         far more often a mis-aim than an intent to deselect.
         """
-        from pluton.selection_ops import adjacent_faces, bounding_edges
+        from pluton.selection_ops import adjacent_faces, bounding_edges, incident_edges
 
         hit = self._pick_geometry(cx, cy, w, h)
         if hit is None:
@@ -301,6 +310,11 @@ class SelectTool(Tool):
         elif kind == "edge":
             edges = {int(ent_id)}
             faces = adjacent_faces(self._scene, edges)
+        elif kind == "vertex":
+            vertices = {int(ent_id)}
+            edges = incident_edges(self._scene, vertices)
+            self._apply_smart_selection(event, edges=edges, faces=set(), vertices=vertices)
+            return
         else:
             return
         self._apply_smart_selection(event, edges=edges, faces=faces)
@@ -321,15 +335,22 @@ class SelectTool(Tool):
         hit = self._pick_geometry(cx, cy, w, h)
         if hit is None:
             return
-        _verts, edges, faces = connected_component(self._scene, self._seed_vertices(hit))
-        self._apply_smart_selection(event, edges=edges, faces=faces)
+        verts, edges, faces = connected_component(self._scene, self._seed_vertices(hit))
+        if not self._select_vertices():
+            verts = set()
+        self._apply_smart_selection(event, edges=edges, faces=faces, vertices=verts)
 
     def _pick_geometry(self, cx: float, cy: float, w: int, h: int):
         """pick_selectable against the active context, or None."""
         if self._scene is None or self._camera is None:
             return None
         return pick_selectable(
-            (cx, cy), (w, h), self._camera, self._scene, world_transform=self._world_transform()
+            (cx, cy),
+            (w, h),
+            self._camera,
+            self._scene,
+            world_transform=self._world_transform(),
+            select_vertices=self._select_vertices(),
         )
 
     def _seed_vertices(self, hit) -> set[int]:
@@ -341,19 +362,23 @@ class SelectTool(Tool):
             if kind == "edge":
                 e = self._scene.edge(ent_id)
                 return {int(e.v1_id), int(e.v2_id)}
+            if kind == "vertex":
+                return {int(ent_id)}
         except KeyError:
             return set()
         return set()
 
-    def _apply_smart_selection(self, event: QMouseEvent, *, edges, faces) -> None:
+    def _apply_smart_selection(
+        self, event: QMouseEvent, *, edges, faces, vertices=frozenset()
+    ) -> None:
         """Replace, or add when Shift is held, matching single-click and
         box-select."""
         if self._selection is None:
             return
         if bool(event.modifiers() & Qt.KeyboardModifier.ShiftModifier):
-            self._selection.add(edges=edges, faces=faces)
+            self._selection.add(edges=edges, faces=faces, vertices=vertices)
         else:
-            self._selection.replace(edges=edges, faces=faces)
+            self._selection.replace(edges=edges, faces=faces, vertices=vertices)
 
     def prompt_text(self, default: str = "") -> str | None:
         """Ask the user for a label's new text. Overridable for testing

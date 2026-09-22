@@ -122,3 +122,55 @@ def test_double_click_on_empty_space_leaves_the_selection_alone():
     sel.replace(faces={ids["left"]})
     tool.on_mouse_double_click(_event_at(cam, (50.0, 50.0, 0.0)), None)
     assert sel.faces == {ids["left"]}
+
+
+def _tool_with_vertices(scene, w=800, h=600):
+    from pluton.selection import Selection
+    from pluton.tools.select_tool import SelectTool
+    from pluton.tools.tool import ToolContext
+
+    sel = Selection()
+    cam = _camera(w, h)
+    tool = SelectTool()
+    tool.activate(
+        ToolContext(
+            scene=scene,
+            camera=cam,
+            widget_size_provider=lambda: (w, h),
+            selection=sel,
+            select_vertices_provider=lambda: True,
+        )
+    )
+    return tool, sel, cam
+
+
+def test_double_click_a_vertex_selects_it_and_its_incident_edges():
+    scene, ids = _quad_pair_scene()
+    tool, sel, cam = _tool_with_vertices(scene)
+    tool.on_mouse_double_click(_event_at(cam, (1.0, 0.0, 0.0)), None)
+    assert sel.vertices == {ids["b"]}
+    # b touches a-b, b-c and b-e.
+    assert len(sel.edges) == 3
+    assert sel.faces == set()
+
+
+def test_triple_click_keeps_vertices_only_when_the_mode_is_on():
+    """Spec D5: a user who never enabled the mode cannot acquire a vertex
+    selection by accident, and so cannot be surprised by a Move that drags
+    vertices they cannot see selected."""
+    scene, _ids = _quad_pair_scene()
+    off_tool, off_sel, cam = _tool(scene)
+    off_tool.on_mouse_triple_click(_event_at(cam, (0.5, 0.5, 0.0)), None)
+    assert off_sel.vertices == set()
+
+    on_tool, on_sel, cam2 = _tool_with_vertices(scene)
+    on_tool.on_mouse_triple_click(_event_at(cam2, (0.5, 0.5, 0.0)), None)
+    assert len(on_sel.vertices) == 6
+
+
+def test_with_the_mode_off_a_corner_double_click_still_smart_selects_the_edge():
+    scene, _ids = _quad_pair_scene()
+    tool, sel, cam = _tool(scene)
+    tool.on_mouse_double_click(_event_at(cam, (0.0, 0.0, 0.0)), None)
+    assert sel.vertices == set()
+    assert len(sel.edges) == 1

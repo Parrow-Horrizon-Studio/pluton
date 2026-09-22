@@ -64,6 +64,10 @@ class ViewportWidget(QOpenGLWidget):
         # renumber anyone's ids. Guides are visible by default (SketchUp).
         self.show_guides = True
 
+        # M7.6c Task 7: View > Select Vertices. Off by default, so an
+        # untouched pluton picks exactly as it did before this milestone.
+        self.select_vertices = False
+
         # M7.6c: Qt has no triple-click event, so the third press is counted
         # here and dispatched as Tool.on_mouse_triple_click. The interval is
         # read from Qt once, at construction, so the gesture honours the

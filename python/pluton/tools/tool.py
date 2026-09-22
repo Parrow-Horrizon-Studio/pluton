@@ -45,6 +45,11 @@ class ToolContext:
     # ToolContext) reads as "guides visible", matching the viewport's own
     # default.
     show_guides_provider: object = None
+    # M7.6c -- callable () -> bool, mirroring ViewportWidget.select_vertices.
+    # Vertex picking is opt-in and off by default, so None (a bare test
+    # ToolContext) reads as "vertices not pickable", matching the viewport's
+    # own default and keeping every pre-M7.6c test meaningful.
+    select_vertices_provider: object = None
 
 
 @dataclass(frozen=True, slots=True)

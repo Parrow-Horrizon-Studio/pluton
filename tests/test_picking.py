@@ -92,7 +92,7 @@ def test_window_selects_only_fully_enclosed():
     margin = 10.0
     rect = (min(s1[0], s2[0]) - margin, min(s1[1], s2[1]) - margin,
             max(s1[0], s2[0]) + margin, max(s1[1], s2[1]) + margin)
-    edges, faces = entities_in_box(rect, "window", (w, h), cam, scene)
+    edges, faces, _vertices = entities_in_box(rect, "window", (w, h), cam, scene)
     assert e_in in edges
     assert e_out not in edges
 
@@ -116,8 +116,8 @@ def test_crossing_selects_straddling_edge_window_does_not():
     left = min(sa[0], sb[0]) - 20.0
     rect = (left, top, midx, bot)
 
-    win_edges, _ = entities_in_box(rect, "window", (w, h), cam, scene)
-    cross_edges, _ = entities_in_box(rect, "crossing", (w, h), cam, scene)
+    win_edges, _, _ = entities_in_box(rect, "window", (w, h), cam, scene)
+    cross_edges, _, _ = entities_in_box(rect, "crossing", (w, h), cam, scene)
     assert e not in win_edges
     assert e in cross_edges
 
@@ -140,8 +140,8 @@ def test_crossing_face_when_rect_is_inside_the_face():
     cx, cy, _ = cam.world_to_screen(np.array([0.0, 0.0, 0.0], dtype=np.float32), w, h)
     rect = (cx - 8.0, cy - 8.0, cx + 8.0, cy + 8.0)
 
-    _, cross_faces = entities_in_box(rect, "crossing", (w, h), cam, scene)
+    _, cross_faces, _ = entities_in_box(rect, "crossing", (w, h), cam, scene)
     assert fid in cross_faces
     # Window mode must NOT select it (its corners are far outside the tiny rect).
-    _, win_faces = entities_in_box(rect, "window", (w, h), cam, scene)
+    _, win_faces, _ = entities_in_box(rect, "window", (w, h), cam, scene)
     assert fid not in win_faces
