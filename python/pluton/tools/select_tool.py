@@ -246,8 +246,21 @@ class SelectTool(Tool):
     def on_mouse_double_click(self, event: QMouseEvent, snap) -> None:
         """Double-click a label to reopen its text prompt; a dimension has no
         stored text and does nothing. Otherwise double-click an instance to
-        enter it (group/component open for editing)."""
-        if self._model is None or self._camera is None:
+        enter it (group/component open for editing). Failing both, double-click
+        raw geometry to smart-select it with its immediate neighbours.
+
+        The order is load-bearing and matches SketchUp: a group is entered by
+        double-clicking it, and raw geometry is what you double-click once you
+        are inside. Putting the geometry branch first would make a group
+        impossible to enter wherever a face sits under the cursor, which is
+        everywhere.
+
+        Only the instance branch needs `self._model`; `_pick_annotation`
+        already tolerates a None model (a bare test ToolContext has none),
+        and the geometry branch needs neither, so the method is no longer
+        gated on model up front.
+        """
+        if self._camera is None:
             return
         cx, cy = self._cursor(event)
         w, h = self._viewport_size()
@@ -257,12 +270,90 @@ class SelectTool(Tool):
         if ann_id is not None:
             self._edit_annotation_text(ann_id)
             return
-        origin, direction = self._camera.ray_from_screen(cx, cy, w, h)
-        inst = self._model.pick_instance(origin, direction)
-        if inst is not None:
-            self._model.enter(inst)
-            self._enter_or_exit_cleanup()
-            self._suppress_next_release = True
+        if self._model is not None:
+            origin, direction = self._camera.ray_from_screen(cx, cy, w, h)
+            inst = self._model.pick_instance(origin, direction)
+            if inst is not None:
+                self._model.enter(inst)
+                self._enter_or_exit_cleanup()
+                self._suppress_next_release = True
+                return
+        self._smart_select(event, cx, cy, w, h)
+
+    def _smart_select(self, event: QMouseEvent, cx: float, cy: float, w: int, h: int) -> None:
+        """M7.6c: a double-click on raw geometry selects the entity plus its
+        immediate neighbours, one dimension up and down.
+
+        Face gives the face and its bounding edges; edge gives the edge and
+        its adjacent faces. Nothing under the cursor leaves the selection
+        alone rather than clearing it, because a double-click that missed is
+        far more often a mis-aim than an intent to deselect.
+        """
+        from pluton.selection_ops import adjacent_faces, bounding_edges
+
+        hit = self._pick_geometry(cx, cy, w, h)
+        if hit is None:
+            return
+        kind, ent_id = hit
+        if kind == "face":
+            faces = {int(ent_id)}
+            edges = bounding_edges(self._scene, faces)
+        elif kind == "edge":
+            edges = {int(ent_id)}
+            faces = adjacent_faces(self._scene, edges)
+        else:
+            return
+        self._apply_smart_selection(event, edges=edges, faces=faces)
+
+    def on_mouse_triple_click(self, event: QMouseEvent, snap) -> None:
+        """M7.6c: select everything connected to the entity under the cursor.
+
+        Scoped to the active context's mesh, like every other pick here: the
+        flood neither descends into a nested instance nor escapes to the
+        parent.
+        """
+        if self._camera is None or self._scene is None:
+            return
+        from pluton.selection_ops import connected_component
+
+        cx, cy = self._cursor(event)
+        w, h = self._viewport_size()
+        hit = self._pick_geometry(cx, cy, w, h)
+        if hit is None:
+            return
+        _verts, edges, faces = connected_component(self._scene, self._seed_vertices(hit))
+        self._apply_smart_selection(event, edges=edges, faces=faces)
+
+    def _pick_geometry(self, cx: float, cy: float, w: int, h: int):
+        """pick_selectable against the active context, or None."""
+        if self._scene is None or self._camera is None:
+            return None
+        return pick_selectable(
+            (cx, cy), (w, h), self._camera, self._scene, world_transform=self._world_transform()
+        )
+
+    def _seed_vertices(self, hit) -> set[int]:
+        """The vertices a flood starts from, for whichever kind was picked."""
+        kind, ent_id = hit
+        try:
+            if kind == "face":
+                return {int(v) for v in self._scene.face_loop(ent_id)}
+            if kind == "edge":
+                e = self._scene.edge(ent_id)
+                return {int(e.v1_id), int(e.v2_id)}
+        except KeyError:
+            return set()
+        return set()
+
+    def _apply_smart_selection(self, event: QMouseEvent, *, edges, faces) -> None:
+        """Replace, or add when Shift is held, matching single-click and
+        box-select."""
+        if self._selection is None:
+            return
+        if bool(event.modifiers() & Qt.KeyboardModifier.ShiftModifier):
+            self._selection.add(edges=edges, faces=faces)
+        else:
+            self._selection.replace(edges=edges, faces=faces)
 
     def prompt_text(self, default: str = "") -> str | None:
         """Ask the user for a label's new text. Overridable for testing
