@@ -80,6 +80,11 @@ class ViewportWidget(QOpenGLWidget):
         # site. M7.6b deliberately left exactly one in the codebase and that
         # is worth keeping true.
         self._now_ms_provider = _default_now_ms
+        # M7.6c fix round 1: the (x, y, now_ms) most recently fed into
+        # _click_runs, so a press and a dblclick reporting the same physical
+        # click (identical position and timestamp) cannot advance the run
+        # counter twice. See _feed_click_run.
+        self._last_click_feed: tuple[float, float, float] | None = None
 
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         self.setMouseTracking(True)
@@ -169,9 +174,7 @@ class ViewportWidget(QOpenGLWidget):
                 snap = self._snap_for_event(event)
                 active.on_mouse_press(event, snap)
                 pos = event.position()
-                run = self._click_runs.press(
-                    float(pos.x()), float(pos.y()), self._now_ms_provider()
-                )
+                run = self._feed_click_run(float(pos.x()), float(pos.y()), self._now_ms_provider())
                 if run == 3:
                     triple = getattr(active, "on_mouse_triple_click", None)
                     if triple is not None:
@@ -236,6 +239,19 @@ class ViewportWidget(QOpenGLWidget):
             if active is not None:
                 snap = self._snap_for_event(event)
                 active.on_mouse_double_click(event, snap)
+                # M7.6c fix round 1: the real triple-click sequence is Press,
+                # DblClick, Press -- Qt never sends a second MousePress, so
+                # the run counter must be fed from here too, or a genuine
+                # triple click can only ever reach run 2. This is additive
+                # beside the dispatch above, not a replacement for it: entering
+                # a group and editing a label's text still flow through
+                # on_mouse_double_click exactly as before.
+                pos = event.position()
+                run = self._feed_click_run(float(pos.x()), float(pos.y()), self._now_ms_provider())
+                if run == 3:
+                    triple = getattr(active, "on_mouse_triple_click", None)
+                    if triple is not None:
+                        triple(event, snap)
                 if self._on_event_finished is not None:
                     self._on_event_finished()
                 self.update()
@@ -308,6 +324,30 @@ class ViewportWidget(QOpenGLWidget):
         event.accept()
 
     # --- Helpers ----------------------------------------------------------
+
+    def _feed_click_run(self, x: float, y: float, now_ms: float) -> int | None:
+        """Feed one press-equivalent event into the multi-click run counter.
+
+        M7.6c fix round 1: Qt's real click sequence replaces the second
+        press of a double-click with MouseButtonDblClick, so both
+        mousePressEvent and mouseDoubleClickEvent must feed this counter or a
+        genuine triple click (Press, DblClick, Press) never reaches run 3 --
+        see SelectTool._suppress_next_release, which exists only because
+        that DblClick's own release has no matching press.
+
+        Idempotent for a press and a dblclick reported at the same position
+        and timestamp: were some platform ever to deliver both for a single
+        physical click, feeding the counter twice would make a real
+        double-click read as a triple. The guard costs one false negative in
+        exchange -- two genuinely distinct clicks landing at the exact same
+        pixel at the exact same millisecond would be under-counted -- which
+        real input hardware and Qt's own event loop do not produce.
+        """
+        key = (x, y, now_ms)
+        if key == self._last_click_feed:
+            return None
+        self._last_click_feed = key
+        return self._click_runs.press(x, y, now_ms)
 
     def _cursor_to_ndc(self, x: float, y: float) -> np.ndarray:
         w = max(self.width(), 1)
