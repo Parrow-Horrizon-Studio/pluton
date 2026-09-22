@@ -13,7 +13,7 @@ from collections.abc import Iterable
 
 
 class Selection:
-    __slots__ = ("_annotations", "_edges", "_faces", "_instances", "_version")
+    __slots__ = ("_annotations", "_edges", "_faces", "_instances", "_version", "_vertices")
 
     def __init__(self) -> None:
         self._edges: set[int] = set()
@@ -21,6 +21,7 @@ class Selection:
         self._instances: set[int] = set()
         self._annotations: set[int] = set()
         self._version: int = 0
+        self._vertices: set[int] = set()
 
     @property
     def edges(self) -> set[int]:
@@ -39,6 +40,10 @@ class Selection:
         return self._annotations
 
     @property
+    def vertices(self) -> set[int]:
+        return self._vertices
+
+    @property
     def version(self) -> int:
         return self._version
 
@@ -52,11 +57,13 @@ class Selection:
         faces: Iterable[int] = (),
         instances: Iterable[int] = (),
         annotations: Iterable[int] = (),
+        vertices: Iterable[int] = (),
     ) -> None:
         self._edges = set(edges)
         self._faces = set(faces)
         self._instances = set(instances)
         self._annotations = set(annotations)
+        self._vertices = set(vertices)
         self._bump()
 
     def add(
@@ -66,11 +73,13 @@ class Selection:
         faces: Iterable[int] = (),
         instances: Iterable[int] = (),
         annotations: Iterable[int] = (),
+        vertices: Iterable[int] = (),
     ) -> None:
         self._edges |= set(edges)
         self._faces |= set(faces)
         self._instances |= set(instances)
         self._annotations |= set(annotations)
+        self._vertices |= set(vertices)
         self._bump()
 
     def remove(
@@ -80,11 +89,13 @@ class Selection:
         faces: Iterable[int] = (),
         instances: Iterable[int] = (),
         annotations: Iterable[int] = (),
+        vertices: Iterable[int] = (),
     ) -> None:
         self._edges -= set(edges)
         self._faces -= set(faces)
         self._instances -= set(instances)
         self._annotations -= set(annotations)
+        self._vertices -= set(vertices)
         self._bump()
 
     def toggle_edge(self, e_id: int) -> None:
@@ -103,12 +114,17 @@ class Selection:
         self._annotations.symmetric_difference_update({a_id})
         self._bump()
 
+    def toggle_vertex(self, v_id: int) -> None:
+        self._vertices.symmetric_difference_update({v_id})
+        self._bump()
+
     def clear(self) -> None:
-        if self._edges or self._faces or self._instances or self._annotations:
+        if self._edges or self._faces or self._instances or self._annotations or self._vertices:
             self._edges.clear()
             self._faces.clear()
             self._instances.clear()
             self._annotations.clear()
+            self._vertices.clear()
             self._bump()
 
     def contains_edge(self, e_id: int) -> bool:
@@ -124,12 +140,19 @@ class Selection:
         return a_id in self._annotations
 
     def is_empty(self) -> bool:
-        return not self._edges and not self._faces and not self._instances and not self._annotations
+        return (
+            not self._edges
+            and not self._faces
+            and not self._instances
+            and not self._annotations
+            and not self._vertices
+        )
 
-    def counts(self) -> tuple[int, int, int, int]:
+    def counts(self) -> tuple[int, int, int, int, int]:
         return (
             len(self._edges),
             len(self._faces),
             len(self._instances),
             len(self._annotations),
+            len(self._vertices),
         )

@@ -39,11 +39,13 @@ def prune_to_live(model, selection) -> None:
     live_edges = {e.id for e in context.mesh.edges_iter()}
     live_faces = {f.id for f in context.mesh.faces_iter()}
     live_annotations = {a.id for a in context.annotations}
+    live_vertices = {v.id for v in context.mesh.vertices_iter()}
     selection.replace(
         edges=selection.edges & live_edges,
         faces=selection.faces & live_faces,
         instances=selection.instances & live_instances,
         annotations=selection.annotations & live_annotations,
+        vertices=selection.vertices & live_vertices,
     )
 
 
@@ -52,10 +54,11 @@ def selection_status_text(selection) -> str:
     counts = selection.counts()
     if not any(counts):
         return ""
-    labels = ("edge", "face", "instance", "annotation")
+    labels = ("edge", "face", "instance", "annotation", "vertex")
+    plurals = ("edges", "faces", "instances", "annotations", "vertices")
     parts = [
-        f"{n} {label}" + ("s" if n != 1 else "")
-        for n, label in zip(counts, labels, strict=True)
+        f"{n} {label if n == 1 else plural}"
+        for n, label, plural in zip(counts, labels, plurals, strict=True)
         if n
     ]
     return ", ".join(parts) + " selected"

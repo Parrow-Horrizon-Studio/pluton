@@ -16,8 +16,9 @@ import numpy as np
 def selection_vertices(scene, selection) -> list[int]:
     """Ordered-unique vertex ids covered by the selection.
 
-    Union of each selected edge's two endpoints and each selected face's loop.
-    Ids whose entity is no longer live are skipped. Sorted for determinism.
+    Union of each selected edge's two endpoints, each selected face's loop,
+    and each directly-selected vertex. Ids whose entity is no longer live are
+    skipped. Sorted for determinism.
     """
     seen: dict[int, None] = {}
     for e_id in sorted(selection.edges):
@@ -34,6 +35,16 @@ def selection_vertices(scene, selection) -> list[int]:
             continue
         for vid in loop:
             seen.setdefault(int(vid), None)
+    # M7.6c: a directly-selected vertex is part of the transform set exactly
+    # like an edge's endpoint. This is the single line that makes Move,
+    # Rotate and Scale drag a bare vertex, since all three read this function
+    # and nothing else.
+    for v_id in sorted(selection.vertices):
+        try:
+            scene.vertex(v_id)
+        except KeyError:
+            continue
+        seen.setdefault(int(v_id), None)
     return sorted(seen)
 
 

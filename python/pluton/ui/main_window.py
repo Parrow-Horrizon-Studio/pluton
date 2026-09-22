@@ -954,6 +954,17 @@ class MainWindow(QMainWindow):
         if sel.is_empty():
             return
 
+        # M7.6c D6: a selected vertex is NOT deletable. Scene.remove_vertex
+        # exists, but a vertex with incident edges cannot go without cascading
+        # into those edges and the faces they bound, and a Delete that
+        # destroys two faces because one corner was selected is the same trap
+        # M7.6b closed for hidden guides. A vertex-only selection is a no-op
+        # here; a mixed selection deletes the edges and faces and leaves the
+        # vertices, which prune_to_live then drops if they died with their
+        # geometry.
+        if not (sel.edges or sel.faces or sel.instances or sel.annotations):
+            return
+
         # Fix wave: build the annotation delete up front but do NOT execute it
         # standalone -- it must ride along as one child of whichever single
         # command below ends up on the undo stack, so a mixed selection (any
