@@ -218,14 +218,18 @@ def same_material(scene, face_ids) -> set[int]:
     side counts (spec D8): a user asking for "same material" means the paint
     they can see, and they cannot see which side dictionary it came from.
 
-    Material 0 (Default) participates as a seed only when NO seed face
-    carries a real material on either side. Without that guard, a face
-    painted on one side only would still seed Default from its unpainted
-    side, and "All with Same Material" on one painted wall would select
-    every blank face in the document -- not what a user means by the
-    command. When every seed face is genuinely unpainted on both sides,
-    Default is the honest answer and "select all unpainted faces" keeps
-    working.
+    Material 0 (Default) participates as a seed on a PER-FACE basis: a seed
+    face contributes Default only when THAT face itself carries no real
+    material on either side. A face painted on one side only contributes
+    just its real material, never Default from its own unpainted side --
+    that is what stops "All with Same Material" on one painted wall from
+    also matching every blank face in the document. A face the caller
+    deliberately included in the seed that is wholly unpainted still
+    contributes Default, so seeding a painted face together with an
+    unpainted one matches both families rather than dropping the unpainted
+    seed from its own result. (An earlier version of this rule pooled real
+    vs. Default across the whole seed set before deciding, which made a
+    mixed seed like that exclude its own unpainted member.)
     """
     from pluton.scene.scene import Side
 
@@ -236,14 +240,11 @@ def same_material(scene, face_ids) -> set[int]:
             back = int(scene.face_material(f_id, Side.BACK))
         except KeyError:
             continue
-        seed_materials.add(front)
-        seed_materials.add(back)
+        face_materials = {front, back}
+        real = face_materials - {_DEFAULT_MATERIAL_ID}
+        seed_materials |= real if real else face_materials
     if not seed_materials:
         return set()
-
-    real_materials = seed_materials - {_DEFAULT_MATERIAL_ID}
-    if real_materials:
-        seed_materials = real_materials
 
     out: set[int] = set()
     for f in scene.faces_iter():

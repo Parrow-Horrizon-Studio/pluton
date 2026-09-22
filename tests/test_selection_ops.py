@@ -275,15 +275,69 @@ def test_grow_adds_edges_sharing_a_vertex():
     assert len(edges) > 1
 
 
+def _nine_quad_grid():
+    """A 3x3 grid of unit quads sharing edges, lying in the z=0 plane.
+
+        f02 f12 f22
+        f01 f11 f21
+        f00 f10 f20
+
+    `ids["f{row}{col}"]` names each cell, row and col in 0..2; `ids["center"]`
+    aliases f11, the one cell with all four edge-neighbours live inside the
+    grid. Vertices are shared across adjacent cells, so face adjacency
+    (sharing an edge) is real, unlike a diagonal pair that only shares a
+    corner.
+    """
+    from pluton.scene import Scene
+
+    scene = Scene()
+    verts = {}
+    for y in range(4):
+        for x in range(4):
+            verts[(x, y)] = scene.add_vertex(np.array([float(x), float(y), 0.0], dtype=np.float32))
+
+    ids = {}
+    for row in range(3):
+        for col in range(3):
+            a = verts[(col, row)]
+            b = verts[(col + 1, row)]
+            c = verts[(col + 1, row + 1)]
+            d = verts[(col, row + 1)]
+            ids[f"f{row}{col}"] = scene.add_face_from_loop((a, b, c, d))
+    ids["center"] = ids["f11"]
+    return scene, ids
+
+
 def test_shrink_inverts_grow_on_an_interior_region():
-    """Spec section 4 property 1."""
+    """Spec section 4 property 1.
+
+    The quad pair (two faces total) cannot exercise this: growing either
+    face already reaches the whole universe, so shrinking has nothing on
+    the boundary to erode and the round trip passes even if `shrink` is
+    broken. A 3x3 grid gives the centre face a genuine interior.
+
+    Hand-derived expectation:
+    - `grow({center})` reaches center plus its four edge-adjacent
+      neighbours (f01, f10, f12, f21) -- a plus shape of 5 faces. The four
+      diagonal corners (f00, f02, f20, f22) share only a vertex with the
+      center, not an edge, so one-hop face adjacency does not reach them.
+    - Shrinking that plus shape drops every arm: f01's other grid neighbours
+      are f00 and f02, neither in the plus shape, so f01 is on the boundary
+      and is dropped; f10, f12 and f21 are each boundary for the same
+      reason against their own two non-center grid neighbours. The center's
+      neighbours are exactly the four arms, all of which ARE in the plus
+      shape, so the center is interior and is kept.
+    - Net: grow(center) -> shrink -> {center}, the original seed.
+    """
     from pluton.selection_ops import grow, shrink
 
-    scene, ids = _quad_pair()
-    start = {ids["left"], ids["right"]}
-    grown_e, grown_f, grown_v = grow(scene, edges=set(), faces=start, vertices=set())
-    _e, back_f, _v = shrink(scene, edges=grown_e, faces=grown_f, vertices=grown_v)
-    assert back_f == start
+    scene, ids = _nine_quad_grid()
+    center = ids["center"]
+    _e, grown, _v = grow(scene, edges=set(), faces={center}, vertices=set())
+    assert grown == {center, ids["f01"], ids["f10"], ids["f12"], ids["f21"]}
+
+    _e, back_f, _v = shrink(scene, edges=set(), faces=grown, vertices=set())
+    assert back_f == {center}
 
 
 def test_shrink_removes_a_face_whose_neighbour_is_not_selected():
@@ -340,6 +394,23 @@ def test_same_material_does_not_pull_in_an_unpainted_face():
     scene, ids = _quad_pair()
     scene.set_face_material(ids["left"], 7, Side.FRONT)
     assert same_material(scene, {ids["left"]}) == {ids["left"]}
+
+
+def test_same_material_of_a_mixed_seed_matches_both_families():
+    """Controller ruling refinement: Default participates per seed face, not
+    pooled across the whole seed set. Seeding a painted face together with
+    an unpainted one must match both families, including the unpainted seed
+    matching itself. A global pool (drop Default from the whole seed set
+    once ANY seed face has a real material) would silently exclude the
+    unpainted seed from its own result -- that was the bug this test pins."""
+    from pluton.scene.scene import Side
+    from pluton.selection_ops import same_material
+
+    scene, ids = _quad_pair()
+    scene.set_face_material(ids["left"], 7, Side.FRONT)
+    # ids["right"] stays wholly unpainted (Default on both sides).
+    got = same_material(scene, {ids["left"], ids["right"]})
+    assert got == {ids["left"], ids["right"]}
 
 
 def test_invert_returns_everything_not_selected():
