@@ -162,6 +162,7 @@ class ViewportWidget(QOpenGLWidget):
         overlay = active.overlay() if active is not None else None
         self.scene_renderer.render(self.camera, self.model, overlay, self.selection)
         self._paint_annotations(overlay)
+        self._paint_vertex_glyphs()
 
     # --- Mouse handling ---------------------------------------------------
 
@@ -692,5 +693,77 @@ class ViewportWidget(QOpenGLWidget):
                 # chrome, not a selectable/dimmable annotation. Painted last
                 # so it sits on top of everything else.
                 paint_annotation_plans(painter, [readout_plan], color, set(), color)
+        finally:
+            painter.end()
+
+    _VERTEX_GLYPH_PX = 7.0
+
+    def _selected_vertex_points(self, width: int, height: int) -> list[tuple[float, float]]:
+        """Screen positions of every selected vertex, in the active context.
+
+        Pure: projection only, no painting, so the layout is testable without
+        a GL context. Returns [] when the mode is off, matching how View >
+        Guides makes a hidden guide unpaintable rather than merely dimmed. A
+        vertex that does not project (behind the eye) is skipped rather than
+        clamped, because a clamped position is a glyph drawn somewhere the
+        vertex is not.
+        """
+        if not self.select_vertices or self.model is None or self.selection is None:
+            return []
+        selected = self.selection.vertices
+        if not selected:
+            return []
+        scene = self.model.active_scene
+        wt = self.model.active_world_transform
+        out: list[tuple[float, float]] = []
+        for v_id in sorted(selected):
+            try:
+                local = scene.vertex(v_id).position
+            except KeyError:
+                continue
+            world = (
+                local
+                if is_identity_transform(wt)
+                else apply_mat(
+                    np.asarray(local, dtype=np.float64).reshape(1, 3),
+                    np.asarray(wt, dtype=np.float64),
+                )[0]
+            )
+            s = self.camera.world_to_screen(np.asarray(world, dtype=np.float32), width, height)
+            if s is None:
+                continue
+            out.append((float(s[0]), float(s[1])))
+        return out
+
+    def _paint_vertex_glyphs(self) -> None:
+        """Draw a small filled square at each selected vertex.
+
+        Its own QPainter pass rather than a branch inside _paint_annotations,
+        which returns early when there is nothing annotation-shaped to draw
+        and would therefore hide the glyph in any document without
+        annotations, which is most of them.
+
+        No depth test: the 2D layer has no depth buffer, so a selected vertex
+        behind a wall draws on top of it. Accepted (spec D13) and consistent
+        with how snap markers already behave.
+        """
+        from PySide6.QtGui import QColor, QPainter
+
+        points = self._selected_vertex_points(self.width(), self.height())
+        if not points:
+            return
+        half = self._VERTEX_GLYPH_PX * 0.5
+        painter = QPainter(self)
+        try:
+            painter.setRenderHint(QPainter.RenderHint.Antialiasing, False)
+            painter.setPen(QColor(20, 20, 20))
+            painter.setBrush(QColor(51, 140, 242))
+            for x, y in points:
+                painter.drawRect(
+                    round(x - half),
+                    round(y - half),
+                    int(self._VERTEX_GLYPH_PX),
+                    int(self._VERTEX_GLYPH_PX),
+                )
         finally:
             painter.end()
