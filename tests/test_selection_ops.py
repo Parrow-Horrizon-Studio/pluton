@@ -34,8 +34,15 @@ def _quad_pair():
     shared = scene.edge_between(b, c)
     assert shared is not None
     return scene, {
-        "a": a, "b": b, "c": c, "d": d, "e": e, "f": f,
-        "left": left, "right": right, "shared": shared,
+        "a": a,
+        "b": b,
+        "c": c,
+        "d": d,
+        "e": e,
+        "f": f,
+        "left": left,
+        "right": right,
+        "shared": shared,
     }
 
 
@@ -125,9 +132,11 @@ def test_neighbour_queries_return_a_plain_set_of_ints(fn_name):
     import pluton.selection_ops as ops
 
     scene, ids = _quad_pair()
-    seed = {"bounding_edges": {ids["left"]},
-            "adjacent_faces": {ids["shared"]},
-            "incident_edges": {ids["b"]}}[fn_name]
+    seed = {
+        "bounding_edges": {ids["left"]},
+        "adjacent_faces": {ids["shared"]},
+        "incident_edges": {ids["b"]},
+    }[fn_name]
     got = getattr(ops, fn_name)(scene, seed)
     assert isinstance(got, set)
     assert all(type(x) is int for x in got)

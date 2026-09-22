@@ -47,9 +47,10 @@ def test_with_the_flag_on_a_corner_picks_the_vertex():
     scene, ids = _quad()
     corner = np.array([0.0, 0.0, 0.0], dtype=np.float32)
     sx, sy, _ = cam.world_to_screen(corner, w, h)
-    assert pick_selectable(
-        (sx, sy), (w, h), cam, scene, select_vertices=True
-    ) == ("vertex", ids["a"])
+    assert pick_selectable((sx, sy), (w, h), cam, scene, select_vertices=True) == (
+        "vertex",
+        ids["a"],
+    )
 
 
 def test_with_the_flag_on_a_midspan_click_still_picks_the_edge():
@@ -74,9 +75,10 @@ def test_with_the_flag_on_a_face_centre_still_picks_the_face():
     scene, ids = _quad()
     centre = np.array([0.5, 0.5, 0.0], dtype=np.float32)
     sx, sy, _ = cam.world_to_screen(centre, w, h)
-    assert pick_selectable(
-        (sx, sy), (w, h), cam, scene, select_vertices=True
-    ) == ("face", ids["face"])
+    assert pick_selectable((sx, sy), (w, h), cam, scene, select_vertices=True) == (
+        "face",
+        ids["face"],
+    )
 
 
 def test_the_nearest_vertex_wins_when_two_are_in_tolerance():
@@ -87,9 +89,7 @@ def test_the_nearest_vertex_wins_when_two_are_in_tolerance():
     scene, ids = _quad()
     a_px = cam.world_to_screen(np.array([0.0, 0.0, 0.0], dtype=np.float32), w, h)
     # Nudge one pixel toward the far corner: still nearest to a.
-    kind, ent = pick_selectable(
-        (a_px[0] + 1.0, a_px[1]), (w, h), cam, scene, select_vertices=True
-    )
+    kind, ent = pick_selectable((a_px[0] + 1.0, a_px[1]), (w, h), cam, scene, select_vertices=True)
     assert (kind, ent) == ("vertex", ids["a"])
     assert PICK_PIXEL_TOLERANCE == 8.0
 
