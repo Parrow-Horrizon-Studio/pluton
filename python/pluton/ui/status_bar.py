@@ -15,13 +15,22 @@ from __future__ import annotations
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QHBoxLayout, QLabel, QWidget
 
+# The status bar paints over the VIEWPORT, so these two alphas have to work
+# against whatever environment the document carries. At the original 0.5, black
+# over a white background resolved to about mid grey behind #dddddd text, close
+# to 2.3:1 and unreadable. 0.72 is near 6.6:1 and still reads over the dark
+# environment, so one value serves every environment and the status bar stays
+# independent of document state (spec D10).
+_CHIP_ALPHA = 0.72
+_BOX_ALPHA = 0.82
+
 _FIELD_STYLE = (
-    "QLabel { background-color: rgba(0, 0, 0, 0.5); color: #dddddd;"
+    f"QLabel {{ background-color: rgba(0, 0, 0, {_CHIP_ALPHA}); color: #dddddd;"
     " padding: 4px 10px; font-family: sans-serif; font-size: 11px; }"
 )
 _BOX_STYLE = (
-    "QLabel { background-color: rgba(0, 0, 0, 0.65); color: #ffffff;"
-    " border: 1px solid #666; padding: 3px 8px; font-family: monospace;"
+    f"QLabel {{ background-color: rgba(0, 0, 0, {_BOX_ALPHA}); color: #ffffff;"
+    " border: 1px solid #888; padding: 3px 8px; font-family: monospace;"
     " font-size: 11px; min-width: 70px; }"
 )
 
