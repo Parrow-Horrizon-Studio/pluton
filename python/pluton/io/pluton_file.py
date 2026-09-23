@@ -19,7 +19,7 @@ from pluton.io.document_codec import (
 )
 from pluton.io.errors import PlutonFormatError, PlutonVersionError
 
-SCHEMA_VERSION = 8  # M7.6b: construction guides (Guide, GuidePoint)
+SCHEMA_VERSION = 9  # M7.7: per-document viewport environment (background, sky, ground, ink)
 _MANIFEST = "manifest.json"
 _DOCUMENT = "document.json"
 _TEXTURES_DIR = "textures/"

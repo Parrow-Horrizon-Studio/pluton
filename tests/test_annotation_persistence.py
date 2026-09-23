@@ -35,7 +35,7 @@ def test_annotations_round_trip_in_the_root_context():
     model.active_context.annotations.append(
         Label(model.new_annotation_id(), (0, 0, 0), (2, 2, 0), "Load-bearing")
     )
-    restored, _cam, _units, _style = _roundtrip(model, Camera(), DocumentSettings())
+    restored, _cam, _units, _style, _env = _roundtrip(model, Camera(), DocumentSettings())
     anns = restored.active_context.annotations
     assert len(anns) == 2
     assert anns[0].kind == "dimension" and anns[0].p2 == pytest.approx((4.0, 0.0, 0.0))
@@ -47,7 +47,7 @@ def test_annotations_round_trip_inside_a_group():
     grp = model.new_definition("G", is_group=True)
     model.active_context.children.append(model.new_instance(grp))
     grp.annotations.append(Label(model.new_annotation_id(), (0, 0, 0), (1, 1, 0), "inside"))
-    restored, _cam, _units, _style = _roundtrip(model, Camera(), DocumentSettings())
+    restored, _cam, _units, _style, _env = _roundtrip(model, Camera(), DocumentSettings())
     inner = restored.active_context.children[0].definition
     assert len(inner.annotations) == 1
     assert inner.annotations[0].text == "inside"
@@ -61,7 +61,7 @@ def test_document_without_annotations_key_still_loads():
     for defn in data["model"]["definitions"]:
         assert "annotations" in defn  # sanity: codec does emit the key normally
         defn.pop("annotations")
-    restored, _cam, _units, _style = document_from_dict(data)
+    restored, _cam, _units, _style, _env = document_from_dict(data)
     assert restored.active_context.annotations == []
 
 
@@ -85,7 +85,7 @@ def test_dimension_and_label_round_trip_all_fields_without_transposition():
     model.active_context.annotations.append(dim)
     model.active_context.annotations.append(label)
 
-    restored, _cam, _units, _style = _roundtrip(model, Camera(), DocumentSettings())
+    restored, _cam, _units, _style, _env = _roundtrip(model, Camera(), DocumentSettings())
     r_dim, r_label = restored.active_context.annotations
 
     assert r_dim.kind == "dimension"
@@ -121,7 +121,7 @@ def test_load_from_resets_next_annotation_id_after_document_load():
     existing_ids = {a.id for a in model.active_context.annotations}
 
     data = document_to_dict(model, Camera(), DocumentSettings(), RenderStyle())
-    loaded, _cam, _units, _style = document_from_dict(data)
+    loaded, _cam, _units, _style, _env = document_from_dict(data)
 
     # Mirrors how MainWindow/DocumentController actually swap contents: a
     # long-lived Model object has its contents replaced in place via load_from.
@@ -168,7 +168,7 @@ def test_guides_survive_a_round_trip():
     ctx.annotations.append(Guide(model.new_annotation_id(), (1.0, 0.0, 0.0), (0.0, 0.0, 2.0)))
     ctx.annotations.append(GuidePoint(model.new_annotation_id(), (4.0, 5.0, 6.0)))
 
-    restored, _cam, _units, _style = _roundtrip(model, Camera(), DocumentSettings())
+    restored, _cam, _units, _style, _env = _roundtrip(model, Camera(), DocumentSettings())
     kinds = sorted(a.kind for a in restored.active_context.annotations)
     assert kinds == ["guide", "guide_point"]
     guide = next(a for a in restored.active_context.annotations if a.kind == "guide")
@@ -182,5 +182,5 @@ def test_a_document_without_guides_still_loads():
     model.active_context.annotations.append(
         Dimension(model.new_annotation_id(), (0.0, 0.0, 0.0), (1.0, 0.0, 0.0), (0.0, 0.5, 0.0))
     )
-    restored, _cam, _units, _style = _roundtrip(model, Camera(), DocumentSettings())
+    restored, _cam, _units, _style, _env = _roundtrip(model, Camera(), DocumentSettings())
     assert [a.kind for a in restored.active_context.annotations] == ["dimension"]

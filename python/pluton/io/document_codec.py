@@ -23,6 +23,7 @@ from pluton.model.tag import TagLibrary
 from pluton.model.texture import TextureLibrary
 from pluton.scene.scene import DEFAULT_PLACEMENT, Scene, Side, TexturePlacement
 from pluton.units import Units, units_from_dict, units_to_dict
+from pluton.viewport.environment import LEGACY_ENVIRONMENT, Environment
 from pluton.viewport.face_batches import MAX_MATERIAL_ID
 from pluton.viewport.render_style import FaceStyle, RenderStyle
 
@@ -374,6 +375,85 @@ def render_style_from_dict(d: dict | None) -> RenderStyle:
     )
 
 
+def environment_to_dict(env: Environment) -> dict:
+    """Serialize the document's environment (background, sky, ground, ink).
+
+    Every field of Environment belongs here, for the reason
+    render_style_to_dict's docstring gives: a look the user chose and then
+    saved must come back when the document reopens. Colours go out as lists
+    because JSON has no tuple.
+    """
+    return {
+        "background": list(env.background),
+        "sky_enabled": bool(env.sky_enabled),
+        "sky_color": list(env.sky_color),
+        "ground_enabled": bool(env.ground_enabled),
+        "ground_color": list(env.ground_color),
+        "ground_opacity": float(env.ground_opacity),
+        "edge_color": list(env.edge_color),
+        "grid_color": list(env.grid_color),
+        "grid_centerline_color": list(env.grid_centerline_color),
+    }
+
+
+def _environment_color(value, fallback: tuple[float, float, float]) -> tuple[float, float, float]:
+    """One colour triple from stored data, or `fallback` when absent.
+
+    A stored value of the wrong length or type raises ValueError or TypeError,
+    which document_from_dict normalizes into PlutonFormatError.
+    """
+    if value is None:
+        return fallback
+    r, g, b = (float(x) for x in value)
+    return (r, g, b)
+
+
+def _environment_opacity(value) -> float:
+    """Ground opacity, clamped to [0, 1].
+
+    GLSL mix() extrapolates outside [0, 1] rather than clamping, so an
+    out-of-range value from a hand-edited document would drive the ground colour
+    past the sky and look like a renderer defect instead of a bad file.
+    """
+    return min(1.0, max(0.0, float(value)))
+
+
+def environment_from_dict(d: dict | None) -> Environment:
+    """Rebuild an Environment; missing or empty data yields LEGACY_ENVIRONMENT.
+
+    Studio, not the DocumentSettings default (spec D5): every file written
+    before M7.7 was authored against the dark background, so anchoring the
+    fallback there is what makes an old document reopen unchanged. A brand-new
+    document gets DEFAULT_ENVIRONMENT from DocumentSettings instead.
+
+    Each key is read with the legacy value as its fallback, matching
+    render_style_from_dict, so a partially written document still loads.
+
+    The isinstance guard is load-bearing. document_from_dict catches KeyError,
+    TypeError, ValueError and IndexError; without this, a JSON string here would
+    reach `.get` and raise AttributeError, which that handler does not catch and
+    no caller expects (#116).
+    """
+    if not d:
+        return LEGACY_ENVIRONMENT
+    if not isinstance(d, dict):
+        raise TypeError(f"'environment' must be an object, got {type(d).__name__}")
+    base = LEGACY_ENVIRONMENT
+    return Environment(
+        background=_environment_color(d.get("background"), base.background),
+        sky_enabled=bool(d.get("sky_enabled", base.sky_enabled)),
+        sky_color=_environment_color(d.get("sky_color"), base.sky_color),
+        ground_enabled=bool(d.get("ground_enabled", base.ground_enabled)),
+        ground_color=_environment_color(d.get("ground_color"), base.ground_color),
+        ground_opacity=_environment_opacity(d.get("ground_opacity", base.ground_opacity)),
+        edge_color=_environment_color(d.get("edge_color"), base.edge_color),
+        grid_color=_environment_color(d.get("grid_color"), base.grid_color),
+        grid_centerline_color=_environment_color(
+            d.get("grid_centerline_color"), base.grid_centerline_color
+        ),
+    )
+
+
 @dataclass(frozen=True)
 class CameraState:
     """Snapshot of the viewport Camera's user-facing state (not aspect/near/far,
@@ -418,12 +498,13 @@ class CameraState:
 
 
 class LoadedDocument(NamedTuple):
-    """Result of loading a .pluton document: model + camera + units + render style."""
+    """Result of loading a .pluton document: model + camera + units + style + environment."""
 
     model: Model
     camera_state: CameraState
     units: Units
     style: RenderStyle
+    environment: Environment
 
 
 def document_to_dict(model: Model, camera, doc, render_style) -> dict:
@@ -436,6 +517,7 @@ def document_to_dict(model: Model, camera, doc, render_style) -> dict:
         "tags": {"next_id": model.tags.next_id, "items": model.tags.to_records()},
         "scenes": {"next_id": model.views.next_id, "items": model.views.to_records()},
         "style": render_style_to_dict(render_style),
+        "environment": environment_to_dict(doc.environment),
         "model": model_to_dict(model),
     }
 
@@ -470,6 +552,13 @@ def document_from_dict(data: dict, blobs: dict[int, bytes] | None = None) -> Loa
         camera_state = CameraState.from_dict(data["camera"])
         units = units_from_dict(data["units"])
         style = render_style_from_dict(data.get("style"))
+        environment = environment_from_dict(data.get("environment"))
     except (KeyError, TypeError, ValueError, IndexError) as e:
         raise PlutonFormatError(f"malformed document: {e}") from e
-    return LoadedDocument(model=model, camera_state=camera_state, units=units, style=style)
+    return LoadedDocument(
+        model=model,
+        camera_state=camera_state,
+        units=units,
+        style=style,
+        environment=environment,
+    )

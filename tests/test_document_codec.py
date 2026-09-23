@@ -5,16 +5,25 @@ from pluton.io.document_codec import (
     CameraState,
     document_from_dict,
     document_to_dict,
+    environment_from_dict,
+    environment_to_dict,
     geometry_from_dict,
     geometry_to_dict,
     model_from_dict,
     model_to_dict,
 )
 from pluton.io.errors import PlutonFormatError
+from pluton.io.pluton_file import SCHEMA_VERSION
 from pluton.model.model import Model
 from pluton.scene.scene import Scene
 from pluton.units import Units, UnitSystem
 from pluton.viewport.camera import Camera
+from pluton.viewport.environment import (
+    DEFAULT_ENVIRONMENT,
+    LEGACY_ENVIRONMENT,
+    PLAIN_WHITE,
+    STUDIO,
+)
 from pluton.viewport.render_style import RenderStyle
 
 
@@ -66,6 +75,11 @@ def test_geometry_from_dict_rejects_bad_index():
     bad = {"vertices": [[0, 0, 0]], "edges": [[0, 7]], "faces": [], "face_materials": {}}
     with pytest.raises(PlutonFormatError):
         geometry_from_dict(dst, bad)
+
+
+def _minimal_document_dict():
+    """The smallest dict document_from_dict accepts, for mutating in one place."""
+    return document_to_dict(Model(), Camera(), DocumentSettings(), RenderStyle())
 
 
 def _one_face_doc(face_materials, key="face_materials"):
@@ -352,3 +366,93 @@ def test_a_degenerate_guide_direction_never_escapes_the_whole_document_load():
 
     with pytest.raises(PlutonFormatError):
         document_from_dict(data)
+
+
+def test_environment_round_trips_through_the_codec():
+    """All nine fields, not just the colours."""
+    restored = environment_from_dict(environment_to_dict(PLAIN_WHITE))
+    assert restored == PLAIN_WHITE
+
+
+def test_an_absent_environment_key_yields_the_legacy_environment():
+    """A schema-8 file has no "environment" key at all.
+
+    It must reopen dark, because that is what its author saw. Note this is
+    LEGACY_ENVIRONMENT (Studio), deliberately NOT DEFAULT_ENVIRONMENT, which is
+    what a brand-new document gets. Spec D5.
+    """
+    assert environment_from_dict(None) == LEGACY_ENVIRONMENT
+    assert environment_from_dict({}) == LEGACY_ENVIRONMENT
+
+
+def test_a_partial_environment_dict_fills_the_rest_from_legacy():
+    """Per-key defaulting, matching render_style_from_dict.
+
+    A document written by a build that had fewer fields still loads.
+    """
+    restored = environment_from_dict({"background": [1.0, 1.0, 1.0]})
+    assert restored.background == (1.0, 1.0, 1.0)
+    assert restored.edge_color == STUDIO.edge_color
+    assert restored.grid_color == STUDIO.grid_color
+
+
+def test_ground_opacity_is_clamped_to_the_unit_interval():
+    """A hand-edited file can carry anything, and GLSL mix() extrapolates.
+
+    Without the clamp, ground_opacity 5.0 drives the ground colour far past the
+    sky and reads as a rendering bug rather than a bad file.
+    """
+    assert environment_from_dict({"ground_opacity": 5.0}).ground_opacity == 1.0
+    assert environment_from_dict({"ground_opacity": -2.0}).ground_opacity == 0.0
+    assert environment_from_dict({"ground_opacity": 0.4}).ground_opacity == pytest.approx(0.4)
+
+
+def test_a_non_object_environment_value_is_a_format_error_not_an_attribute_error():
+    """Review Focus 1, and open issue #116's exact shape.
+
+    document_from_dict catches KeyError/TypeError/ValueError/IndexError. A JSON
+    string here would reach `.get` and raise AttributeError, which that handler
+    does not catch and no caller expects, so a truncated file would crash out of
+    the open path instead of reporting a bad document.
+    """
+    with pytest.raises(TypeError):
+        environment_from_dict("blue")
+
+
+def test_a_document_with_a_non_object_environment_raises_pluton_format_error():
+    """The same input one level up, through the real entry point."""
+    data = _minimal_document_dict()
+    data["environment"] = "blue"
+    with pytest.raises(PlutonFormatError):
+        document_from_dict(data)
+
+
+def test_document_to_dict_emits_the_environment():
+    doc = DocumentSettings()
+    doc.set_environment(PLAIN_WHITE)
+    data = document_to_dict(Model(), Camera(), doc, RenderStyle())
+    assert environment_from_dict(data["environment"]) == PLAIN_WHITE
+
+
+def test_the_schema_version_is_nine():
+    """M7.7 is the environment bump. Nothing else in this milestone changes it."""
+    assert SCHEMA_VERSION == 9
+
+
+def test_a_fresh_document_opens_in_the_modelling_environment():
+    """DEFAULT_ENVIRONMENT, not the codec's LEGACY_ENVIRONMENT. Spec D5."""
+    assert DocumentSettings().environment is DEFAULT_ENVIRONMENT
+
+
+def test_set_environment_replaces_it_wholesale():
+    doc = DocumentSettings()
+    doc.set_environment(PLAIN_WHITE)
+    assert doc.environment == PLAIN_WHITE
+
+
+def test_set_environment_does_not_disturb_units():
+    """Units and environment are independent axes; the welcome dialog relies on it."""
+    doc = DocumentSettings()
+    doc.set_metric("mm")
+    doc.set_environment(PLAIN_WHITE)
+    assert doc.units.metric_unit == "mm"

@@ -16,7 +16,7 @@ def _quad(scene, z=0.0):
 
 
 def test_schema_version_is_seven():
-    assert SCHEMA_VERSION == 8
+    assert SCHEMA_VERSION == 9
 
 
 def test_a_document_with_no_stored_uvs_writes_empty_dicts():
