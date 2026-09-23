@@ -144,7 +144,7 @@ def stubbed_renderer(monkeypatch):
 
     def fake_upload(definition, translucent_ids, model):
         calls.append(translucent_ids)
-        return _DefBuffers(translucent_ids=translucent_ids)
+        return _DefBuffers(translucent_ids=translucent_ids, edge_color=r._environment.edge_color)
 
     monkeypatch.setattr(r, "_upload_definition", fake_upload)
     return r, calls

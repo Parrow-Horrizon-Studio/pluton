@@ -423,6 +423,7 @@ def uv_stubbed_renderer(monkeypatch):
         return _DefBuffers(
             translucent_ids=translucent_ids,
             uv_key=uv_material_key(definition.mesh, model),
+            edge_color=r._environment.edge_color,
         )
 
     monkeypatch.setattr(r, "_upload_definition", fake_upload)

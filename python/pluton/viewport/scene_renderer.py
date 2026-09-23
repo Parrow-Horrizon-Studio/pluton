@@ -124,8 +124,6 @@ def aabb_world_edges(lo, hi, world_transform) -> np.ndarray:
 
 _GRID_HALF_EXTENT = 5.0  # meters, so grid is 10x10
 _GRID_SPACING = 1.0
-_GRID_COLOR = (0.40, 0.40, 0.40)
-_GRID_CENTERLINE_COLOR = (0.60, 0.60, 0.60)
 
 _AXIS_LENGTH = 5.0
 _AXIS_X_COLOR = (0.90, 0.20, 0.20)
@@ -151,7 +149,6 @@ _DEFAULT_MATERIAL = PhongMaterial(
 # value is the one this line used to hold (see viewport/environment.py).
 
 # Edge / overlay colors (per-vertex, packed into the VBO alongside positions).
-_USER_EDGE_COLOR = (0.85, 0.85, 0.85)
 _SELECTION_FILL_COLOR = (0.20, 0.50, 0.95, 0.25)  # selected faces (blue, 25% alpha)
 _SELECTION_EDGE_COLOR = (0.20, 0.55, 1.00)  # selected edges (bright blue)
 
@@ -273,6 +270,12 @@ class _DefBuffers:
     # from each material's texture_size, which lives on the MaterialLibrary, so
     # resizing a texture dirties no mesh either. See uv_material_key.
     uv_key: tuple = ()
+
+    # M7.7: the same asymmetry once more. The edge colour is tiled into the edge
+    # VBO from the document's environment, which no mesh dirty flag covers, so
+    # switching environment has to be able to invalidate this buffer. None means
+    # "never uploaded", which reads as stale.
+    edge_color: tuple[float, float, float] | None = None
 
     # --- Task 7: state the translucent pass re-sorts each frame -------------
     #
@@ -674,6 +677,16 @@ def uv_key_still_matches(key: tuple, model) -> bool:
     return True
 
 
+def _edge_buffer_is_stale(buf: _DefBuffers, edge_color: tuple[float, float, float]) -> bool:
+    """True when this definition's edge VBO was uploaded under a different ink.
+
+    Pulled out as a function rather than inlined into the _ensure_buffers
+    condition so it can be tested headlessly, including the zero-edge case that
+    otherwise re-uploads every frame forever.
+    """
+    return buf.edge_color != edge_color
+
+
 def _translucent_ids(materials, textures) -> frozenset[int]:
     """Ids of every material that must draw in the sorted translucent pass.
 
@@ -1039,14 +1052,23 @@ def _cache_uniform_locations(program: int, names: Sequence[str]) -> dict[str, in
     return {name: GL.glGetUniformLocation(program, name) for name in names}
 
 
-def _build_grid_vertex_array() -> np.ndarray:
-    """Return a (N, 6) float32 array of grid-line vertices: x,y,z, r,g,b."""
+def _build_grid_vertex_array(
+    grid_color: tuple[float, float, float],
+    centerline_color: tuple[float, float, float],
+) -> np.ndarray:
+    """Return a (44, 6) float32 array of grid-line vertices: x,y,z, r,g,b.
+
+    The colours are arguments rather than module constants because they belong
+    to the document's environment now. They are baked into the vertex data, so
+    changing environment re-uploads this array; a tint uniform cannot express
+    it, because the two colours move in opposite directions between presets.
+    """
     verts: list[float] = []
     n = int(2 * _GRID_HALF_EXTENT / _GRID_SPACING) + 1
     for i in range(n):
         v = -_GRID_HALF_EXTENT + i * _GRID_SPACING
         is_centerline = abs(v) < 1e-5
-        c = _GRID_CENTERLINE_COLOR if is_centerline else _GRID_COLOR
+        c = centerline_color if is_centerline else grid_color
         # Line parallel to X (varying x at fixed y)
         verts.extend([-_GRID_HALF_EXTENT, v, 0.0, *c])
         verts.extend([+_GRID_HALF_EXTENT, v, 0.0, *c])
@@ -1242,6 +1264,11 @@ class SceneRenderer:
         self._grid_vao: int = 0
         self._grid_vbo: int = 0
         self._grid_vertex_count: int = 0
+        # set_environment can run with no current GL context (a View menu click
+        # is not inside paintGL), so a colour change queues the re-upload and
+        # render() performs it -- the same discipline as the pending texture
+        # evictions.
+        self._grid_dirty: bool = False
         self._axes_vao: int = 0
         self._axes_vbo: int = 0
         self._axes_vertex_count: int = 0
@@ -1364,8 +1391,16 @@ class SceneRenderer:
         self._render_style = replace(style)
 
     def set_environment(self, environment: Environment) -> None:
-        """Set the active environment (called by the viewport from the View menu)."""
+        """Set the active environment (called by the viewport from the View menu).
+
+        The grid's colours are baked into its vertex buffer, so a change queues a
+        rebuild for the next frame rather than touching GL here: this runs
+        outside paintGL and may have no current context.
+        """
+        if environment == self._environment:
+            return
         self._environment = environment
+        self._grid_dirty = True
 
     def render(self, camera: Camera, model=None, tool_overlay=None, selection=None) -> None:
         """Draw the full scene: grid + axes + user geometry (all definitions) + tool overlay.
@@ -1383,6 +1418,8 @@ class SceneRenderer:
         # -- BEFORE anything below looks up a GL texture for a material, so a
         # stale upload is never bound this frame either.
         self._flush_pending_texture_evictions()
+        if self._grid_dirty:
+            self._init_grid_buffers()
 
         GL.glClearColor(*self._environment.background, 1.0)
         GL.glClear(GL.GL_COLOR_BUFFER_BIT | GL.GL_DEPTH_BUFFER_BIT)
@@ -1658,9 +1695,15 @@ class SceneRenderer:
     # --- Init helpers -----------------------------------------------------
 
     def _init_grid_buffers(self) -> None:
-        verts = _build_grid_vertex_array()
+        if self._grid_vao:
+            GL.glDeleteVertexArrays(1, [self._grid_vao])
+        if self._grid_vbo:
+            GL.glDeleteBuffers(1, [self._grid_vbo])
+        env = self._environment
+        verts = _build_grid_vertex_array(env.grid_color, env.grid_centerline_color)
         self._grid_vertex_count = int(verts.shape[0])
         self._grid_vao, self._grid_vbo = self._upload_interleaved_lines(verts)
+        self._grid_dirty = False
 
     def _init_axes_buffers(self) -> None:
         verts = _build_axes_vertex_array()
@@ -1865,6 +1908,7 @@ class SceneRenderer:
             or definition.mesh.dirty
             or buf.translucent_ids != translucent_ids
             or not uv_key_still_matches(buf.uv_key, model)
+            or _edge_buffer_is_stale(buf, self._environment.edge_color)
         ):
             buf = self._upload_definition(definition, translucent_ids, model)
             definition.mesh.mark_clean()
@@ -1976,16 +2020,20 @@ class SceneRenderer:
 
         # Edges: (2*E, 3) positions — pack constant color per vertex so the
         # line shader's attribute 1 (in_color) is always satisfied.
+        edge_color = self._environment.edge_color
         edges = scene.edge_line_buffer()
         if edges.shape[0] > 0:
             n = int(edges.shape[0])
-            colors = np.tile(np.array(_USER_EDGE_COLOR, dtype=np.float32), (n, 1))
+            colors = np.tile(np.array(edge_color, dtype=np.float32), (n, 1))
             data = np.ascontiguousarray(np.concatenate([edges.astype(np.float32), colors], axis=1))
             GL.glBindBuffer(GL.GL_ARRAY_BUFFER, buf.edge_vbo)
             GL.glBufferData(GL.GL_ARRAY_BUFFER, data.nbytes, data, GL.GL_DYNAMIC_DRAW)
             buf.edge_count = n
         else:
             buf.edge_count = 0
+        # Recorded on BOTH branches. A definition with no edges that skipped
+        # this would stay stale forever and re-upload on every frame.
+        buf.edge_color = edge_color
 
         return buf
 
