@@ -21,7 +21,7 @@ from OpenGL import GL
 from pluton.geometry.transforms import apply_mat, is_identity_transform
 from pluton.scene.scene import Side
 from pluton.viewport.camera import Camera
-from pluton.viewport.environment import DEFAULT_ENVIRONMENT, Environment
+from pluton.viewport.environment import DEFAULT_ENVIRONMENT, Environment, environment_pass_needed
 from pluton.viewport.face_batches import BatchPlan, FaceBatch, plan_face_batches
 from pluton.viewport.render_style import (
     BACK_DEFAULT_COLOR,
@@ -213,6 +213,16 @@ _TEXTURE_UNIT_ENUM = (
 )
 _LINE_UNIFORMS = ("u_view", "u_projection")
 _GHOST_FILL_UNIFORMS = ("u_view", "u_projection", "u_color")
+_ENVIRONMENT_UNIFORMS = (
+    "u_inv_view_proj",
+    "u_camera_pos",
+    "u_background",
+    "u_sky_color",
+    "u_ground_color",
+    "u_ground_opacity",
+    "u_sky_enabled",
+    "u_ground_enabled",
+)
 
 
 def _empty_batch_plan() -> BatchPlan:
@@ -1276,6 +1286,12 @@ class SceneRenderer:
         # by set_environment(), called by the View menu via the viewport.
         self._environment: Environment = DEFAULT_ENVIRONMENT
 
+        # Sky/ground pass (M7.7)
+        self._environment_program: int = 0
+        self._environment_locs: dict[str, int] = {}
+        self._environment_vao: int = 0
+        self._environment_vbo: int = 0
+
     # --- Lifecycle --------------------------------------------------------
 
     def initialize_gl(self) -> None:
@@ -1308,10 +1324,19 @@ class SceneRenderer:
             self._ghost_fill_program, _GHOST_FILL_UNIFORMS
         )
 
+        self._environment_program = _link_program(
+            _load_shader_source("environment.vert"),
+            _load_shader_source("environment.frag"),
+        )
+        self._environment_locs = _cache_uniform_locations(
+            self._environment_program, _ENVIRONMENT_UNIFORMS
+        )
+
         self._init_grid_buffers()
         self._init_axes_buffers()
         self._init_overlay_buffers()
         self._init_ghost_fill_buffers()
+        self._init_environment_buffers()
 
         self._initialized = True
 
@@ -1367,6 +1392,9 @@ class SceneRenderer:
         projection = camera.projection_matrix()
         self._current_view_matrix = view
         self._current_projection_matrix = projection
+
+        # 0. Environment (M7.7): sky and ground, behind everything.
+        self._draw_environment(camera, view, projection)
 
         # 1. Grid (M1)
         self._draw_lines(self._grid_vao, self._grid_vertex_count, view, projection)
@@ -1768,6 +1796,45 @@ class SceneRenderer:
         GL.glBindVertexArray(vao)
         GL.glDrawArrays(GL.GL_LINES, 0, count)
         GL.glBindVertexArray(0)
+        GL.glUseProgram(0)
+
+    def _draw_environment(self, camera: Camera, view: np.ndarray, projection: np.ndarray) -> None:
+        """Fill the frame with the environment's sky and ground.
+
+        Runs after glClear and before the grid, with the depth test off and
+        depth writes masked, so it can never occlude geometry and leaves no
+        depth behind for the passes after it.
+
+        Returns immediately when both halves are disabled: glClearColor has
+        already painted every pixel this would paint, so Plain White and Studio
+        pay nothing for a feature they do not use.
+        """
+        env = self._environment
+        if not environment_pass_needed(env):
+            return
+
+        inv_view_proj = np.linalg.inv(
+            np.asarray(projection, dtype=np.float64) @ np.asarray(view, dtype=np.float64)
+        )
+
+        GL.glUseProgram(self._environment_program)
+        locs = self._environment_locs
+        _set_mat4(locs["u_inv_view_proj"], inv_view_proj)
+        _set_vec3(locs["u_camera_pos"], camera.position)
+        _set_vec3(locs["u_background"], env.background)
+        _set_vec3(locs["u_sky_color"], env.sky_color)
+        _set_vec3(locs["u_ground_color"], env.ground_color)
+        _set_float(locs["u_ground_opacity"], env.ground_opacity)
+        _set_int(locs["u_sky_enabled"], 1 if env.sky_enabled else 0)
+        _set_int(locs["u_ground_enabled"], 1 if env.ground_enabled else 0)
+
+        GL.glDisable(GL.GL_DEPTH_TEST)
+        GL.glDepthMask(GL.GL_FALSE)
+        GL.glBindVertexArray(self._environment_vao)
+        GL.glDrawArrays(GL.GL_TRIANGLES, 0, 6)
+        GL.glBindVertexArray(0)
+        GL.glDepthMask(GL.GL_TRUE)
+        GL.glEnable(GL.GL_DEPTH_TEST)
         GL.glUseProgram(0)
 
     def _ensure_buffers(self, definition, translucent_ids: frozenset[int], model) -> _DefBuffers:
@@ -2276,6 +2343,33 @@ class SceneRenderer:
         GL.glEnableVertexAttribArray(0)
         GL.glBindVertexArray(0)
 
+    def _init_environment_buffers(self) -> None:
+        """Create the VAO/VBO for the fullscreen environment quad.
+
+        Layout: position-only (vec2) at attribute 0, in NDC. Uploaded once, in
+        clip space, so it needs no matrices and no resize handling.
+        """
+        quad = np.array(
+            [
+                [-1.0, -1.0],
+                [+1.0, -1.0],
+                [+1.0, +1.0],
+                [-1.0, -1.0],
+                [+1.0, +1.0],
+                [-1.0, +1.0],
+            ],
+            dtype=np.float32,
+        )
+        self._environment_vao = int(GL.glGenVertexArrays(1))
+        self._environment_vbo = int(GL.glGenBuffers(1))
+        GL.glBindVertexArray(self._environment_vao)
+        GL.glBindBuffer(GL.GL_ARRAY_BUFFER, self._environment_vbo)
+        GL.glBufferData(GL.GL_ARRAY_BUFFER, quad.nbytes, quad, GL.GL_STATIC_DRAW)
+        stride = 2 * ctypes.sizeof(ctypes.c_float)
+        GL.glVertexAttribPointer(0, 2, GL.GL_FLOAT, GL.GL_FALSE, stride, ctypes.c_void_p(0))
+        GL.glEnableVertexAttribArray(0)
+        GL.glBindVertexArray(0)
+
     def draw_face_fill_overlays(
         self,
         polygons: list[np.ndarray],
@@ -2395,3 +2489,9 @@ def _set_float(loc: int, x: float) -> None:
     if loc < 0:
         return
     GL.glUniform1f(loc, float(x))
+
+
+def _set_int(loc: int, x: int) -> None:
+    if loc < 0:
+        return
+    GL.glUniform1i(loc, int(x))

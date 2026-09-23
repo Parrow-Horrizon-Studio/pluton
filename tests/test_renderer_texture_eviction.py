@@ -31,7 +31,7 @@ from __future__ import annotations
 from pluton.model.texture import TextureLibrary
 from pluton.viewport import scene_renderer as sr
 from pluton.viewport.camera import Camera
-from pluton.viewport.scene_renderer import _LINE_UNIFORMS, SceneRenderer
+from pluton.viewport.scene_renderer import _ENVIRONMENT_UNIFORMS, _LINE_UNIFORMS, SceneRenderer
 from pluton.viewport.texture_cache import TextureCache
 
 
@@ -73,8 +73,9 @@ def _renderer_with_fake_gl() -> tuple[SceneRenderer, _RecordingGL]:
 def _make_renderable(r: SceneRenderer, gl: _RecordingGL, monkeypatch) -> None:
     """Enough state for render(camera, model=None) to run to completion
     without a real GL context. model=None skips the whole per-definition
-    drawing block (materials/textures included), leaving only grid + axes
-    line drawing, which needs a program + the two view/projection locations.
+    drawing block (materials/textures included), leaving only the environment
+    pass (M7.7, on by default) and grid + axes line drawing, which needs a
+    program + the two view/projection locations.
 
     render() calls the module-level `GL` (`from OpenGL import GL`), not
     `self._texture_cache._gl` -- the recorder has to replace that name too,
@@ -85,6 +86,8 @@ def _make_renderable(r: SceneRenderer, gl: _RecordingGL, monkeypatch) -> None:
     r._initialized = True
     r._line_program = 2
     r._line_locs = dict.fromkeys(_LINE_UNIFORMS, 0)
+    r._environment_program = 3
+    r._environment_locs = dict.fromkeys(_ENVIRONMENT_UNIFORMS, 0)
 
 
 def test_evict_stale_textures_only_queues_the_slot_issues_no_gl_call():
