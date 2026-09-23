@@ -51,7 +51,7 @@ def test_render_style_persists_through_save_new_open(qtbot, tmp_path):
     from pluton.io.pluton_file import load_document
     loaded = load_document(path)
     win._reset_document(loaded.model, loaded.camera_state, loaded.units,
-                        loaded.style, path)
+                        loaded.style, path, environment=loaded.environment)
     assert win._render_style.face_style is FaceStyle.MONOCHROME
     assert win._render_style.xray is True
 

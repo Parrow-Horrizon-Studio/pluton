@@ -21,6 +21,7 @@ from OpenGL import GL
 from pluton.geometry.transforms import apply_mat, is_identity_transform
 from pluton.scene.scene import Side
 from pluton.viewport.camera import Camera
+from pluton.viewport.environment import DEFAULT_ENVIRONMENT, Environment
 from pluton.viewport.face_batches import BatchPlan, FaceBatch, plan_face_batches
 from pluton.viewport.render_style import (
     BACK_DEFAULT_COLOR,
@@ -145,7 +146,9 @@ _DEFAULT_MATERIAL = PhongMaterial(
     shininess=_MATERIAL_SHININESS,
 )
 
-_BG_COLOR = (0.15, 0.15, 0.18, 1.0)
+# The background is no longer a constant: it is Environment.background, held by
+# DocumentSettings and reached through SceneRenderer._environment. Studio's
+# value is the one this line used to hold (see viewport/environment.py).
 
 # Edge / overlay colors (per-vertex, packed into the VBO alongside positions).
 _USER_EDGE_COLOR = (0.85, 0.85, 0.85)
@@ -754,6 +757,7 @@ def resolve_batch_sides(
     materials,
     render_style: RenderStyle,
     *,
+    bg: tuple[float, float, float],
     dimmed: bool,
     translucent_ids: frozenset[int],
     tag_color: tuple[float, float, float] | None = None,
@@ -791,6 +795,12 @@ def resolve_batch_sides(
     _translucent_ids' own discipline: a caller that omitted it would get solid
     cutouts and no error, which looks exactly like the feature not existing.
     Pass `frozenset()` to mean "nothing here is translucent".
+
+    `bg` is the document environment's background. Hidden Line fills faces with
+    it, so it is the colour of the page rather than of any material. Required
+    rather than defaulted for the same reason translucent_ids is: a caller that
+    omitted it would get the old dark fill with no error, and resolve_face_pass
+    (which this wraps) already requires it.
     """
     front_mat, front_alpha = _material_terms(materials, batch.front_material_id, Side.FRONT)
     back_mat, back_alpha = _material_terms(materials, batch.back_material_id, Side.BACK)
@@ -801,7 +811,7 @@ def resolve_batch_sides(
         return resolve_face_pass(
             render_style,
             dimmed=dimmed,
-            bg=_BG_COLOR[:3],
+            bg=bg,
             material=mat,
             dim_ambient=_DIM_AMBIENT,
             dim_diffuse=_DIM_DIFFUSE,
@@ -1262,12 +1272,16 @@ class SceneRenderer:
         # Updated by set_render_style(), called by the View menu via the viewport.
         self._render_style = RenderStyle()
 
+        # Active document environment (background + sky/ground + ink). Updated
+        # by set_environment(), called by the View menu via the viewport.
+        self._environment: Environment = DEFAULT_ENVIRONMENT
+
     # --- Lifecycle --------------------------------------------------------
 
     def initialize_gl(self) -> None:
         if self._initialized:
             return
-        GL.glClearColor(*_BG_COLOR)
+        GL.glClearColor(*self._environment.background, 1.0)
         GL.glEnable(GL.GL_DEPTH_TEST)
 
         self._phong_program = _link_program(
@@ -1324,6 +1338,10 @@ class SceneRenderer:
         """Set the active display style (called by the viewport from the View menu)."""
         self._render_style = replace(style)
 
+    def set_environment(self, environment: Environment) -> None:
+        """Set the active environment (called by the viewport from the View menu)."""
+        self._environment = environment
+
     def render(self, camera: Camera, model=None, tool_overlay=None, selection=None) -> None:
         """Draw the full scene: grid + axes + user geometry (all definitions) + tool overlay.
 
@@ -1341,7 +1359,7 @@ class SceneRenderer:
         # stale upload is never bound this frame either.
         self._flush_pending_texture_evictions()
 
-        GL.glClearColor(*_BG_COLOR)
+        GL.glClearColor(*self._environment.background, 1.0)
         GL.glClear(GL.GL_COLOR_BUFFER_BIT | GL.GL_DEPTH_BUFFER_BIT)
         GL.glEnable(GL.GL_DEPTH_TEST)
 
@@ -1399,6 +1417,7 @@ class SceneRenderer:
                         batch,
                         materials,
                         self._render_style,
+                        bg=self._environment.background,
                         dimmed=dimmed,
                         tag_color=tag_color,
                         translucent_ids=translucent_ids,
@@ -1458,6 +1477,7 @@ class SceneRenderer:
                         batch,
                         materials,
                         self._render_style,
+                        bg=self._environment.background,
                         dimmed=dimmed,
                         tag_color=tag_color,
                         translucent_ids=translucent_ids,

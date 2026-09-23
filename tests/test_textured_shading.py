@@ -19,6 +19,7 @@ import numpy as np
 from pluton.model.material import MaterialLibrary
 from pluton.model.texture import TextureLibrary
 from pluton.viewport import scene_renderer as sr
+from pluton.viewport.environment import STUDIO
 from pluton.viewport.face_batches import FaceBatch
 from pluton.viewport.render_style import FaceStyle, RenderStyle
 from pluton.viewport.scene_renderer import _PHONG_UNIFORMS, resolve_batch_sides
@@ -237,7 +238,7 @@ def _draw(renderer, *, front_texture=None, back_texture=None):
     red = lib.add_custom("Red", (0.8, 0.1, 0.1))
     batch = FaceBatch(front_material_id=red.id, back_material_id=0, first=0, count=3)
     front, back = resolve_batch_sides(
-        batch, lib, RenderStyle(), dimmed=False, translucent_ids=frozenset()
+        batch, lib, RenderStyle(), bg=STUDIO.background, dimmed=False, translucent_ids=frozenset()
     )
     renderer._draw_definition_faces(
         sr._DefBuffers(face_vao=1, face_count=3),
@@ -430,7 +431,7 @@ def test_a_cutout_batch_blends_even_though_its_material_alpha_is_one():
     ids = sr._translucent_ids(materials, textures)
 
     front, back = resolve_batch_sides(
-        batch, materials, RenderStyle(), dimmed=False, translucent_ids=ids
+        batch, materials, RenderStyle(), bg=STUDIO.background, dimmed=False, translucent_ids=ids
     )
     assert front.blend is True
     assert back.blend is True
@@ -445,7 +446,7 @@ def test_an_opaque_textured_batch_still_draws_unblended():
     ids = sr._translucent_ids(materials, textures)
 
     front, _ = resolve_batch_sides(
-        batch, materials, RenderStyle(), dimmed=False, translucent_ids=ids
+        batch, materials, RenderStyle(), bg=STUDIO.background, dimmed=False, translucent_ids=ids
     )
     assert front.blend is False
     assert front.depth_write is True

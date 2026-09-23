@@ -6,6 +6,7 @@ import pytest
 from pluton.commands.tag_commands import SetTagColorCommand
 from pluton.model.model import Model
 from pluton.model.tag import TagLibrary
+from pluton.viewport.environment import STUDIO
 from pluton.viewport.render_style import RenderStyle
 from pluton.viewport.scene_renderer import (
     _translucent_ids,
@@ -186,6 +187,7 @@ def test_a_tag_colour_replaces_both_sides_diffuse():
         _batch(red.id, blue.id),
         lib,
         RenderStyle(),
+        bg=STUDIO.background,
         dimmed=False,
         translucent_ids=_ids(lib),
         tag_color=color,
@@ -216,6 +218,7 @@ def test_the_tag_colour_also_drives_ambient_and_specular_on_both_sides():
         _batch(gold.id, blue.id),
         lib,
         RenderStyle(),
+        bg=STUDIO.background,
         dimmed=False,
         translucent_ids=_ids(lib),
         tag_color=color,
@@ -241,6 +244,7 @@ def test_a_tag_colour_does_not_bypass_a_materials_alpha():
         _batch(glass.id, 0),
         lib,
         RenderStyle(),
+        bg=STUDIO.background,
         dimmed=False,
         translucent_ids=_ids(lib),
         tag_color=(0.2, 0.55, 0.9),
@@ -262,12 +266,18 @@ def test_no_tag_colour_leaves_the_materials_alone():
     blue = lib.add_custom("Blue", (0.1, 0.1, 0.8))
 
     plain = resolve_batch_sides(
-        _batch(red.id, blue.id), lib, RenderStyle(), dimmed=False, translucent_ids=_ids(lib)
+        _batch(red.id, blue.id),
+        lib,
+        RenderStyle(),
+        bg=STUDIO.background,
+        dimmed=False,
+        translucent_ids=_ids(lib),
     )
     explicit = resolve_batch_sides(
         _batch(red.id, blue.id),
         lib,
         RenderStyle(),
+        bg=STUDIO.background,
         dimmed=False,
         translucent_ids=_ids(lib),
         tag_color=None,
@@ -421,6 +431,7 @@ def test_the_full_chain_from_instance_tag_to_resolved_diffuse():
         batch,
         m.materials,
         RenderStyle(),
+        bg=STUDIO.background,
         dimmed=False,
         translucent_ids=_ids(m.materials),
         tag_color=off_color,
@@ -432,6 +443,7 @@ def test_the_full_chain_from_instance_tag_to_resolved_diffuse():
         batch,
         m.materials,
         RenderStyle(),
+        bg=STUDIO.background,
         dimmed=False,
         translucent_ids=_ids(m.materials),
         tag_color=on_color,
@@ -768,6 +780,7 @@ def test_the_dim_pass_still_dims_under_a_tag_colour():
         _batch(gold.id, blue.id),
         lib,
         RenderStyle(),
+        bg=STUDIO.background,
         dimmed=True,
         translucent_ids=_ids(lib),
         tag_color=color,

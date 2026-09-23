@@ -19,6 +19,7 @@ from pluton.viewport.render_style import FaceStyle
 TOOL_GROUP = "tool"
 FACE_STYLE_GROUP = "face_style"
 UNITS_GROUP = "units"
+ENVIRONMENT_GROUP = "environment"
 
 
 class CursorStyle(Enum):
@@ -204,6 +205,34 @@ ACTIONS: tuple[ActionSpec, ...] = (
         "_set_units_imperial",
         checkable=True,
         group=UNITS_GROUP,
+    ),
+    # --- Environment (M7.7) -------------------------------------------------
+    # Flat entries in View rather than a submenu: MenuSpec is one top-level menu
+    # holding a tuple of action ids, with no nesting. Labels carry no dash, so
+    # they do not copy the units entries' em-dashes.
+    ActionSpec(
+        "view_env_sky_ground",
+        "Sky and Ground",
+        "_set_environment",
+        handler_arg="sky_and_ground",
+        checkable=True,
+        group=ENVIRONMENT_GROUP,
+    ),
+    ActionSpec(
+        "view_env_plain_white",
+        "Plain White",
+        "_set_environment",
+        handler_arg="plain_white",
+        checkable=True,
+        group=ENVIRONMENT_GROUP,
+    ),
+    ActionSpec(
+        "view_env_studio",
+        "Studio",
+        "_set_environment",
+        handler_arg="studio",
+        checkable=True,
+        group=ENVIRONMENT_GROUP,
     ),
     # --- Tools --------------------------------------------------------
     _tool("tool_select", "Select", "Space", _AR),
@@ -470,6 +499,10 @@ MENUS: tuple[MenuSpec, ...] = (
             "view_color_by_tag",
             "view_guides",
             "view_select_vertices",
+            None,
+            "view_env_sky_ground",
+            "view_env_plain_white",
+            "view_env_studio",
             None,
             "view_zoom_extents",
             None,

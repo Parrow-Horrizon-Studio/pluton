@@ -117,6 +117,11 @@ class ViewportWidget(QOpenGLWidget):
         self.scene_renderer.set_render_style(style)
         self.update()
 
+    def set_environment(self, environment) -> None:
+        """Set the document environment and repaint (called from the View menu)."""
+        self.scene_renderer.set_environment(environment)
+        self.update()
+
     def set_units_provider(self, fn) -> None:
         """M7d: install a callable () -> pluton.units.Units, used by
         _paint_annotations to format dimension text. Set by MainWindow

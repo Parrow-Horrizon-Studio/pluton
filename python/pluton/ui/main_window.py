@@ -84,6 +84,7 @@ from pluton.ui.window_state import (
     restore_window_state,
     save_window_state,
 )
+from pluton.viewport import environment as env_module
 from pluton.viewport.render_style import FaceStyle, RenderStyle
 from pluton.viewport.texture_cache import decode_image, sniff_format
 from pluton.viewport.view_animator import ViewAnimator
@@ -435,6 +436,14 @@ class MainWindow(QMainWindow):
             for style, action_id in self._FACE_STYLE_ACTION_IDS.items()
         }
         self._xray_action = self._actions["view_xray"]
+        self._environment_actions = {
+            key: self._actions[action_id]
+            for key, action_id in (
+                (env_module.SKY_AND_GROUND_KEY, "view_env_sky_ground"),
+                (env_module.PLAIN_WHITE_KEY, "view_env_plain_white"),
+                (env_module.STUDIO_KEY, "view_env_studio"),
+            )
+        }
         self._color_by_tag_action = self._actions["view_color_by_tag"]
         # M7.6b Task 7: guides are visible by default (SketchUp), matching
         # ViewportWidget.show_guides's own default -- this just reflects that
@@ -483,6 +492,7 @@ class MainWindow(QMainWindow):
         self._units_menu = self._menus["Units"]
 
         self._update_window_title()
+        self._sync_environment_ui()
 
     # --- Material slot ---------------------------------------------------
 
@@ -1809,6 +1819,22 @@ class MainWindow(QMainWindow):
         self._viewport.update()
         self._on_document_changed()
 
+    def _set_environment(self, key: str) -> None:
+        self._doc.set_environment(env_module.PRESETS[key])
+        self._viewport.set_environment(self._doc.environment)
+        self._on_document_changed()
+
+    def _sync_environment_ui(self) -> None:
+        """Reflect self._doc.environment in the View menu + viewport.
+
+        preset_key returns None for a value no preset matches, which leaves every
+        entry unchecked rather than lying about which one is active.
+        """
+        active = env_module.preset_key(self._doc.environment)
+        for key, action in self._environment_actions.items():
+            action.setChecked(key == active)
+        self._viewport.set_environment(self._doc.environment)
+
     # --- File I/O --------------------------------------------------------
 
     def _on_document_changed(self) -> None:
@@ -2045,8 +2071,8 @@ class MainWindow(QMainWindow):
         else:
             event.ignore()
 
-    def _reset_document(self, model, camera_state, units, style, path) -> None:
-        """Adopt a (model, camera, units, render style) into the live window, in place."""
+    def _reset_document(self, model, camera_state, units, style, path, *, environment) -> None:
+        """Adopt a (model, camera, units, render style, environment) into the live window."""
         from dataclasses import replace
 
         # M7.5b Task 9: the incoming Model's TextureLibrary restarts id
@@ -2064,6 +2090,8 @@ class MainWindow(QMainWindow):
         self._render_style = replace(style)
         self._sync_render_style_ui()
         self._doc.set_units(units)
+        self._doc.set_environment(environment)
+        self._sync_environment_ui()
         self._active_material_id = self._model.materials.DEFAULT_ID
         self._active_tag_id = self._model.tags.UNTAGGED_ID
         self._selection.clear()
@@ -2088,7 +2116,12 @@ class MainWindow(QMainWindow):
         from pluton.viewport.camera import Camera
 
         self._reset_document(
-            Model(), CameraState.from_camera(Camera()), Units(), RenderStyle(), None
+            Model(),
+            CameraState.from_camera(Camera()),
+            Units(),
+            RenderStyle(),
+            None,
+            environment=env_module.DEFAULT_ENVIRONMENT,
         )
 
     def _prompt_open_path(
@@ -2113,4 +2146,11 @@ class MainWindow(QMainWindow):
 
             QMessageBox.critical(self, "Open failed", str(e))
             return
-        self._reset_document(loaded.model, loaded.camera_state, loaded.units, loaded.style, path)
+        self._reset_document(
+            loaded.model,
+            loaded.camera_state,
+            loaded.units,
+            loaded.style,
+            path,
+            environment=loaded.environment,
+        )

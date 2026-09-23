@@ -15,6 +15,7 @@ import pytest
 from pluton.model.model import Model
 from pluton.viewport import scene_renderer
 from pluton.viewport.camera import Camera
+from pluton.viewport.environment import STUDIO
 from pluton.viewport.face_batches import FaceBatch, plan_face_batches
 from pluton.viewport.render_style import RenderStyle
 from pluton.viewport.scene_renderer import (
@@ -601,6 +602,7 @@ class _Harness:
             FaceBatch(front_material_id=material_id, back_material_id=0, first=0, count=3),
             self.model.materials,
             RenderStyle(),
+            bg=STUDIO.background,
             dimmed=False,
             translucent_ids=scene_renderer._translucent_ids(
                 self.model.materials, self.model.textures
