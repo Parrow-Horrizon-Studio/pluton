@@ -67,6 +67,4 @@ def test_bg_is_required_not_defaulted():
     lib = MaterialLibrary()
     batch = FaceBatch(front_material_id=0, back_material_id=0, first=0, count=3)
     with pytest.raises(TypeError):
-        resolve_batch_sides(
-            batch, lib, RenderStyle(), dimmed=False, translucent_ids=frozenset()
-        )
+        resolve_batch_sides(batch, lib, RenderStyle(), dimmed=False, translucent_ids=frozenset())
