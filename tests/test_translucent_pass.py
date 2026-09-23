@@ -19,13 +19,14 @@ from pluton.viewport.environment import STUDIO
 from pluton.viewport.face_batches import FaceBatch, plan_face_batches
 from pluton.viewport.render_style import RenderStyle
 from pluton.viewport.scene_renderer import (
+    _ENVIRONMENT_UNIFORMS,
     _FACE_VERTEX_BYTES,
     _FACE_VERTEX_FLOATS,
     _LINE_UNIFORMS,
     _PHONG_UNIFORMS,
+    SceneRenderer,
     _DefBuffers,
     _reset_translucent_state,
-    SceneRenderer,
     order_definitions_for_translucent_pass,
     rebuild_translucent_batches,
     resolve_batch_sides,
@@ -560,6 +561,8 @@ class _Harness:
         self.renderer._line_program = 2
         self.renderer._phong_locs = {n: i for i, n in enumerate(_PHONG_UNIFORMS)}
         self.renderer._line_locs = {n: i for i, n in enumerate(_LINE_UNIFORMS)}
+        self.renderer._environment_program = 3
+        self.renderer._environment_locs = {n: i for i, n in enumerate(_ENVIRONMENT_UNIFORMS)}
 
         self._records: list[tuple] = []
         real_faces = self.renderer._draw_definition_faces

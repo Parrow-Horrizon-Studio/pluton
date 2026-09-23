@@ -500,6 +500,7 @@ class _TagRenderHarness:
         from pluton.viewport import scene_renderer
         from pluton.viewport.camera import Camera
         from pluton.viewport.scene_renderer import (
+            _ENVIRONMENT_UNIFORMS,
             _LINE_UNIFORMS,
             _PHONG_UNIFORMS,
             SceneRenderer,
@@ -540,6 +541,8 @@ class _TagRenderHarness:
         self.renderer._line_program = 2
         self.renderer._phong_locs = {n: i for i, n in enumerate(_PHONG_UNIFORMS)}
         self.renderer._line_locs = {n: i for i, n in enumerate(_LINE_UNIFORMS)}
+        self.renderer._environment_program = 3
+        self.renderer._environment_locs = {n: i for i, n in enumerate(_ENVIRONMENT_UNIFORMS)}
 
         self._passes: list[tuple] = []
         real_faces = self.renderer._draw_definition_faces

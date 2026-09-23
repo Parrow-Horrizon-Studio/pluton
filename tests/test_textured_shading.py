@@ -475,7 +475,7 @@ def _square(scene, z=0.0):
 def _rendered(monkeypatch, *, transparent: bool, style: RenderStyle | None = None):
     from pluton.model.model import Model
     from pluton.viewport.camera import Camera
-    from pluton.viewport.scene_renderer import _LINE_UNIFORMS, SceneRenderer
+    from pluton.viewport.scene_renderer import _ENVIRONMENT_UNIFORMS, _LINE_UNIFORMS, SceneRenderer
 
     recorder = _GLRecorder()
     monkeypatch.setattr(sr, "GL", recorder)
@@ -495,6 +495,8 @@ def _rendered(monkeypatch, *, transparent: bool, style: RenderStyle | None = Non
     renderer._line_program = 2
     renderer._phong_locs = {n: i for i, n in enumerate(_PHONG_UNIFORMS)}
     renderer._line_locs = {n: i for i, n in enumerate(_LINE_UNIFORMS)}
+    renderer._environment_program = 3
+    renderer._environment_locs = {n: i for i, n in enumerate(_ENVIRONMENT_UNIFORMS)}
     renderer._texture_cache = sr.TextureCache(gl=recorder)
     if style is not None:
         renderer.set_render_style(style)
