@@ -14,7 +14,7 @@ test_main_window_scenes.test_render_style_persists_through_save_new_open, but
 follows self._doc.environment instead of self._render_style.
 """
 
-from pluton.viewport.environment import DEFAULT_ENVIRONMENT, PLAIN_WHITE
+from pluton.viewport.environment import DEFAULT_ENVIRONMENT, PLAIN_WHITE, STUDIO
 
 
 def _make_window(qtbot):
@@ -33,6 +33,13 @@ def test_environment_persists_through_save_new_open(qtbot, tmp_path):
 
     win._on_file_new()
     assert win._doc.environment == DEFAULT_ENVIRONMENT  # New pins the default
+
+    # Move to a third state so the reopen assertion below discriminates on its
+    # own rather than free-riding on the assertion above: if it were still
+    # PLAIN_WHITE from before New, a _reset_document that dropped `environment`
+    # would leave it PLAIN_WHITE and the assertion would pass for the wrong
+    # reason.
+    win._doc.set_environment(STUDIO)
 
     # Re-open and confirm the saved environment is adopted, not just accepted:
     from pluton.io.pluton_file import load_document
