@@ -401,20 +401,32 @@ def _environment_color(value, fallback: tuple[float, float, float]) -> tuple[flo
 
     A stored value of the wrong length or type raises ValueError or TypeError,
     which document_from_dict normalizes into PlutonFormatError.
+
+    Each channel is clamped to [0, 1] for the same reason _environment_opacity
+    clamps: GL clamps these values silently and at a different stage (upload
+    versus the shader's own mix()), so an out-of-range channel from a
+    hand-edited file would look like a renderer defect instead of a bad file.
     """
     if value is None:
         return fallback
-    r, g, b = (float(x) for x in value)
+    r, g, b = (min(1.0, max(0.0, float(x))) for x in value)
     return (r, g, b)
 
 
-def _environment_opacity(value) -> float:
-    """Ground opacity, clamped to [0, 1].
+def _environment_opacity(value, fallback: float) -> float:
+    """Ground opacity from stored data, or `fallback` when absent, clamped to
+    [0, 1].
 
     GLSL mix() extrapolates outside [0, 1] rather than clamping, so an
     out-of-range value from a hand-edited document would drive the ground colour
     past the sky and look like a renderer defect instead of a bad file.
+
+    An explicit JSON null reaches here as None, exactly like every colour
+    field passed to _environment_color, and is defaulted the same way rather
+    than reaching float(None) and raising.
     """
+    if value is None:
+        return fallback
     return min(1.0, max(0.0, float(value)))
 
 
@@ -450,7 +462,7 @@ def environment_from_dict(d: dict | None) -> Environment:
         sky_color=_environment_color(d.get("sky_color"), base.sky_color),
         ground_enabled=bool(d.get("ground_enabled", base.ground_enabled)),
         ground_color=_environment_color(d.get("ground_color"), base.ground_color),
-        ground_opacity=_environment_opacity(d.get("ground_opacity", base.ground_opacity)),
+        ground_opacity=_environment_opacity(d.get("ground_opacity"), base.ground_opacity),
         edge_color=_environment_color(d.get("edge_color"), base.edge_color),
         grid_color=_environment_color(d.get("grid_color"), base.grid_color),
         grid_centerline_color=_environment_color(

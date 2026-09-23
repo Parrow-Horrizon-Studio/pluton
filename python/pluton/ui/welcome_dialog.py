@@ -102,7 +102,7 @@ class WelcomeDialog(QDialog):
         layout.addLayout(units_row)
 
         self._show_checkbox = QCheckBox("Show this window on startup")
-        self._show_checkbox.setChecked(True)
+        self._show_checkbox.setChecked(preferences.read_show_welcome(settings))
         layout.addWidget(self._show_checkbox)
 
         buttons = QHBoxLayout()
