@@ -415,6 +415,26 @@ def test_ground_opacity_is_clamped_to_the_unit_interval():
     assert environment_from_dict({"ground_opacity": 0.4}).ground_opacity == pytest.approx(0.4)
 
 
+def test_an_explicit_null_ground_opacity_falls_back_like_a_missing_one():
+    """Review finding: {"ground_opacity": null} reached float(None) and raised
+    TypeError, which document_from_dict surfaces as PlutonFormatError, unlike
+    every colour field, where an explicit null already falls back cleanly via
+    _environment_color. Per-key defaulting should be uniform across the record.
+    """
+    restored = environment_from_dict({"ground_opacity": None})
+    assert restored.ground_opacity == LEGACY_ENVIRONMENT.ground_opacity
+
+
+def test_a_colour_triple_is_clamped_to_the_unit_interval_per_channel():
+    """The same argument _environment_opacity's docstring makes -- an
+    out-of-range value from a hand-edited file would look like a renderer
+    defect instead of a bad file -- applies identically to a colour channel:
+    GL clamps [5, 5, 5] or [-1, 0, 0] silently and at a different stage.
+    """
+    restored = environment_from_dict({"background": [5.0, -1.0, 0.4]})
+    assert restored.background == pytest.approx((1.0, 0.0, 0.4))
+
+
 @pytest.mark.parametrize("value", ["", 0, False, [], "blue"])
 def test_a_non_object_environment_value_is_a_format_error_not_an_attribute_error(value):
     """Review Focus 1, and open issue #116's exact shape.

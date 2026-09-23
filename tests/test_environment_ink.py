@@ -1,19 +1,52 @@
 """Grid and edge ink following the environment, without a GL context."""
 
 from pluton.viewport.environment import PLAIN_WHITE, STUDIO
-from pluton.viewport.scene_renderer import _build_grid_vertex_array
+from pluton.viewport.scene_renderer import _GRID_HALF_EXTENT, _build_grid_vertex_array
+
+
+def _row_is_centerline(row) -> bool:
+    """True when `row` (x, y, z, r, g, b) belongs to one of the grid's two
+    centre lines.
+
+    A row's two coordinates are x and y; exactly one of them is pinned to
+    +/-_GRID_HALF_EXTENT (the endpoint of the line segment this row is one end
+    of), and the other is the value that varies from one grid line to the next
+    across the whole family (named `v` in _build_grid_vertex_array). The row
+    is a centre-line row when that second, varying value is within 1e-5 of
+    zero.
+    """
+    x, y = float(row[0]), float(row[1])
+    varying = y if abs(abs(x) - _GRID_HALF_EXTENT) < 1e-5 else x
+    return abs(varying) < 1e-5
+
+
+def _assert_rows_carry_the_right_colour(verts, grid_color, centerline_color) -> None:
+    """Every row must carry grid_color or centerline_color, never the other,
+    according to which line it belongs to -- not merely have both colours
+    somewhere in the array.
+    """
+    for row in verts:
+        expected = centerline_color if _row_is_centerline(row) else grid_color
+        actual = tuple(round(float(c), 4) for c in row[3:])
+        assert actual == expected, f"row {row!r} carries {actual}, expected {expected}"
 
 
 def test_the_grid_array_carries_the_environments_grid_colours():
-    """Both colours, and they must not be swapped.
+    """Every row carries the right one of the two colours: the two centre
+    lines get grid_centerline_color, the other twenty get grid_color.
 
-    Discriminates: swap the two arguments at the _init_grid_buffers call and this
-    fails, because the presets move them in opposite directions.
+    This calls _build_grid_vertex_array directly with its own arguments in the
+    same order every call, so it cannot see whether the real _init_grid_buffers
+    call site passes grid_color and centerline_color in that same order --
+    swapping them there produces identical rows-carry-both-colours-somewhere
+    results. That call site is pinned separately, by
+    test_init_grid_buffers_passes_the_colours_in_order below, which drives
+    _init_grid_buffers itself rather than calling the function directly.
     """
     verts = _build_grid_vertex_array(PLAIN_WHITE.grid_color, PLAIN_WHITE.grid_centerline_color)
-    colors = {tuple(round(float(c), 4) for c in row[3:]) for row in verts}
-    assert PLAIN_WHITE.grid_color in colors
-    assert PLAIN_WHITE.grid_centerline_color in colors
+    _assert_rows_carry_the_right_colour(
+        verts, PLAIN_WHITE.grid_color, PLAIN_WHITE.grid_centerline_color
+    )
 
 
 def test_the_grid_array_shape_is_unchanged():
@@ -23,10 +56,51 @@ def test_the_grid_array_shape_is_unchanged():
 
 
 def test_the_studio_grid_matches_the_pre_m77_array():
-    """The dark environment's grid is byte-identical to what v0.12.0 drew."""
+    """The dark environment's grid carries the same two colours in the same
+    rows as v0.12.0 drew, checked row by row rather than as a colour set --
+    a set comparison cannot tell a row-for-row match from the two colours
+    merely being swapped between the grid and centre lines.
+    """
     verts = _build_grid_vertex_array(STUDIO.grid_color, STUDIO.grid_centerline_color)
-    colors = {tuple(round(float(c), 4) for c in row[3:]) for row in verts}
-    assert colors == {(0.40, 0.40, 0.40), (0.60, 0.60, 0.60)}
+    _assert_rows_carry_the_right_colour(verts, STUDIO.grid_color, STUDIO.grid_centerline_color)
+
+
+def test_init_grid_buffers_passes_the_colours_in_order(monkeypatch):
+    """Pins the _init_grid_buffers call site, which the two tests above cannot
+    see: they call _build_grid_vertex_array directly, with its arguments in
+    the same order the call site is supposed to use, so a swap made only at
+    the call site is invisible to them.
+
+    _upload_interleaved_lines is monkeypatched to capture the array it is
+    handed instead of uploading it to a real GL context. SceneRenderer's own
+    __init__ leaves _grid_vao and _grid_vbo at 0, so the delete guards at the
+    top of _init_grid_buffers no-op and no GL stand-in is needed for them.
+
+    Discriminates: swap the two arguments in the _build_grid_vertex_array(...)
+    call inside _init_grid_buffers and this fails, because the array handed to
+    _upload_interleaved_lines then carries grid_color on the centre-line rows
+    and grid_centerline_color everywhere else.
+    """
+    from pluton.viewport.scene_renderer import SceneRenderer
+
+    renderer = SceneRenderer()
+    assert renderer._grid_vao == 0
+    assert renderer._grid_vbo == 0
+
+    captured: dict[str, object] = {}
+
+    def _capture_upload(verts):
+        captured["verts"] = verts
+        return 1, 2
+
+    monkeypatch.setattr(renderer, "_upload_interleaved_lines", _capture_upload)
+    renderer._init_grid_buffers()
+
+    assert "verts" in captured, "_upload_interleaved_lines was never called"
+    env = renderer._environment
+    _assert_rows_carry_the_right_colour(
+        captured["verts"], env.grid_color, env.grid_centerline_color
+    )
 
 
 def test_switching_environment_marks_the_grid_for_rebuild():

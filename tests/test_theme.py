@@ -75,9 +75,16 @@ def test_a_palette_change_re_tints_the_properties_tab_strip(app):
 
     Discriminates: drop the _properties_dock.refresh_icons call from
     _rebuild_all_icons and this fails.
+
+    Review finding: membership in the cache is satisfied by a loop that merely
+    warms the cache at the current colour, touching no widget at all. The
+    assertion that actually pins the fix is on the tab button's own icon: its
+    cacheKey() must change across a real palette change, verified independently
+    by measuring 30064771072 -> 356482285568 on a real theme switch.
     """
     from pluton.ui.main_window import MainWindow
     from pluton.ui.panel_icons import TAB_ICONS
+    from PySide6.QtGui import QColor, QPalette
 
     window = MainWindow()
     icons.clear_icon_cache()
@@ -86,6 +93,19 @@ def test_a_palette_change_re_tints_the_properties_tab_strip(app):
     cached_at_current = {stem for stem, color in icons._icon_cache if color == color_name}
     missing = TAB_ICONS - cached_at_current
     assert not missing, f"tab icons not re-tinted at the new colour: {sorted(missing)}"
+
+    tab_button = window._properties_dock.tab_button(window._properties_dock.current_tab_id)
+    before_key = tab_button.icon().cacheKey()
+
+    palette = window.palette()
+    current = palette.color(QPalette.ColorRole.WindowText)
+    new_color = QColor("#204060") if current.name() != "#204060" else QColor("#602040")
+    palette.setColor(QPalette.ColorRole.WindowText, new_color)
+    window.setPalette(palette)
+    window._rebuild_all_icons()
+
+    after_key = tab_button.icon().cacheKey()
+    assert after_key != before_key, "the tab button's own icon did not change"
 
 
 def test_a_palette_change_rebuilds_the_outliner(app, monkeypatch):
@@ -108,9 +128,15 @@ def test_a_palette_change_rebuilds_the_outliner(app, monkeypatch):
 
 
 def test_a_palette_change_re_tints_the_action_icons(app):
-    """The registry half, so the tests above cannot pass alone."""
+    """The registry half, so the tests above cannot pass alone.
+
+    Review finding: as with the tab strip above, cache membership is satisfied
+    by warming the cache at the current colour without touching a single
+    action. The widget assertion below is the one that actually pins the fix.
+    """
     from pluton.ui import actions
     from pluton.ui.main_window import MainWindow
+    from PySide6.QtGui import QColor, QPalette
 
     window = MainWindow()
     icons.clear_icon_cache()
@@ -119,3 +145,16 @@ def test_a_palette_change_re_tints_the_action_icons(app):
     cached_at_current = {stem for stem, color in icons._icon_cache if color == color_name}
     expected = {spec.icon for spec in actions.ACTIONS if spec.icon is not None}
     assert expected <= cached_at_current
+
+    action = window._actions["file_new"]
+    before_key = action.icon().cacheKey()
+
+    palette = window.palette()
+    current = palette.color(QPalette.ColorRole.WindowText)
+    new_color = QColor("#204060") if current.name() != "#204060" else QColor("#602040")
+    palette.setColor(QPalette.ColorRole.WindowText, new_color)
+    window.setPalette(palette)
+    window._rebuild_all_icons()
+
+    after_key = action.icon().cacheKey()
+    assert after_key != before_key, "the action's own icon did not change"

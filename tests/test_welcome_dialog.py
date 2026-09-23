@@ -6,7 +6,7 @@ from pluton.templates import template_for_key
 from pluton.ui import preferences
 from pluton.ui.welcome_dialog import WelcomeDialog, apply_template
 from pluton.units import UnitSystem
-from pluton.viewport.environment import DEFAULT_ENVIRONMENT, PLAIN_WHITE, SKY_AND_GROUND
+from pluton.viewport.environment import PLAIN_WHITE, SKY_AND_GROUND
 from PySide6.QtCore import QSettings
 from PySide6.QtWidgets import QApplication
 
@@ -84,20 +84,54 @@ def test_ticking_do_not_show_reports_it(app, settings):
     assert dialog.show_on_startup is False
 
 
+def test_the_checkbox_starts_ticked_when_nothing_is_stored(app, settings):
+    """Default-true, matching preferences.read_show_welcome's own default."""
+    dialog = WelcomeDialog(settings)
+    assert dialog.show_on_startup is True
+
+
+def test_the_checkbox_starts_unticked_when_the_stored_preference_says_so(app, settings):
+    """Review finding: the checkbox never read the stored preference, so
+    reopening the dialog from Help > Welcome to Pluton after unticking it
+    showed ticked regardless, and accepting from there silently reversed the
+    user's choice back to True.
+    """
+    preferences.write_show_welcome(settings, False)
+    dialog = WelcomeDialog(settings)
+    assert dialog.show_on_startup is False
+
+
 def test_the_dialog_does_not_write_preferences_on_construction(app, settings):
     """Opening the dialog and closing it must leave the store untouched."""
     WelcomeDialog(settings)
     assert settings.value(preferences.SHOW_WELCOME_KEY) is None
 
 
-def test_escape_leaves_the_document_alone(app, settings):
-    """Spec: dismissal changes nothing and leaves no half-configured document."""
-    doc = DocumentSettings()
-    before_units = doc.units
-    dialog = WelcomeDialog(settings)
-    dialog.reject()
-    assert doc.units == before_units
-    assert doc.environment is DEFAULT_ENVIRONMENT
+def test_escape_leaves_the_document_alone(app, monkeypatch):
+    """Spec: dismissal changes nothing and leaves no half-configured document.
+
+    Review finding: the previous version built a DocumentSettings that was
+    never passed to or referenced by the dialog, so dialog.reject() could not
+    have affected it under any implementation -- the assertion was
+    unconditional. This drives the real path (MainWindow.show_welcome_dialog,
+    which execs the real dialog) with exec() patched to report Rejected, and
+    compares the live document and settings store against a before snapshot
+    rather than against a hardcoded default.
+    """
+    from pluton.ui.main_window import MainWindow
+    from pluton.ui.welcome_dialog import WelcomeDialog as Dialog
+
+    window = MainWindow()
+    before_units = window._doc.units
+    before_environment = window._doc.environment
+
+    monkeypatch.setattr(Dialog, "exec", lambda self: Dialog.DialogCode.Rejected)
+    window.show_welcome_dialog()
+
+    assert window._settings.value(preferences.SHOW_WELCOME_KEY) is None
+    assert window._settings.value(preferences.DEFAULT_TEMPLATE_PREF_KEY) is None
+    assert window._doc.units == before_units
+    assert window._doc.environment == before_environment
 
 
 def test_open_is_reported_rather_than_performed(app, settings):
