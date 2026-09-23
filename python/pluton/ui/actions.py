@@ -20,6 +20,7 @@ TOOL_GROUP = "tool"
 FACE_STYLE_GROUP = "face_style"
 UNITS_GROUP = "units"
 ENVIRONMENT_GROUP = "environment"
+THEME_GROUP = "theme"
 
 
 class CursorStyle(Enum):
@@ -249,6 +250,23 @@ ACTIONS: tuple[ActionSpec, ...] = (
         handler_arg="studio",
         checkable=True,
         group=ENVIRONMENT_GROUP,
+    ),
+    # --- Theme (M7.7) -------------------------------------------------------
+    ActionSpec(
+        "view_theme_light",
+        "Light Theme",
+        "_set_theme",
+        handler_arg="light",
+        checkable=True,
+        group=THEME_GROUP,
+    ),
+    ActionSpec(
+        "view_theme_dark",
+        "Dark Theme",
+        "_set_theme",
+        handler_arg="dark",
+        checkable=True,
+        group=THEME_GROUP,
     ),
     # --- Tools --------------------------------------------------------
     _tool("tool_select", "Select", "Space", _AR),
@@ -523,6 +541,9 @@ MENUS: tuple[MenuSpec, ...] = (
             "view_env_landscape",
             "view_env_plain_white",
             "view_env_studio",
+            None,
+            "view_theme_light",
+            "view_theme_dark",
             None,
             "view_zoom_extents",
             None,

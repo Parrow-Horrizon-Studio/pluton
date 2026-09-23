@@ -446,6 +446,10 @@ class MainWindow(QMainWindow):
                 (env_module.STUDIO_KEY, "view_env_studio"),
             )
         }
+        self._theme_actions = {
+            "light": self._actions["view_theme_light"],
+            "dark": self._actions["view_theme_dark"],
+        }
         self._color_by_tag_action = self._actions["view_color_by_tag"]
         # M7.6b Task 7: guides are visible by default (SketchUp), matching
         # ViewportWidget.show_guides's own default -- this just reflects that
@@ -488,6 +492,10 @@ class MainWindow(QMainWindow):
         self._settings = QSettings()
         self._default_window_state = self.saveState(WINDOW_STATE_VERSION)
         restore_window_state(self, self._settings)
+
+        # Reflect the saved theme choice (M7.7). Deferred to here, after
+        # self._settings exists, rather than beside self._theme_actions above.
+        self._theme_actions[preferences.read_theme(self._settings)].setChecked(True)
 
         # Back-compat aliases for tests that read a named menu by attribute.
         self._file_menu = self._menus["File"]
@@ -1836,6 +1844,67 @@ class MainWindow(QMainWindow):
         for key, action in self._environment_actions.items():
             action.setChecked(key == active)
         self._viewport.set_environment(self._doc.environment)
+
+    def _set_theme(self, name: str) -> None:
+        from PySide6.QtWidgets import QApplication
+
+        from pluton.ui.theme import apply_theme, theme_for_name
+
+        app = QApplication.instance()
+        if app is not None:
+            apply_theme(app, theme_for_name(name))
+        preferences.write_theme(self._settings, name)
+
+    def changeEvent(self, event):
+        """Rebuild icons when the palette changes (#101).
+
+        The icons are monochrome SVGs recoloured from the palette's text colour
+        at load time and cached on (stem, colour), so they already serve both
+        themes. What was missing was the refresh: nothing ever cleared the cache
+        or re-requested them, so a theme change left every toolbar and menu icon
+        in the previous theme's ink until restart.
+        """
+        from PySide6.QtCore import QEvent
+
+        super().changeEvent(event)
+        if event.type() == QEvent.Type.PaletteChange:
+            self._rebuild_all_icons()
+
+    def _rebuild_all_icons(self) -> None:
+        """Re-request every icon at the current palette's text colour.
+
+        Every source, and that is the whole point. The action icons come from the
+        ACTIONS registry. The properties dock's tab strip is built once and holds
+        its own buttons, so it needs re-tinting. The Outliner sets row icons
+        during set_rows, so it needs rebuilding. Neither is reachable from an
+        ActionSpec, and a refresh that walked only the registry would leave every
+        tab and every Outliner row in the old ink while looking complete from the
+        toolbar.
+
+        Read the colour from self.palette() at call time, never from a value
+        captured earlier: the cache is keyed on the colour, so re-requesting at
+        the old one would re-cache the stale icon and make the switch appear to
+        do nothing.
+        """
+        from pluton.ui import actions as actions_module
+        from pluton.ui import icons as icons_module
+
+        icons_module.clear_icon_cache()
+        color = self.palette().windowText().color()
+        for spec in actions_module.ACTIONS:
+            if spec.icon is None:
+                continue
+            action = self._actions.get(spec.id)
+            if action is None:
+                continue
+            try:
+                action.setIcon(icons_module.icon(spec.icon, color))
+            except KeyError:
+                # Same reasoning as ui_builder.build_action: a damaged install
+                # must not take the window down over one missing glyph.
+                continue
+        self._properties_dock.refresh_icons(color)
+        self._rebuild_outliner()
 
     # --- File I/O --------------------------------------------------------
 

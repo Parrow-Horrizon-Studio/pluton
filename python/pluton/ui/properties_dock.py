@@ -159,6 +159,17 @@ class PropertiesDock(QDockWidget):
     def tab_button(self, tab_id: str) -> QToolButton:
         return self._buttons[tab_id]
 
+    def refresh_icons(self, color) -> None:
+        """Re-tint the tab strip after a palette change (#101).
+
+        The strip is built once in __init__, so nothing else would ever
+        re-request these icons and every tab would keep the old theme's ink.
+        """
+        for spec in PROPERTIES_TABS:
+            button = self._buttons.get(spec.id)
+            if button is not None:
+                button.setIcon(icon(spec.icon, color))
+
     @property
     def current_tab_id(self) -> str:
         return self._current
