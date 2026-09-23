@@ -1056,7 +1056,11 @@ def _build_grid_vertex_array(
     grid_color: tuple[float, float, float],
     centerline_color: tuple[float, float, float],
 ) -> np.ndarray:
-    """Return a (44, 6) float32 array of grid-line vertices: x,y,z, r,g,b.
+    """Return a (N, 6) float32 array of grid-line vertices: x,y,z, r,g,b.
+
+    N is derived from _GRID_HALF_EXTENT and _GRID_SPACING (44 at the current
+    values); reshape(-1, 6) absorbs either changing, so this docstring does
+    not hardcode the count.
 
     The colours are arguments rather than module constants because they belong
     to the document's environment now. They are baked into the vertex data, so
@@ -1901,6 +1905,11 @@ class SceneRenderer:
         into the vertex buffer from each material's texture_size, which also
         lives on the library, so resizing a texture dirties no mesh and would
         otherwise go on tiling at the old size.
+
+        M7.7 adds a fourth cause of the same shape: the edge colour is baked
+        into the edge vertex buffer from the document's environment, which no
+        mesh dirty flag covers either, so switching environment would otherwise
+        leave every definition drawing its old ink.
         """
         buf = self._def_buffers.get(id(definition))
         if (
