@@ -62,7 +62,7 @@ from pluton.tools.primitive_tool import BoxTool, ConeTool, CylinderTool, SphereT
 from pluton.tools.roof_tool import RoofTool
 from pluton.tools.text_tool import TextTool
 from pluton.tools.wall_tool import WallTool
-from pluton.ui import selection_controller
+from pluton.ui import preferences, selection_controller
 from pluton.ui.cursors import cursor_for
 from pluton.ui.document_controller import DocumentController
 from pluton.ui.entity_info_page import EntityInfoPage
@@ -2114,16 +2114,17 @@ class MainWindow(QMainWindow):
     def _on_file_new(self) -> None:
         if not self._confirm_discard_if_dirty():
             return
-        from pluton.units import Units
+        from pluton.templates import template_for_key
         from pluton.viewport.camera import Camera
 
+        template = template_for_key(preferences.read_default_template(self._settings))
         self._reset_document(
             Model(),
             CameraState.from_camera(Camera()),
-            Units(),
+            template.units,
             RenderStyle(),
             None,
-            environment=env_module.DEFAULT_ENVIRONMENT,
+            environment=template.environment,
         )
 
     def _prompt_open_path(
@@ -2156,3 +2157,38 @@ class MainWindow(QMainWindow):
             path,
             environment=loaded.environment,
         )
+
+    def _on_show_welcome(self) -> None:
+        """Show the welcome dialog on demand (Help > Welcome to Pluton).
+
+        The same entry point app.py uses at startup, so the do-not-show
+        checkbox is recoverable without editing a settings file.
+        """
+        from pluton.ui.welcome_dialog import WelcomeDialog, apply_template
+        from pluton.viewport.camera import Camera
+
+        dialog = WelcomeDialog(self._settings, self)
+        if dialog.exec() != WelcomeDialog.DialogCode.Accepted:
+            return
+        preferences.write_show_welcome(self._settings, dialog.show_on_startup)
+        preferences.write_default_template(self._settings, dialog.selected_template.key)
+        if dialog.wants_open:
+            self._on_file_open()
+            return
+        if not self._confirm_discard_if_dirty():
+            return
+        self._reset_document(
+            Model(),
+            CameraState.from_camera(Camera()),
+            dialog.selected_template.units,
+            RenderStyle(),
+            None,
+            environment=dialog.selected_template.environment,
+        )
+        apply_template(self._doc, dialog.selected_template, dialog.selected_unit)
+        self._sync_environment_ui()
+        self._refresh_status_text()
+
+    def show_welcome_dialog(self) -> None:
+        """Public entry point for app.py's startup call."""
+        self._on_show_welcome()

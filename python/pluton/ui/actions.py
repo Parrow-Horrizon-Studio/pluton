@@ -346,6 +346,8 @@ ACTIONS: tuple[ActionSpec, ...] = (
     ActionSpec("view_materials", "Materials", "_on_show_material_tab"),
     ActionSpec("view_tags", "Tags", "_on_show_tags_tab"),
     ActionSpec("view_scenes", "Scenes", "_on_show_scenes_tab"),
+    # --- Help (M7.7) --------------------------------------------------------
+    ActionSpec("help_welcome", "Welcome to Pluton", "_on_show_welcome"),
 )
 
 _BY_ID: dict[str, ActionSpec] = {spec.id: spec for spec in ACTIONS}
@@ -529,6 +531,7 @@ MENUS: tuple[MenuSpec, ...] = (
             "view_scenes",
         ),
     ),
+    MenuSpec("Help", ("help_welcome",)),
 )
 
 # Right-click menus. `Assign Tag` is deliberately absent: it is a dynamic

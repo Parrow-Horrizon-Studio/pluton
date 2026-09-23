@@ -2,9 +2,11 @@
 
 import sys
 
+from PySide6.QtCore import QSettings
 from PySide6.QtWidgets import QApplication
 
 from pluton import __version__
+from pluton.ui import preferences
 from pluton.ui.main_window import MainWindow
 from pluton.ui.window_state import APPLICATION_NAME, ORGANIZATION_NAME
 
@@ -16,8 +18,16 @@ def main() -> int:
     # QSettings keys off these; without them it has no per-application store.
     app.setOrganizationName(ORGANIZATION_NAME)
     app.setApplicationName(APPLICATION_NAME)
+
     window = MainWindow()
     window.show()
+
+    # After show(), so the dialog is modal over a real window rather than over
+    # nothing, and so there is no second "no document yet" code path: the
+    # template applies to the live document the window already built.
+    if preferences.read_show_welcome(QSettings()):
+        window.show_welcome_dialog()
+
     return app.exec()
 
 
