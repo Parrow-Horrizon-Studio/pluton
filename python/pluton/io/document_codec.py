@@ -427,17 +427,22 @@ def environment_from_dict(d: dict | None) -> Environment:
     document gets DEFAULT_ENVIRONMENT from DocumentSettings instead.
 
     Each key is read with the legacy value as its fallback, matching
-    render_style_from_dict, so a partially written document still loads.
+    render_style_from_dict's per-key defaulting, so a partially written document
+    still loads. That "matching" does not extend to the falsy guard below: the
+    type check runs first, on purpose, so every non-dict value raises, not just
+    the truthy ones.
 
     The isinstance guard is load-bearing. document_from_dict catches KeyError,
     TypeError, ValueError and IndexError; without this, a JSON string here would
     reach `.get` and raise AttributeError, which that handler does not catch and
-    no caller expects (#116).
+    no caller expects (#116). It runs before the `not d` check so that a falsy
+    non-dict such as "", 0, False or [] raises too, rather than silently being
+    treated the same as an absent key.
     """
+    if d is not None and not isinstance(d, dict):
+        raise TypeError(f"'environment' must be an object, got {type(d).__name__}")
     if not d:
         return LEGACY_ENVIRONMENT
-    if not isinstance(d, dict):
-        raise TypeError(f"'environment' must be an object, got {type(d).__name__}")
     base = LEGACY_ENVIRONMENT
     return Environment(
         background=_environment_color(d.get("background"), base.background),

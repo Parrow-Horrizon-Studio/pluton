@@ -22,6 +22,7 @@ from pluton.viewport.environment import (
     DEFAULT_ENVIRONMENT,
     LEGACY_ENVIRONMENT,
     PLAIN_WHITE,
+    SKY_AND_GROUND,
     STUDIO,
 )
 from pluton.viewport.render_style import RenderStyle
@@ -368,10 +369,17 @@ def test_a_degenerate_guide_direction_never_escapes_the_whole_document_load():
         document_from_dict(data)
 
 
-def test_environment_round_trips_through_the_codec():
-    """All nine fields, not just the colours."""
-    restored = environment_from_dict(environment_to_dict(PLAIN_WHITE))
-    assert restored == PLAIN_WHITE
+@pytest.mark.parametrize("preset", [PLAIN_WHITE, SKY_AND_GROUND])
+def test_environment_round_trips_through_the_codec(preset):
+    """All nine fields, not just the colours.
+
+    PLAIN_WHITE alone has sky_enabled=False and ground_enabled=False, which are
+    also STUDIO's values for those two fields -- a codec bug that always wrote
+    or read back False for them would still pass. SKY_AND_GROUND has both
+    flags True, so the pair together actually discriminates.
+    """
+    restored = environment_from_dict(environment_to_dict(preset))
+    assert restored == preset
 
 
 def test_an_absent_environment_key_yields_the_legacy_environment():
@@ -407,16 +415,23 @@ def test_ground_opacity_is_clamped_to_the_unit_interval():
     assert environment_from_dict({"ground_opacity": 0.4}).ground_opacity == pytest.approx(0.4)
 
 
-def test_a_non_object_environment_value_is_a_format_error_not_an_attribute_error():
+@pytest.mark.parametrize("value", ["", 0, False, [], "blue"])
+def test_a_non_object_environment_value_is_a_format_error_not_an_attribute_error(value):
     """Review Focus 1, and open issue #116's exact shape.
 
     document_from_dict catches KeyError/TypeError/ValueError/IndexError. A JSON
     string here would reach `.get` and raise AttributeError, which that handler
     does not catch and no caller expects, so a truncated file would crash out of
     the open path instead of reporting a bad document.
+
+    The falsy shapes ("", 0, False, []) are the point of fix round 1: the type
+    check must run before the "absent" check, or these would silently come back
+    as LEGACY_ENVIRONMENT instead of raising. None and {} are the genuinely
+    absent/empty cases and stay covered by
+    test_an_absent_environment_key_yields_the_legacy_environment, not here.
     """
     with pytest.raises(TypeError):
-        environment_from_dict("blue")
+        environment_from_dict(value)
 
 
 def test_a_document_with_a_non_object_environment_raises_pluton_format_error():
