@@ -1156,6 +1156,17 @@ def _snap_marker_vertices(kind: int, p) -> np.ndarray:
     )
 
 
+def _snap_marker_halo(pos: np.ndarray, p, scale: float) -> np.ndarray:
+    """The marker's vertices scaled about the snap point, for the contrast halo.
+
+    Drawn behind the marker in the environment's edge colour so every marker
+    kind reads against every background. Scaling about `p` rather than the
+    origin keeps the halo centred on the snap point at any world position.
+    """
+    centre = np.array([float(p[0]), float(p[1]), float(p[2])], dtype=np.float32)
+    return ((pos - centre) * float(scale) + centre).astype(np.float32)
+
+
 def _selection_face_polygons(scene, selection) -> list[np.ndarray]:
     """World-space loops (N,3 float32) for each LIVE selected face."""
     polys: list[np.ndarray] = []
@@ -2267,8 +2278,30 @@ class SceneRenderer:
             if overlay.snap_marker_position is not None:
                 p = overlay.snap_marker_position
                 pos = _snap_marker_vertices(overlay.snap_marker_kind, p)
-
                 n = pos.shape[0]
+
+                # Contrast halo (M7.7 Task 6b): a larger copy of the marker in
+                # the environment's own edge colour, drawn first so every
+                # marker kind reads against every background. edge_color is
+                # reused rather than computed because the contrast floor in
+                # tests/test_environment.py already guarantees it differs from
+                # every enabled backdrop of its own preset.
+                halo_scale = 1.8
+                halo_pos = _snap_marker_halo(pos, p, halo_scale)
+                hr, hg, hb = self._environment.edge_color
+                halo_colors = np.tile(np.array([hr, hg, hb], dtype=np.float32), (n, 1))
+                halo_data = np.ascontiguousarray(
+                    np.concatenate([halo_pos, halo_colors], axis=1).astype(np.float32)
+                )
+
+                GL.glBindBuffer(GL.GL_ARRAY_BUFFER, self._overlay_marker_vbo)
+                GL.glBufferData(GL.GL_ARRAY_BUFFER, halo_data.nbytes, halo_data, GL.GL_DYNAMIC_DRAW)
+                GL.glBindVertexArray(self._overlay_marker_vao)
+                GL.glLineWidth(4.0)
+                GL.glDrawArrays(GL.GL_LINES, 0, n)
+                GL.glLineWidth(1.0)
+                GL.glBindVertexArray(0)
+
                 cr, cg, cb = overlay.snap_marker_color
                 colors = np.tile(np.array([cr, cg, cb], dtype=np.float32), (n, 1))
                 data = np.ascontiguousarray(

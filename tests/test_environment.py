@@ -3,11 +3,16 @@
 import pytest
 from pluton.viewport.environment import (
     DEFAULT_ENVIRONMENT,
+    LANDSCAPE_KEY,
     LEGACY_ENVIRONMENT,
+    NEUTRAL_GREY_KEY,
     PLAIN_WHITE,
+    PLAIN_WHITE_KEY,
     PRESETS,
     SKY_AND_GROUND,
+    SKY_AND_GROUND_KEY,
     STUDIO,
+    STUDIO_KEY,
     Environment,
     environment_pass_needed,
     preset_key,
@@ -116,3 +121,27 @@ def test_the_pass_is_needed_only_when_a_half_is_enabled():
     assert environment_pass_needed(SKY_AND_GROUND) is True
     assert environment_pass_needed(PLAIN_WHITE) is False
     assert environment_pass_needed(STUDIO) is False
+
+
+def test_every_preset_has_a_distinct_key():
+    """Two presets must never share a key: registering one would silently
+    shadow the other in PRESETS and in the View menu's action lookup.
+    """
+    keys = list(PRESETS.keys())
+    assert len(keys) == len(set(keys))
+
+
+def test_presets_has_exactly_five_entries_and_every_key_is_registered():
+    """Task 6b brings the preset count to five. Pinning the count and the exact
+    key set means a future preset added to the module without being wired into
+    PRESETS is caught here rather than discovered later as a menu entry with
+    nothing behind it.
+    """
+    assert len(PRESETS) == 5
+    assert set(PRESETS) == {
+        SKY_AND_GROUND_KEY,
+        NEUTRAL_GREY_KEY,
+        LANDSCAPE_KEY,
+        PLAIN_WHITE_KEY,
+        STUDIO_KEY,
+    }

@@ -50,6 +50,36 @@ SKY_AND_GROUND = Environment(
     grid_centerline_color=(0.30, 0.30, 0.30),
 )
 
+# SketchUp's architectural template look: a pale grey sky over a mid grey
+# ground, with no colour to compete with the model. Not called "Architectural"
+# because this project does not borrow another product's template names.
+NEUTRAL_GREY = Environment(
+    background=(1.00, 1.00, 1.00),
+    sky_enabled=True,
+    sky_color=(0.90, 0.91, 0.93),
+    ground_enabled=True,
+    ground_color=(0.78, 0.78, 0.78),
+    ground_opacity=1.0,
+    edge_color=(0.15, 0.15, 0.15),
+    grid_color=(0.55, 0.55, 0.55),
+    grid_centerline_color=(0.35, 0.35, 0.35),
+)
+
+# Blue sky over green ground, for site and context modelling. Shares
+# SKY_AND_GROUND's sky colour deliberately, so the two read as the same sky
+# with a different surface.
+LANDSCAPE = Environment(
+    background=(1.00, 1.00, 1.00),
+    sky_enabled=True,
+    sky_color=(0.53, 0.71, 0.87),
+    ground_enabled=True,
+    ground_color=(0.52, 0.68, 0.42),
+    ground_opacity=1.0,
+    edge_color=(0.15, 0.15, 0.15),
+    grid_color=(0.42, 0.42, 0.42),
+    grid_centerline_color=(0.28, 0.28, 0.28),
+)
+
 # The documentation look: no sky, no ground, white page. sky_color and
 # ground_color repeat the background rather than holding a dead value, so a
 # reader does not have to wonder whether they leak.
@@ -82,11 +112,15 @@ STUDIO = Environment(
 )
 
 SKY_AND_GROUND_KEY = "sky_and_ground"
+NEUTRAL_GREY_KEY = "neutral_grey"
+LANDSCAPE_KEY = "landscape"
 PLAIN_WHITE_KEY = "plain_white"
 STUDIO_KEY = "studio"
 
 PRESETS: dict[str, Environment] = {
     SKY_AND_GROUND_KEY: SKY_AND_GROUND,
+    NEUTRAL_GREY_KEY: NEUTRAL_GREY,
+    LANDSCAPE_KEY: LANDSCAPE,
     PLAIN_WHITE_KEY: PLAIN_WHITE,
     STUDIO_KEY: STUDIO,
 }

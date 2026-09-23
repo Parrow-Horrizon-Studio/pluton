@@ -14,6 +14,9 @@ calls, not a piece of text.
 
 import re
 
+import numpy as np
+
+from pluton.tools.tool import ToolOverlay
 from pluton.viewport import scene_renderer as sr
 from pluton.viewport.camera import Camera
 from pluton.viewport.environment import PLAIN_WHITE, SKY_AND_GROUND, STUDIO, environment_pass_needed
@@ -22,7 +25,10 @@ from pluton.viewport.scene_renderer import (
     _LINE_UNIFORMS,
     SceneRenderer,
     _load_shader_source,
+    _snap_marker_halo,
+    _snap_marker_vertices,
 )
+from pluton.viewport.snap_engine import SnapKind
 
 _UNIFORM_DECL = re.compile(r"^\s*uniform\s+\w+\s+(\w+)\s*;", re.MULTILINE)
 _LINE_COMMENT = re.compile(r"//.*")
@@ -213,3 +219,104 @@ def test_the_pass_is_skipped_at_render_time_when_both_halves_are_disabled(monkey
         if name == "glDrawArrays" and args and args[0] == triangles
     ]
     assert environment_draws == []
+
+
+# --- Snap-marker halo (Task 6b) ---------------------------------------------
+#
+# The visual pass reported the snap marker is hard to see on light
+# backgrounds; measured luminance deltas as low as 0.017 confirmed it is
+# invisible, not merely faint. The fix draws the marker geometry twice at the
+# single site it is already drawn: a slightly larger halo in the
+# environment's own edge colour first, then the marker unchanged on top, so
+# every marker kind reads against every background without the marker
+# colours themselves changing meaning.
+
+
+def _draw_overlay_with_recording_gl(monkeypatch, environment, overlay) -> _RecordingGL:
+    """Drive SceneRenderer._draw_tool_overlay() through a recording GL, no
+    real GL context, mirroring _render_with_recording_gl above but scoped to
+    just the tool-overlay draw so the marker block's calls aren't mixed in
+    with a full frame's worth of grid/axis calls.
+    """
+    recorder = _RecordingGL()
+    monkeypatch.setattr(sr, "GL", recorder)
+
+    renderer = SceneRenderer()
+    renderer._line_program = 2
+    renderer._line_locs = dict.fromkeys(_LINE_UNIFORMS, 0)
+    renderer._environment = environment
+
+    view = np.eye(4, dtype=np.float32)
+    projection = np.eye(4, dtype=np.float32)
+    renderer._draw_tool_overlay(overlay, view, projection)
+    return recorder
+
+
+def _snap_marker_overlay() -> ToolOverlay:
+    """A bare overlay carrying only a snap marker -- no rubber band, so the
+    marker block's calls are the only glDrawArrays(GL_LINES, ...) calls made.
+    """
+    return ToolOverlay(
+        rubber_band_segments=np.zeros((0, 3), dtype=np.float32),
+        rubber_band_color=(1.0, 1.0, 1.0),
+        snap_marker_position=np.array([1.0, 2.0, 0.0], dtype=np.float32),
+        snap_marker_color=(0.70, 0.70, 0.70),
+        snap_marker_kind=int(SnapKind.GRID),
+    )
+
+
+def _line_draws(recorder: _RecordingGL) -> list[tuple]:
+    lines = recorder.GL_LINES
+    return [
+        (name, args)
+        for name, args in recorder.calls
+        if name == "glDrawArrays" and args and args[0] == lines
+    ]
+
+
+def test_the_snap_marker_draws_a_halo_behind_itself(monkeypatch):
+    """The marker block must record two GL_LINES draws, the halo first.
+
+    Discriminates: with the halo draw removed, only one GL_LINES draw remains
+    for the marker block and this fails.
+    """
+    recorder = _draw_overlay_with_recording_gl(monkeypatch, SKY_AND_GROUND, _snap_marker_overlay())
+    assert len(_line_draws(recorder)) == 2, "expected a halo draw and a marker draw"
+
+
+def test_the_halo_uses_the_environments_edge_colour(monkeypatch):
+    """The halo's uploaded vertex colours must equal self._environment.edge_color.
+
+    That colour, not a computed one, is the point of the design: the contrast
+    floor (tests/test_environment.py) already guarantees edge_color differs
+    from every enabled backdrop of its own preset by at least 0.35 luminance.
+
+    Discriminates: with the halo draw removed, the first buffer upload is the
+    marker's own snap_marker_color (0.70, 0.70, 0.70), not STUDIO's edge_color
+    (0.85, 0.85, 0.85), and this fails.
+    """
+    recorder = _draw_overlay_with_recording_gl(monkeypatch, STUDIO, _snap_marker_overlay())
+    buffer_uploads = [args for name, args in recorder.calls if name == "glBufferData"]
+    assert len(buffer_uploads) >= 1, "no buffer was uploaded for the marker block"
+    halo_data = buffer_uploads[0][2]  # (target, size, data, usage)
+    halo_colors = {tuple(round(float(c), 4) for c in row[3:]) for row in halo_data}
+    assert halo_colors == {STUDIO.edge_color}
+
+
+def test_the_halo_is_a_scaled_copy_about_the_snap_point():
+    """Pure test of _snap_marker_halo, no GL and no renderer.
+
+    Discriminates: scale about the origin instead of about p and the halo's
+    centroid moves off the marker's centroid whenever p is not the origin.
+    """
+    p = np.array([3.0, -2.0, 5.0], dtype=np.float32)
+    marker = _snap_marker_vertices(int(SnapKind.GRID), p)
+    scale = 1.8
+    halo = _snap_marker_halo(marker, p, scale)
+
+    assert halo.shape == marker.shape
+    assert np.allclose(halo.mean(axis=0), marker.mean(axis=0), atol=1e-5)
+
+    centre = np.array([float(p[0]), float(p[1]), float(p[2])], dtype=np.float32)
+    for orig, scaled in zip(marker, halo, strict=True):
+        assert np.allclose(scaled - centre, (orig - centre) * scale, atol=1e-5)

@@ -440,6 +440,8 @@ class MainWindow(QMainWindow):
             key: self._actions[action_id]
             for key, action_id in (
                 (env_module.SKY_AND_GROUND_KEY, "view_env_sky_ground"),
+                (env_module.NEUTRAL_GREY_KEY, "view_env_neutral_grey"),
+                (env_module.LANDSCAPE_KEY, "view_env_landscape"),
                 (env_module.PLAIN_WHITE_KEY, "view_env_plain_white"),
                 (env_module.STUDIO_KEY, "view_env_studio"),
             )
