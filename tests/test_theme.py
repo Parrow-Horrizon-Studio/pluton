@@ -38,8 +38,72 @@ def test_theme_for_name_falls_back_rather_than_raising():
     assert theme_for_name("") is ThemeChoice.LIGHT
 
 
+def _platform_tracks_colour_scheme(app) -> bool:
+    """Whether this platform theme implements colour schemes at all.
+
+    Measured rather than assumed, and probed through Qt directly rather than
+    through apply_theme, so the probe cannot mask the thing the test checks.
+    The offscreen plugin that conftest selects under CI accepts
+    setColorScheme and does nothing at all with it: the readback stays
+    Unknown, the palette does not move, and colorSchemeChanged never fires.
+    """
+    hints = app.styleHints()
+    original = hints.colorScheme()
+    try:
+        hints.setColorScheme(Qt.ColorScheme.Dark)
+        if hints.colorScheme() != Qt.ColorScheme.Dark:
+            return False
+        hints.setColorScheme(Qt.ColorScheme.Light)
+        return hints.colorScheme() == Qt.ColorScheme.Light
+    finally:
+        hints.setColorScheme(original)
+
+
+def test_apply_theme_maps_each_choice_to_its_qt_scheme():
+    """The mapping, asserted on every platform including the headless one.
+
+    This is the whole of apply_theme's own logic: a _SCHEMES lookup and one
+    setter call. A swapped pair is therefore the only regression the function
+    can carry, and it is the one that would ship, so it needs a test that
+    does not depend on whether the platform theme honours the call. Verified
+    against the mutation by swapping _SCHEMES and watching this fail.
+    """
+
+    class RecordingHints:
+        def __init__(self) -> None:
+            self.schemes: list[Qt.ColorScheme] = []
+
+        def setColorScheme(self, scheme: Qt.ColorScheme) -> None:
+            self.schemes.append(scheme)
+
+    class FakeApp:
+        def __init__(self) -> None:
+            self.hints = RecordingHints()
+
+        def styleHints(self) -> RecordingHints:
+            return self.hints
+
+    fake = FakeApp()
+    apply_theme(fake, ThemeChoice.DARK)
+    apply_theme(fake, ThemeChoice.LIGHT)
+    assert fake.hints.schemes == [Qt.ColorScheme.Dark, Qt.ColorScheme.Light]
+
+
 def test_apply_theme_sets_the_qt_colour_scheme(app):
+    """The end-to-end half: Qt actually adopts what apply_theme sets.
+
+    The apply_theme calls run unconditionally, so a PySide6 release that
+    renames or drops setColorScheme fails here on every platform. Only the
+    readback is conditional, because a platform theme without colour-scheme
+    support leaves it at Unknown no matter what was set. Nothing in
+    python/pluton reads colorScheme() back, so this is the only place that
+    difference can bite.
+    """
+    observable = _platform_tracks_colour_scheme(app)
+
     apply_theme(app, ThemeChoice.DARK)
+    if not observable:
+        pytest.skip("platform theme does not implement colour schemes; readback is inert")
     assert app.styleHints().colorScheme() == Qt.ColorScheme.Dark
     apply_theme(app, ThemeChoice.LIGHT)
     assert app.styleHints().colorScheme() == Qt.ColorScheme.Light

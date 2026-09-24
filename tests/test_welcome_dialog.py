@@ -190,6 +190,18 @@ def test_template_descriptions_report_a_real_wrapped_height(app, settings):
        dialog's minimum width does. Without word wrap, heightForWidth does
        not vary with width at all, so this comparison is what actually
        discriminates that regression.
+
+    The two-line ceiling counts in lineSpacing, not in fontMetrics.height().
+    An earlier version of this test used height() and passed locally while
+    failing on CI: height() is ascent plus descent, but Qt advances wrapped
+    text by lineSpacing, which is height() plus leading. Segoe UI has a
+    leading of 0, so the two were indistinguishable on Windows with a real
+    platform theme; the offscreen plugin's Sans Serif has a leading of 2, so
+    two genuine lines measured 26 against a ceiling of 24. lineSpacing is
+    also the bound that holds by construction rather than by luck: n wrapped
+    lines occupy n * lineSpacing - leading, so two lines always fit inside
+    2 * lineSpacing, and three never do, because lineSpacing exceeds leading
+    for any font with a non-zero height.
     """
     dialog = WelcomeDialog(settings)
     min_width = dialog.minimumWidth()
@@ -202,15 +214,17 @@ def test_template_descriptions_report_a_real_wrapped_height(app, settings):
     narrow_width = 40
 
     for key, label in dialog._description_labels.items():
-        one_line = label.fontMetrics().height()
+        metrics = label.fontMetrics()
+        one_line = metrics.height()
+        two_lines = metrics.lineSpacing() * 2
         assert label.sizeHint().height() >= one_line, key
 
         wrapped_height = label.heightForWidth(min_width)
         narrow_height = label.heightForWidth(narrow_width)
 
-        assert 0 < wrapped_height <= one_line * 2, (
+        assert 0 < wrapped_height <= two_lines, (
             f"{key}: heightForWidth({min_width}) = {wrapped_height}, "
-            f"expected readable in at most two lines ({one_line * 2})"
+            f"expected readable in at most two lines ({two_lines})"
         )
         assert narrow_height > wrapped_height, (
             f"{key}: heightForWidth did not grow at a narrower width "
