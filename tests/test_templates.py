@@ -35,6 +35,20 @@ def test_templates_differ_in_units_configuration_not_only_environment():
     assert arch.units != wood.units
 
 
+def test_every_preset_is_used_by_at_least_one_template():
+    """Every viewport environment must have a first-run route in the welcome dialog.
+
+    This is a design choice: the human partner decided that all five presets are
+    equally viable starting points, so none should require a detour through the
+    View menu to reach. If you are adding an environment deliberately without a
+    template, you are choosing to change this invariant, not working around a
+    broken test.
+    """
+    preset_environments = set(PRESETS.values())
+    template_environments = {t.environment for t in TEMPLATES}
+    assert template_environments == preset_environments
+
+
 def test_the_architectural_template_rounds_to_whole_millimetres():
     arch = template_for_key("architectural")
     assert arch.units.system is UnitSystem.METRIC

@@ -19,7 +19,14 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from pluton.units import Units, UnitSystem
-from pluton.viewport.environment import PLAIN_WHITE, SKY_AND_GROUND, STUDIO, Environment
+from pluton.viewport.environment import (
+    LANDSCAPE,
+    NEUTRAL_GREY,
+    PLAIN_WHITE,
+    SKY_AND_GROUND,
+    STUDIO,
+    Environment,
+)
 
 
 @dataclass(frozen=True)
@@ -57,6 +64,30 @@ TEMPLATES: tuple[Template, ...] = (
             imperial_denominator=16,
         ),
         environment=SKY_AND_GROUND,
+    ),
+    Template(
+        key="presentation",
+        name="Presentation",
+        description="Neutral grey sky and ground, metres. For presentations.",
+        units=Units(
+            system=UnitSystem.METRIC,
+            metric_unit="m",
+            metric_precision=3,
+            imperial_denominator=16,
+        ),
+        environment=NEUTRAL_GREY,
+    ),
+    Template(
+        key="site",
+        name="Site",
+        description="Blue sky over green ground, metres. For site modelling.",
+        units=Units(
+            system=UnitSystem.METRIC,
+            metric_unit="m",
+            metric_precision=3,
+            imperial_denominator=16,
+        ),
+        environment=LANDSCAPE,
     ),
     Template(
         key="documentation",
