@@ -166,22 +166,57 @@ def test_template_descriptions_word_wrap_is_enabled(app, settings):
 def test_template_descriptions_report_a_real_wrapped_height(app, settings):
     """Task 6c Finding 1, verified rather than assumed.
 
-    A weak version of this test would only assert setWordWrap(True) was
-    called. This instead measures what the label actually reports: its own
-    sizeHint is tall enough to hold at least one line, and heightForWidth at
-    the dialog's own minimum width is finite and positive -- not 0 (wrapping
-    did nothing) and not -1 (the label does not support height-for-width at
-    all).
+    Fix round 1 (review finding): the first version of this test asserted
+    `sizeHint().height() >= one_line` and `heightForWidth(min_width) > 0`.
+    Neither can fail. Removing setWordWrap(True) drops sizeHint().height() to
+    exactly one_line, which still satisfies `>=`. Removing the minimum-width
+    call makes heightForWidth(0) wrap to eight-plus lines, which is still
+    `> 0`. Both regressions passed the old assertions. This version was
+    verified by hand against both mutations (see task-6c-report.md, Fix
+    Round 1) rather than trusted by inspection.
+
+    Three independent checks, each with a bound a regression can actually
+    cross:
+
+    1. The dialog's minimum width is compared against the production method's
+       OWN computation, not read back from the dialog and used as its own
+       expectation -- so a removed `setMinimumWidth` call (which leaves
+       `minimumWidth()` at Qt's default of 0) is caught directly.
+    2. heightForWidth at that minimum width has BOTH a floor and a ceiling:
+       readable in full means at most two lines, not merely "more than
+       nothing".
+    3. Wrapping is proven to actually be happening, not merely available: a
+       deliberately narrow width must need strictly MORE height than the
+       dialog's minimum width does. Without word wrap, heightForWidth does
+       not vary with width at all, so this comparison is what actually
+       discriminates that regression.
     """
     dialog = WelcomeDialog(settings)
     min_width = dialog.minimumWidth()
-    assert min_width > 0
+
+    # Independent expectation: the production calculation itself, not
+    # whatever minimumWidth() happens to currently report.
+    assert min_width >= dialog._minimum_width_for_descriptions()
+
+    # Narrow enough that no description fits on one line, regardless of font.
+    narrow_width = 40
 
     for key, label in dialog._description_labels.items():
         one_line = label.fontMetrics().height()
         assert label.sizeHint().height() >= one_line, key
-        height_for_width = label.heightForWidth(min_width)
-        assert height_for_width > 0, f"{key}: heightForWidth({min_width}) = {height_for_width}"
+
+        wrapped_height = label.heightForWidth(min_width)
+        narrow_height = label.heightForWidth(narrow_width)
+
+        assert 0 < wrapped_height <= one_line * 2, (
+            f"{key}: heightForWidth({min_width}) = {wrapped_height}, "
+            f"expected readable in at most two lines ({one_line * 2})"
+        )
+        assert narrow_height > wrapped_height, (
+            f"{key}: heightForWidth did not grow at a narrower width "
+            f"({narrow_width} -> {narrow_height} vs {min_width} -> {wrapped_height}); "
+            "word wrap may not be in effect"
+        )
 
 
 def test_the_description_column_gets_the_layout_stretch(app, settings):
