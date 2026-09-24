@@ -153,6 +153,46 @@ def test_every_template_appears_in_the_grid(app, settings):
     assert len(dialog._template_buttons) == len(TEMPLATES)
 
 
+def test_template_descriptions_word_wrap_is_enabled(app, settings):
+    """Task 6c Finding 1: a QLabel with no word wrap clips instead of reflowing, and that
+    is what made the longer descriptions unreadable.
+    """
+    dialog = WelcomeDialog(settings)
+    assert dialog._description_labels, "no description labels were built"
+    for label in dialog._description_labels.values():
+        assert label.wordWrap() is True
+
+
+def test_template_descriptions_report_a_real_wrapped_height(app, settings):
+    """Task 6c Finding 1, verified rather than assumed.
+
+    A weak version of this test would only assert setWordWrap(True) was
+    called. This instead measures what the label actually reports: its own
+    sizeHint is tall enough to hold at least one line, and heightForWidth at
+    the dialog's own minimum width is finite and positive -- not 0 (wrapping
+    did nothing) and not -1 (the label does not support height-for-width at
+    all).
+    """
+    dialog = WelcomeDialog(settings)
+    min_width = dialog.minimumWidth()
+    assert min_width > 0
+
+    for key, label in dialog._description_labels.items():
+        one_line = label.fontMetrics().height()
+        assert label.sizeHint().height() >= one_line, key
+        height_for_width = label.heightForWidth(min_width)
+        assert height_for_width > 0, f"{key}: heightForWidth({min_width}) = {height_for_width}"
+
+
+def test_the_description_column_gets_the_layout_stretch(app, settings):
+    """Task 6c Finding 1: without this the radio-button column can absorb the slack
+    instead, leaving the description column exactly as narrow as before.
+    """
+    dialog = WelcomeDialog(settings)
+    grid = dialog._template_grid
+    assert grid.columnStretch(1) > grid.columnStretch(0)
+
+
 def test_the_default_template_environment_is_the_modelling_one(app, settings):
     """A tester who clicks straight through should land on sky and ground."""
     dialog = WelcomeDialog(settings)

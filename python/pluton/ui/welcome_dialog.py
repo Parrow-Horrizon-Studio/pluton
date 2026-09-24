@@ -42,6 +42,14 @@ _UNIT_CHOICES: tuple[tuple[str, str], ...] = (
 
 _IMPERIAL_UNIT = "in"
 
+# The radio-button column never needs more than a short template name, so it
+# gets a fixed budget and the description column takes the rest (Task 6c
+# Finding 1's fix: a QGridLayout with no stretch set sizes both columns to
+# their content, which clips the longer descriptions instead of wrapping
+# them).
+_RADIO_COLUMN_MIN_WIDTH = 160
+_DESCRIPTION_COLUMN_PADDING = 48
+
 
 def apply_template(doc: DocumentSettings, template: Template, unit: str) -> None:
     """Apply `template` to `doc`, with `unit` overriding the template's own.
@@ -76,7 +84,12 @@ class WelcomeDialog(QDialog):
         layout.addWidget(QLabel("Start a new model"))
 
         grid = QGridLayout()
+        # The description column takes the slack; the radio-button column
+        # stays at its content width (Task 6c Finding 1).
+        grid.setColumnStretch(0, 0)
+        grid.setColumnStretch(1, 1)
         self._template_buttons: dict[str, QRadioButton] = {}
+        self._description_labels: dict[str, QLabel] = {}
         self._group = QButtonGroup(self)
         self._group.setExclusive(True)
         for row, template in enumerate(TEMPLATES):
@@ -88,8 +101,12 @@ class WelcomeDialog(QDialog):
             grid.addWidget(button, row, 0)
             description = QLabel(template.description)
             description.setTextFormat(Qt.TextFormat.PlainText)
+            description.setWordWrap(True)
             grid.addWidget(description, row, 1)
+            self._description_labels[template.key] = description
         layout.addLayout(grid)
+        self._template_grid = grid
+        self.setMinimumWidth(self._minimum_width_for_descriptions())
 
         units_row = QHBoxLayout()
         units_row.addWidget(QLabel("Units"))
@@ -115,6 +132,22 @@ class WelcomeDialog(QDialog):
         start_button.clicked.connect(self.accept)
         buttons.addWidget(start_button)
         layout.addLayout(buttons)
+
+    def _minimum_width_for_descriptions(self) -> int:
+        """Wide enough that the longest description wraps to at most two lines.
+
+        Half its single-line width is a safe two-line budget -- word wrap
+        reflows well before a column gets exactly that narrow, so this leaves
+        slack rather than landing right on the wrap boundary. Padding covers
+        layout spacing and the label's own margins; the radio-button column
+        gets a fixed budget of its own since template names are short and
+        fixed, unlike the descriptions this fix is about.
+        """
+        metrics = self.fontMetrics()
+        longest = max((template.description for template in TEMPLATES), key=len)
+        single_line_width = metrics.horizontalAdvance(longest)
+        description_width = single_line_width // 2 + _DESCRIPTION_COLUMN_PADDING
+        return description_width + _RADIO_COLUMN_MIN_WIDTH
 
     @staticmethod
     def _index_for_template(template: Template) -> int:
